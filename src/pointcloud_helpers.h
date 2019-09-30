@@ -20,5 +20,8 @@ namespace pointcloud_helpers {
   void PublishPointcloud(const std::vector<Vector2d>& points,
                          PointCloud2& point_cloud,
                          Publisher& pub);
+  std::vector<Vector2d>
+      LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan);
+
 };
 #endif //ICP_POINTCLOUD_HELPERS_H

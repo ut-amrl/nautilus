@@ -7,6 +7,26 @@
 #include "ros/package.h"
 #include "sensor_msgs/PointCloud2.h"
 
+std::vector<Vector2d>
+pointcloud_helpers::LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan) {
+  std::vector<Vector2d> pointcloud;
+  float angle_offset = 0.0f;
+  for (float range : laser_scan.ranges) {
+    if (range >= laser_scan.range_min && range <= laser_scan.range_max) {
+      // Only accept valid ranges.
+      // Then we must rotate the point by the specified angle at that distance.
+      Vector2d point(double(range), 0.0);
+      Matrix2d rot_matrix =
+              Rotation2D<double>(double(laser_scan.angle_min + angle_offset))
+                      .toRotationMatrix();
+      point = rot_matrix * point;
+      pointcloud.push_back(point);
+    }
+    angle_offset += laser_scan.angle_increment;
+  }
+  return pointcloud;
+}
+
 void pointcloud_helpers::InitPointcloud(PointCloud2* point) {
   std::string arr[3] = {"x", "y", "z"};
   point->header.seq = 1;
