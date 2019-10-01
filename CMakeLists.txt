@@ -40,15 +40,15 @@ SET(libs roslib roscpp rosbag console_bridge cv_bridge glog gflags opencv_xfeatu
 
 ROSBUILD_ADD_EXECUTABLE(lidar_slam
         src/main.cc
-        src/icp.cc
-        src/pointcloud_helpers.cpp
-        src/solver.cc)
+        src/pointcloud_helpers.cc
+        src/solver.cc
+        src/slam_type_builder.cc)
 
 ADD_LIBRARY(shared_library
         src/gui_helpers.cc
-        src/timer.cc src/solver.cc src/solver.h src/slam_type_builder.cpp src/slam_type_builder.h)
+        src/timer.cc src/solver.cc src/solver.h src/slam_type_builder.cc src/slam_type_builder.h)
 
-TARGET_LINK_LIBRARIES(icp
+TARGET_LINK_LIBRARIES(lidar_slam
         shared_library
         ${libs}
         ${CERES_LIBRARIES})

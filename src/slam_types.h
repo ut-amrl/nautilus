@@ -29,8 +29,10 @@
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
 
-namespace slam_types {
+#include "math_util.h"
 
+
+namespace slam_types {
   
 // Pinhole camera intrinsics parameters.
 // The convention used here matches that of OpenCV:
@@ -112,11 +114,9 @@ struct LidarFactor {
     uint64_t pose_id;
     std::vector<Eigen::Vector2f> pointcloud;
     LidarFactor() {}
-    LidarFactor(uint64_t pose_initial,
-                uint64_t pose_current,
+    LidarFactor(uint64_t pose_id,
                 const std::vector<Eigen::Vector2f> pointcloud) :
-                pose_idx_initial(pose_initial),
-                pose_idx_current(pose_current),
+                pose_id(pose_id),
                 pointcloud(pointcloud) {}
 };
 
@@ -145,20 +145,24 @@ struct RobotPose2D {
     // Robot location.
     Eigen::Vector2f loc;
     // Robot angle: rotates points from robot frame to global.
-    double angle;
+    float angle;
     // Default constructor: do nothing.
-    RobotPose() {}
+    RobotPose2D() {}
     // Convenience constructor: initialize everything.
-    RobotPose(const Eigen::Vector2f& loc,
-              cons`t double angle) :
-            loc(loc), angle(angle) {}
+    RobotPose2D(const Eigen::Vector2f  loc,
+                const float angle) :
+                loc(loc), angle(angle) {}
     // Return a transform from the robot to the world frame for this pose.
-    Eigen::Affine3f RobotToWorldTf() const {
-      return (Eigen::Translation2f(loc) * angle);
+    Eigen::Affine2f RobotToWorldTf() const {
+      return (Eigen::Translation2f(loc) *
+              Eigen::Rotation2D<float>(math_util::DegToRad(angle))
+                  .toRotationMatrix());
     }
     // Return a transform from the world to the robot frame for this pose.
-    Eigen::Affine3f WorldToRobotTf() const {
-      return ((Eigen::Translation2f(loc) * angle).inverse());
+    Eigen::Affine2f WorldToRobotTf() const {
+      return ((Eigen::Translation2f(loc) *
+               Eigen::Rotation2D<float>(math_util::DegToRad(angle))
+                   .toRotationMatrix()).inverse());
     }
 };
 
@@ -191,14 +195,14 @@ struct OdometryFactor2D {
     // Translation to go from pose i to pose j.
     Eigen::Vector2f translation;
     // Rotation to go from pose i to pose j.
-    double rotation;
+    float rotation;
     // Default constructor: do nothing.
-    OdometryFactor() {}
+    OdometryFactor2D() {}
     // Convenience constructor: initialize everything.
-    OdometryFactor(uint64_t pose_i,
-                   uint64_t pose_j,
-                   Eigen::Vector2f translation,
-                   double rotation) :
+    OdometryFactor2D(uint64_t pose_i,
+                     uint64_t pose_j,
+                     Eigen::Vector2f translation,
+                     float rotation) :
             pose_i(pose_i), pose_j(pose_j), translation(translation),
             rotation(rotation) {}
 };
@@ -233,9 +237,9 @@ struct SLAMNode2D {
     // Observed Lidar Factor
     LidarFactor lidar_factor;
     // Default constructor: do nothing.
-    SLAMNode() {}
+    SLAMNode2D() {}
     // Convenience constructor, initialize all components.
-    SLAMNode(uint64_t idx,
+    SLAMNode2D(uint64_t idx,
              double timestamp,
              const RobotPose2D& pose,
              const LidarFactor& lidar_factor) :
@@ -246,18 +250,21 @@ struct SLAMNode2D {
 };
 
 struct SLAMProblem {
-  // Nodes in the pose graph.
-  std::vector<SLAMNode> nodes;
-  // Odometry / IMU correspondences.
-  std::vector<OdometryFactor> odometry_factors;
-  // Default constructor, do nothing.
-  SLAMProblem() {}
-  // Convenience constructor for initialization.
-  SLAMProblem(const std::vector<SLAMNode>& nodes,
-              const std::vector<OdometryFactor>& odometry_factors) :
-      nodes(nodes),
-      vision_factors(vision_factors),
-      odometry_factors(odometry_factors) {}
+    // Nodes in the pose graph.
+    std::vector<SLAMNode> nodes;
+    // Vision correspondences.
+    std::vector<VisionFactor> vision_factors;
+    // Odometry / IMU correspondences.
+    std::vector<OdometryFactor> odometry_factors;
+    // Default constructor, do nothing.
+    SLAMProblem() {}
+    // Convenience constructor for initialization.
+    SLAMProblem(const std::vector<SLAMNode>& nodes,
+                const std::vector<VisionFactor>& vision_factors,
+                const std::vector<OdometryFactor>& odometry_factors) :
+            nodes(nodes),
+            vision_factors(vision_factors),
+            odometry_factors(odometry_factors) {}
 };
 
 struct SLAMProblem2D {
@@ -266,12 +273,12 @@ struct SLAMProblem2D {
     // Odometry / IMU correspondences.
     std::vector<OdometryFactor2D> odometry_factors;
     // Default constructor, do nothing.
-    SLAMProblem() {}
+    SLAMProblem2D() = default;
     // Convenience constructor for initialization.
-    SLAMProblem(const std::vector<SLAMNode2D>& nodes,
-                const std::vector<OdometryFactor2D>& odometry_factors) :
+    SLAMProblem2D(const std::vector<SLAMNode2D>& nodes,
+                  const std::vector<OdometryFactor2D>& odometry_factors) :
             nodes(nodes),
-            odometry_factors(odomtrey factors){}
+            odometry_factors(odometry_factors){}
 };
 
 struct SLAMNodeSolution {
@@ -312,15 +319,13 @@ struct SLAMNodeSolution2D {
     // 3DOF parameters: tx, ty, angle. Note that
     // angle_* are the coordinates in scaled angle-axis form.
     double pose[3];
-    // Observed vision feature inverse depths.
-    std::vector<double> inverse_depths;
     // Corresponding flag of whether the point is to be part of the map.
     std::vector<bool> point_in_map;
     // Convenience constructor, initialize all values.
-    explicit SLAMNodeSolution(const SLAMNode2D& n) :
-            node_idx(n.node_idx),
-            timestamp(n.timestamp),
-            pose{0, 0, 0} {
+    SLAMNodeSolution2D(const SLAMNode2D& n) :
+                       node_idx(n.node_idx),
+                       timestamp(n.timestamp),
+                       pose{0, 0, 0} {
       pose[0] = n.pose.loc.x();
       pose[1] = n.pose.loc.y();
       pose[2] = n.pose.angle;

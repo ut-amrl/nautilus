@@ -1,4 +1,6 @@
 #include <iostream>
+#include <ros/node_handle.h>
+#include <csignal>
 
 #include "gflags/gflags.h"
 #include "glog/logging.h"
@@ -9,6 +11,7 @@
 #include "nav_msgs/Odometry.h"
 #include "slam_type_builder.h"
 #include "slam_types.h"
+#include "solver.h"
 
 using std::string;
 using std::vector;
@@ -23,7 +26,7 @@ DEFINE_string(lidar_topic,
         "/velodyne_2dscan_high_beams",
         "The topic that lidar messages are published over.");
 
-slam_types::SLAMProblem2D ProcessBagFile(char* bag_path, ros::NodeHandle &n) {
+slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path, ros::NodeHandle& n) {
   /*
    * Loads and processes the bag file pulling out the lidar data
    * and the odometry data. Keeps track of the current pose and produces
@@ -34,7 +37,7 @@ slam_types::SLAMProblem2D ProcessBagFile(char* bag_path, ros::NodeHandle &n) {
     bag.open(bag_path, rosbag::bagmode::Read);
   } catch (rosbag::BagException exception) {
     printf("Unable to read %s, reason %s:", bag_path, exception.what());
-    return;
+    return slam_types::SLAMProblem2D();
   }
   // Get the topics we want
   vector<string> topics;
@@ -44,7 +47,7 @@ slam_types::SLAMProblem2D ProcessBagFile(char* bag_path, ros::NodeHandle &n) {
   SLAMTypeBuilder slam_builder;
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
-       ros::ok && it != view.end();
+       ros::ok() && it != view.end();
        ++it) {
     const rosbag::MessageInstance &message = *it;
     {
@@ -71,9 +74,9 @@ void SignalHandler(int signum) {
 }
 
 int main(int argc, char** argv) {
-  google::InitGoogleLogging(*argv)
+  google::InitGoogleLogging(*argv);
   google::ParseCommandLineFlags(&argc, &argv, false);
-  if (FLAGS_input == "") {
+  if (FLAGS_bag_path == "") {
     printf("Must specify an input bag!");
     exit(0);
   }
@@ -82,8 +85,8 @@ int main(int argc, char** argv) {
   signal(SIGINT, SignalHandler);
   // Load and pre-process the data.
   slam_types::SLAMProblem2D slam_problem =
-          ProcessBagFile(FLAGS_bag_path.c_str(), &n);
+          ProcessBagFile(FLAGS_bag_path.c_str(), n);
   // Load all the residuals into the problem and run!
-  SolveSLAM(slam_problem, &n);
+  solver::SolveSLAM(slam_problem, n);
   return 0;
 }

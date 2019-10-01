@@ -5,13 +5,14 @@
 #ifndef LIDAR_SLAM_SOLVER_H
 #define LIDAR_SLAM_SOLVER_H
 
+#include <ros/node_handle.h>
 #include "ros/package.h"
 
 #include "slam_types.h"
 
 
-class solver {
-  bool SolveSLAM(slam_types::SLAMProblem2D, ros::NodeHandle&);
+namespace solver {
+  bool SolveSLAM(slam_types::SLAMProblem2D&, ros::NodeHandle&);
 };
 
 
