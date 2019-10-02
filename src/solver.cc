@@ -48,16 +48,15 @@ struct OdometryResidual {
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
       typedef Eigen::Matrix<T, 2, 2> Matrix2T;
 
-      const Matrix2T Ri = Eigen::Rotation2D<T>(math_util::DegToRad(pose_i[2]))
+      const Matrix2T Ri = Eigen::Rotation2D<T>(pose_i[2])
               .toRotationMatrix();
-      const Matrix2T Rj = Eigen::Rotation2D<T>(math_util::DegToRad(pose_j[2]))
+      const Matrix2T Rj = Eigen::Rotation2D<T>(pose_j[2])
               .toRotationMatrix();
 
       const Vector2T Ti(pose_i[0], pose_i[1]);
       const Vector2T Tj(pose_j[0], pose_j[1]);
 
-      const Vector2T error_translation =
-              Rj.transpose() * (Ri * T_odom.cast<T>() - (Tj - Ti));
+      const Vector2T error_translation = Ti + T_odom.cast<T>() - Tj;
 
       const Matrix2T error_rotation_mat =
               Rj.transpose() * Ri * R_odom.cast<T>();
@@ -72,8 +71,8 @@ struct OdometryResidual {
     }
 
     OdometryResidual(const OdometryFactor2D& factor) :
-            R_odom(Eigen::Rotation2D<float>(
-                      math_util::DegToRad(factor.rotation)).toRotationMatrix()),
+            R_odom(Eigen::Rotation2D<float>(factor.rotation)
+                    .toRotationMatrix()),
             T_odom(factor.translation) {}
 
     static AutoDiffCostFunction<OdometryResidual, 3, 3, 3>* create(
@@ -129,6 +128,7 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
   ceres::Problem ceres_problem;
   options.linear_solver_type = ceres::DENSE_QR;
   options.minimizer_progress_to_stdout = true;
+  printf("# of odometry factors: %lu\n", problem.odometry_factors.size());
   for (const OdometryFactor2D& odom_factor : problem.odometry_factors) {
     // Add all the odometry residuals. These will act as a constraint to keep
     // the optimizer from going crazy.
@@ -155,6 +155,7 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
 
   // Lastly we will run and have the ceres callback project the output to the world!
   ceres::Solve(options, &ceres_problem, &summary);
+  printf("%s\n", summary.FullReport().c_str());
   return true;
 }
 

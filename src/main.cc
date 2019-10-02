@@ -1,10 +1,8 @@
-#include <iostream>
 #include <ros/node_handle.h>
 #include <csignal>
 
 #include "gflags/gflags.h"
 #include "glog/logging.h"
-#include "ros/package.h"
 #include "rosbag/bag.h"
 #include "rosbag/view.h"
 #include "sensor_msgs/LaserScan.h"
@@ -20,7 +18,7 @@ DEFINE_string(bag_path,
         "",
         "The location of the bag file to run SLAM on.");
 DEFINE_string(odom_topic,
-        "nav_msgs/Odometry",
+        "/odometry/filtered",
         "The topic that odometry messagse are published over.");
 DEFINE_string(lidar_topic,
         "/velodyne_2dscan_high_beams",
@@ -35,32 +33,35 @@ slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path, ros::NodeHandle& 
   rosbag::Bag bag;
   try {
     bag.open(bag_path, rosbag::bagmode::Read);
-  } catch (rosbag::BagException exception) {
+  } catch (rosbag::BagException& exception) {
     printf("Unable to read %s, reason %s:", bag_path, exception.what());
     return slam_types::SLAMProblem2D();
   }
   // Get the topics we want
   vector<string> topics;
-  topics.push_back(FLAGS_odom_topic.c_str());
-  topics.push_back(FLAGS_lidar_topic.c_str());
+  topics.emplace_back(FLAGS_odom_topic.c_str());
+  topics.emplace_back(FLAGS_lidar_topic.c_str());
   rosbag::View view(bag, rosbag::TopicQuery(topics));
   SLAMTypeBuilder slam_builder;
   // Iterate through the bag
+  // TODO: Temporary cut-off for testing.
+  int TEMP_INDEX = 0;
+  int CUTOFF = 500;
   for (rosbag::View::iterator it = view.begin();
-       ros::ok() && it != view.end();
-       ++it) {
+       ros::ok() && it != view.end() && TEMP_INDEX < CUTOFF;
+       ++it, ++TEMP_INDEX) {
     const rosbag::MessageInstance &message = *it;
     {
       // Load all the point clouds into memory.
       sensor_msgs::LaserScanPtr laser_scan =
               message.instantiate<sensor_msgs::LaserScan>();
-      if (laser_scan != NULL) {
+      if (laser_scan != nullptr) {
         slam_builder.LidarCallback(*laser_scan);
       }
     }
     {
       nav_msgs::OdometryPtr odom = message.instantiate<nav_msgs::Odometry>();
-      if (odom != NULL) {
+      if (odom != nullptr) {
         slam_builder.OdometryCallback(*odom);
       }
     }

@@ -145,6 +145,7 @@ struct RobotPose2D {
     // Robot location.
     Eigen::Vector2f loc;
     // Robot angle: rotates points from robot frame to global.
+    // RADIANS
     float angle;
     // Default constructor: do nothing.
     RobotPose2D() {}
@@ -155,13 +156,13 @@ struct RobotPose2D {
     // Return a transform from the robot to the world frame for this pose.
     Eigen::Affine2f RobotToWorldTf() const {
       return (Eigen::Translation2f(loc) *
-              Eigen::Rotation2D<float>(math_util::DegToRad(angle))
+              Eigen::Rotation2D<float>(angle)
                   .toRotationMatrix());
     }
     // Return a transform from the world to the robot frame for this pose.
     Eigen::Affine2f WorldToRobotTf() const {
       return ((Eigen::Translation2f(loc) *
-               Eigen::Rotation2D<float>(math_util::DegToRad(angle))
+               Eigen::Rotation2D<float>(angle)
                    .toRotationMatrix()).inverse());
     }
 };
