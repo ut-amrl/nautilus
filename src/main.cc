@@ -46,7 +46,7 @@ slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path, ros::NodeHandle& 
   // Iterate through the bag
   // TODO: Temporary cut-off for testing.
   int TEMP_INDEX = 0;
-  int CUTOFF = 500;
+  int CUTOFF = 80;
   for (rosbag::View::iterator it = view.begin();
        ros::ok() && it != view.end() && TEMP_INDEX < CUTOFF;
        ++it, ++TEMP_INDEX) {

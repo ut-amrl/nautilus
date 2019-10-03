@@ -29,7 +29,6 @@ void SLAMTypeBuilder::AddOdomFactor(
       last_rot_mat.transpose() * curr_rot_mat;
   // Recover angle from rotation matrix.
   const double angle = atan2(rotation(0, 1), rotation(0, 0));
-  printf("%f %f %lf\n", translation.x(), translation.y(), math_util::DegToRad(angle));
   odom_factors->emplace_back(pose_id_, pose_id_ + 1, translation, angle);
 }
 
