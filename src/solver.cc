@@ -8,6 +8,8 @@
 #include "sensor_msgs/PointCloud2.h"
 
 #include "solver.h"
+
+#include <utility>
 #include "slam_types.h"
 #include "math_util.h"
 #include "pointcloud_helpers.h"
@@ -18,7 +20,7 @@ using slam_types::LidarFactor;
 using ceres::AutoDiffCostFunction;
 using Eigen::Matrix2f;
 using Eigen::Vector2f;
-
+using slam_types::SLAMNodeSolution2D;
 
 template<typename T> Eigen::Transform<T, 2, Eigen::Affine>
 PoseArrayToAffine(const T* rotation, const T* translation) {
@@ -54,16 +56,13 @@ struct OdometryResidual {
       const Matrix2T error_rotation_mat =
               Rj.transpose() * Ri * R_odom.cast<T>();
 
-      T rotation_error =
-              atan2(error_rotation_mat(0, 1), error_rotation_mat(0, 0));
-
       residual[0] = error_translation[0];
       residual[1] = error_translation[1];
-      residual[2] = rotation_error;
+      residual[2] = Eigen::Rotation2D<T>().fromRotationMatrix(error_rotation_mat).angle();
       return true;
     }
 
-    OdometryResidual(const OdometryFactor2D& factor) :
+    explicit OdometryResidual(const OdometryFactor2D& factor) :
             R_odom(Eigen::Rotation2D<float>(factor.rotation)
                     .toRotationMatrix()),
             T_odom(factor.translation) {}
@@ -78,98 +77,40 @@ struct OdometryResidual {
     const Vector2f T_odom;
 };
 
-#define LIDAR_THRESHOLD 0.15
-
-struct LidarPointResidual {
+struct LIDARPointResidual {
     template <typename T>
-    bool operator() (const T* transformation,
+    bool operator() (const T* source_pose,
+                     const T* target_pose,
                      T* residuals) const {
-      // Apply the transformation and find the closest point in the other list.
-      // If the closest point is still further then our threshold then
-      // set this residual to zero.
-      typedef Eigen::Matrix<T, 2, 1> Vector2T;
       typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
-      // Make sure we have a lidar scan to compare against.
-      CHECK_GT(lidar_j.size(), 0);
-      // Make a rotation matrix.
-      Vector2T point_t = point_i.cast<T>();
-      Affine2T i_to_world;
-      i_to_world.rotate(transformation[2])
-           .translate(Vector2T(transformation[0], transformation[1]));
-      point_t = i_to_world * point_t;
-      CHECK(ceres::IsFinite(point_t.x()) && ceres::IsFinite(point_t.y()));
-      Vector2T closest_point = lidar_j[0].cast<T>();
-      for (const Vector2f vec : lidar_j) {
-        Vector2T vec_t = vec.cast<T>();
-        CHECK(ceres::IsFinite(vec_t.x()) && ceres::IsFinite(vec_t.y()));
-        if ((vec_t - point_t).isZero(T(0.001)) || (vec_t - point_t).norm() <
-            (closest_point - point_t).norm()) {
-          closest_point = vec_t;
-        }
-      }
-      T count_point = T(1.0);
-      if (!(closest_point - point_t).isZero(T(0.001)) && (closest_point - point_t).norm() > LIDAR_THRESHOLD) {
-        count_point = T(0.0);
-      }
-      CHECK(ceres::IsFinite(count_point * (point_t.x() - closest_point.x())));
-      CHECK(ceres::IsFinite(count_point * (point_t.y() - closest_point.y())));
-      residuals[0] = count_point * (point_t.x() - closest_point.x());
-      residuals[1] = count_point * (point_t.y() - closest_point.y());
+      typedef Eigen::Matrix<T, 2, 1> Vector2T;
+      Affine2T source_to_world = PoseArrayToAffine(&source_pose[2], &source_pose[0]);
+      Affine2T target_to_world = PoseArrayToAffine(&target_pose[2], &target_pose[0]);
+      Vector2T source_pointT = source_point.cast<T>();
+      CHECK(ceres::IsFinite(source_point.x()) && ceres::IsFinite(source_point.y()));
+      Vector2T target_pointT = target_point.cast<T>();
+      // Transform source_point into the frame of target_point
+      source_pointT = target_to_world.inverse() * source_to_world * source_pointT;
+      CHECK(ceres::IsFinite(source_pointT.x()) && ceres::IsFinite(source_pointT.y()));
+      residuals[0] = source_pointT.x() - target_pointT.x();
+      residuals[1] = source_pointT.y() - target_pointT.y();
       return true;
     }
 
-    LidarPointResidual(const Vector2f& point_i,
-                       const std::vector<Vector2f>& lidar_factor_j) :
-                  point_i(point_i),
-                  lidar_j(lidar_factor_j) {}
+    LIDARPointResidual(Vector2f source_point,
+                       Vector2f target_point) :
+            source_point(std::move(source_point)),
+            target_point(std::move(target_point)) {}
 
-    static AutoDiffCostFunction<LidarPointResidual, 2, 3>* create(
-            const Vector2f& point_i,
-            const slam_types::SLAMNode2D& factor_j) {
-      auto lidar_factor_j = factor_j.lidar_factor.pointcloud;
-      // Want to transform all lidar_factor points to the reference frame
-      // of point_i, but to do this we first have to transform it by A^2_W_
-      // then inside the residual by A^W_1_
-      for (Vector2f vec : lidar_factor_j) {
-        Eigen::Affine2f affine;
-        affine.rotate(factor_j.pose.angle).translate(factor_j.pose.loc);
-        vec = affine * vec;
-      }
-      LidarPointResidual* residual = new LidarPointResidual(point_i,
-                                                            lidar_factor_j);
-      return new AutoDiffCostFunction<LidarPointResidual, 2, 3>(residual);
+    static AutoDiffCostFunction<LIDARPointResidual, 2, 3, 3>* create(
+            const Vector2f& source_point, const Vector2f& target_point) {
+      LIDARPointResidual *residual = new LIDARPointResidual(source_point, target_point);
+      return new AutoDiffCostFunction<LIDARPointResidual, 2, 3, 3>(residual);
     }
 
-    const Vector2f point_i;
-    const vector<Vector2f>& lidar_j;
+    const Vector2f source_point;
+    const Vector2f target_point;
 };
-
-#define LIDAR_CONSTRAINT_AMOUNT 10
-
-void
-AddLidarResiduals(const slam_types::SLAMProblem2D& problem,
-                  std::vector<slam_types::SLAMNodeSolution2D>& solution,
-                  ceres::Problem* ceres_problem) {
-  CHECK_LE(LIDAR_CONSTRAINT_AMOUNT, problem.nodes.size());
-  for (size_t node_i_index = LIDAR_CONSTRAINT_AMOUNT;
-       node_i_index < problem.nodes.size();
-       node_i_index++) {
-    for (size_t node_j_index = node_i_index - LIDAR_CONSTRAINT_AMOUNT;
-         node_j_index < node_i_index;
-         node_j_index++) {
-      auto* pose_i_block =
-              reinterpret_cast<double *>(&solution[node_i_index].pose);
-      for (const Vector2f& point :
-           problem.nodes[node_i_index].lidar_factor.pointcloud) {
-        ceres_problem->AddResidualBlock(
-                LidarPointResidual::create(point,
-                        problem.nodes[node_j_index]),
-                        NULL,
-                        pose_i_block);
-      }
-    }
-  }
-}
 
 class VisualizationCallback : public ceres::IterationCallback {
 public:
@@ -185,6 +126,7 @@ public:
       const vector<slam_types::SLAMNodeSolution2D>& solution_c = *solution;
       for (size_t i = 0; i < solution_c.size(); i++) {
         auto pointcloud = problem.nodes[i].lidar_factor.pointcloud;
+        (void) pointcloud;
         Eigen::Affine2f robot_to_world = PoseArrayToAffine(&(solution_c[i].pose[2]), &(solution_c[i].pose[0])).cast<float>();
         for (const Vector2f& point : pointcloud) {
           all_points.push_back(robot_to_world * point);
@@ -207,6 +149,60 @@ private:
     ros::Publisher point_pub;
 };
 
+void AddOdomFactors(const slam_types::SLAMProblem2D& problem,
+                    const vector<slam_types::SLAMNodeSolution2D>& solution,
+                    ceres::Problem* ceres_problem) {
+  for (const OdometryFactor2D& odom_factor : problem.odometry_factors) {
+    double* pose_i_block =
+            const_cast<double*>(solution[odom_factor.pose_i].pose);
+    double* pose_j_block =
+            const_cast<double*>(solution[odom_factor.pose_j].pose);
+    ceres_problem->AddResidualBlock(OdometryResidual::create(odom_factor),
+                                    NULL,
+                                    pose_i_block,
+                                    pose_j_block);
+  }
+}
+
+
+#define LIDAR_CONSTRAINT_AMOUNT 10
+
+// Source moves to target.
+void AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
+                          const vector<slam_types::SLAMNodeSolution2D>& solution,
+                          ceres::Problem* ceres_problem,
+                          size_t source_node_index,
+                          size_t target_node_index) {
+  // Loop over the two point clouds finding the closest points.
+  const SLAMNodeSolution2D& source_solution = solution[source_node_index];
+  const SLAMNodeSolution2D& target_solution = solution[target_node_index];
+  const vector<Vector2f>& source_pointcloud =
+          problem.nodes[source_node_index].lidar_factor.pointcloud;
+  const vector<Vector2f>& target_pointcloud =
+          problem.nodes[target_node_index].lidar_factor.pointcloud;
+  Eigen::Affine2f source_to_world =
+          PoseArrayToAffine(&source_solution.pose[2], &source_solution.pose[0]).cast<float>();
+  Eigen::Affine2f target_to_world =
+          PoseArrayToAffine(&target_solution.pose[2], &target_solution.pose[0]).cast<float>();
+  for (const Vector2f& source_point : source_pointcloud) {
+    Vector2f source_point_transformed =
+            target_to_world.inverse() * source_to_world * source_point;
+    float min_distance = MAXFLOAT;
+    Vector2f closest_target = target_pointcloud[0];
+    for(const Vector2f& target_point : target_pointcloud) {
+      if ((target_point - source_point_transformed).norm() < min_distance) {
+        closest_target = target_point;
+        min_distance = (target_point - source_point_transformed).norm();
+      }
+    }
+    // Minimize distance between closest points!
+    ceres_problem->AddResidualBlock(LIDARPointResidual::create(source_point, closest_target),
+            NULL,
+            const_cast<double*>(source_solution.pose),
+            const_cast<double*>(target_solution.pose));
+  }
+}
+
 bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
   // Copy all the data to a list that we are going to modify as we optimize.
   vector<slam_types::SLAMNodeSolution2D> solution;
@@ -218,27 +214,26 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
   // Setup ceres for evaluation of the problem.
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
-  ceres::Problem ceres_problem;
   options.linear_solver_type = ceres::DENSE_QR;
   options.minimizer_progress_to_stdout = true;
-  for (const OdometryFactor2D& odom_factor : problem.odometry_factors) {
-    // Add all the odometry residuals. These will act as a constraint to keep
-    // the optimizer from going crazy.
-    auto* pose_i_block =
-            reinterpret_cast<double *>(&solution[odom_factor.pose_i].pose);
-    auto* pose_j_block =
-            reinterpret_cast<double *>(&solution[odom_factor.pose_j].pose);
-    ceres_problem.AddResidualBlock(OdometryResidual::create(odom_factor),
-            NULL,
-            pose_i_block,
-            pose_j_block);
+  // Add the visualization.
+  VisualizationCallback vis_callback(problem, &solution, n);
+  options.callbacks.push_back(&vis_callback);
+  // Continually solve and minimize.
+  for (size_t node_i_index = LIDAR_CONSTRAINT_AMOUNT;
+       node_i_index < problem.nodes.size();
+       node_i_index++) {
+    for (size_t node_j_index = node_i_index - LIDAR_CONSTRAINT_AMOUNT;
+         node_j_index < node_i_index;
+         node_j_index++) {
+      // Add all the points to this, make a new problem. Minimize, continue.
+      ceres::Problem ceres_problem;
+      AddOdomFactors(problem, solution, &ceres_problem);
+      AddPointCloudFactors(problem, solution, &ceres_problem, node_j_index, node_i_index);
+      ceres::Solve(options, &ceres_problem, &summary);
+      printf("%s\n", summary.FullReport().c_str());
+    }
   }
-  AddLidarResiduals(problem, solution, &ceres_problem);
-//  VisualizationCallback vis_callback(problem, &solution, n);
-//  options.callbacks.push_back(&vis_callback);
-  ceres::Solve(options, &ceres_problem, &summary);
-  printf("%s\n", summary.FullReport().c_str());
-
   return true;
 }
 
