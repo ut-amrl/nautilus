@@ -88,8 +88,18 @@ struct LIDARPointResidual {
       Affine2T target_to_world = PoseArrayToAffine(&target_pose[2], &target_pose[0]);
       Vector2T source_pointT = source_point.cast<T>();
       CHECK(ceres::IsFinite(source_point.x()) && ceres::IsFinite(source_point.y()));
+      CHECK(ceres::IsFinite(source_pose[0]) && ceres::IsFinite(source_pose[1]) && ceres::IsFinite(source_pose[2]));
+      CHECK(ceres::IsFinite(target_pose[0]) && ceres::IsFinite(target_pose[1]) && ceres::IsFinite(target_pose[2]));
+      for (int64_t row = 0; row < source_to_world.rows(); row++) {
+        for (int64_t col = 0; col < source_to_world.cols(); col++) {
+          CHECK(ceres::IsFinite(source_to_world(row, col)));
+          CHECK(ceres::IsFinite(target_to_world.inverse()(row, col)));
+        }
+        printf("\n");
+      }
       Vector2T target_pointT = target_point.cast<T>();
       // Transform source_point into the frame of target_point
+      CHECK(ceres::IsFinite(source_pointT.x()) && ceres::IsFinite(source_pointT.y()));
       source_pointT = target_to_world.inverse() * source_to_world * source_pointT;
       CHECK(ceres::IsFinite(source_pointT.x()) && ceres::IsFinite(source_pointT.y()));
       residuals[0] = source_pointT.x() - target_pointT.x();

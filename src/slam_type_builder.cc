@@ -48,19 +48,32 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
   }
 }
 
+float ZRadiansFromQuaterion(geometry_msgs::Quaternion q) {
+  // Protect against case of gimbal lock which will give us a singular transformation.
+  // http://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/
+  if ((q.x * q.y) + (q.z * q.w) == 0.5) {
+    return 0.0;
+  } else if ((q.x * q.y) + (q.z * q.w) == -0.5) {
+    return 0.0;
+  }
+  double first_arg = 2.0f * (q.w * q.z + q.x * q.z);
+  double second_arg = 1.0f - (2.0f * (q.y * q.y + q.z * q.z));
+  return atan2(first_arg, second_arg);
+}
+
 void SLAMTypeBuilder::OdometryCallback(nav_msgs::Odometry& odometry) {
   if (!odom_initialized_) {
     init_odom_translation_ = Eigen::Vector2f(odometry.pose.pose.position.x,
                                              odometry.pose.pose.position.y);
-    init_odom_angle_ = odometry.pose.pose.orientation.y;
-    odom_initialized_ = true;
+    init_odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
     last_odom_translation_ = init_odom_translation_;
     last_odom_angle_ = init_odom_angle_;
+    odom_initialized_ = true;
   } else {
     last_odom_translation_ = odom_translation_;
     last_odom_angle_ = odom_angle_;
   }
-  odom_angle_ = asin(odometry.pose.pose.orientation.z) * 2;
+  odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
   odom_translation_ = Eigen::Vector2f(odometry.pose.pose.position.x,
                                       odometry.pose.pose.position.y);
 }
