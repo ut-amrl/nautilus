@@ -46,7 +46,7 @@ ROSBUILD_ADD_EXECUTABLE(lidar_slam
 
 ADD_LIBRARY(shared_library
         src/gui_helpers.cc
-        src/timer.cc src/solver.cc src/solver.h src/slam_type_builder.cc src/slam_type_builder.h)
+        src/timer.cc)
 
 TARGET_LINK_LIBRARIES(lidar_slam
         shared_library

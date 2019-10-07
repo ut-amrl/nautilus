@@ -10,6 +10,7 @@
 #include "solver.h"
 
 #include <utility>
+#include "valgrind/memcheck.h"
 #include "slam_types.h"
 #include "math_util.h"
 #include "pointcloud_helpers.h"
@@ -25,9 +26,9 @@ using slam_types::SLAMNodeSolution2D;
 template<typename T> Eigen::Transform<T, 2, Eigen::Affine>
 PoseArrayToAffine(const T* rotation, const T* translation) {
   typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
-  typedef Eigen::Matrix<T, 2, 1> Vector2T;
-  Affine2T affine;
-  affine.rotate(rotation[0]).translate(Vector2T(translation[0], translation[1]));
+  typedef Eigen::Rotation2D<T> Rotation2DT;
+  typedef Eigen::Translation<T, 2> Translation2T;
+  Affine2T affine = Rotation2DT(rotation[0]) * Translation2T(translation[0], translation[1]);
   return affine;
 }
 
@@ -95,7 +96,6 @@ struct LIDARPointResidual {
           CHECK(ceres::IsFinite(source_to_world(row, col)));
           CHECK(ceres::IsFinite(target_to_world.inverse()(row, col)));
         }
-        printf("\n");
       }
       Vector2T target_pointT = target_point.cast<T>();
       // Transform source_point into the frame of target_point
@@ -227,7 +227,7 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::DENSE_QR;
-  options.minimizer_progress_to_stdout = false;
+  options.minimizer_progress_to_stdout = true;
   // Add the visualization.
   VisualizationCallback vis_callback(problem, &solution, n);
   options.callbacks.push_back(&vis_callback);
@@ -247,7 +247,7 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
                            node_j_index,
                            node_i_index);
       ceres::Solve(options, &ceres_problem, &summary);
-      //printf("%s\n", summary.FullReport().c_str());
+      printf("%s\n", summary.FullReport().c_str());
     }
   }
   return true;
