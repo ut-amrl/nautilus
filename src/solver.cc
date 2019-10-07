@@ -56,8 +56,8 @@ struct OdometryResidual {
       const Matrix2T error_rotation_mat =
               Rj.transpose() * Ri * R_odom.cast<T>();
 
-      residual[0] = error_translation[0];
-      residual[1] = error_translation[1];
+      residual[0] = error_translation.x();
+      residual[1] = error_translation.y();
       residual[2] = Eigen::Rotation2D<T>().fromRotationMatrix(error_rotation_mat).angle();
       return true;
     }
@@ -91,7 +91,7 @@ struct LIDARPointResidual {
       Vector2T target_pointT = target_point.cast<T>();
       // Transform source_point into the frame of target_point
       source_pointT = target_to_world.inverse() * source_to_world * source_pointT;
-      CHECK(ceres::IsFinite(source_pointT.x()) && ceres::IsFinite(source_pointT.y()));
+//      CHECK(ceres::IsFinite(source_pointT.x()) && ceres::IsFinite(source_pointT.y()));
       residuals[0] = source_pointT.x() - target_pointT.x();
       residuals[1] = source_pointT.y() - target_pointT.y();
       return true;
@@ -169,11 +169,12 @@ void AddOdomFactors(const slam_types::SLAMProblem2D& problem,
 
 // Source moves to target.
 void AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
-                          const vector<slam_types::SLAMNodeSolution2D>& solution,
+                          const vector<slam_types::SLAMNodeSolution2D>* solution_ptr,
                           ceres::Problem* ceres_problem,
                           size_t source_node_index,
                           size_t target_node_index) {
   // Loop over the two point clouds finding the closest points.
+  const vector<SLAMNodeSolution2D>& solution = *solution_ptr;
   const SLAMNodeSolution2D& source_solution = solution[source_node_index];
   const SLAMNodeSolution2D& target_solution = solution[target_node_index];
   const vector<Vector2f>& source_pointcloud =
@@ -187,8 +188,8 @@ void AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
   for (const Vector2f& source_point : source_pointcloud) {
     Vector2f source_point_transformed =
             target_to_world.inverse() * source_to_world * source_point;
-    float min_distance = MAXFLOAT;
     Vector2f closest_target = target_pointcloud[0];
+    float min_distance = (closest_target - source_point_transformed).norm();
     for(const Vector2f& target_point : target_pointcloud) {
       if ((target_point - source_point_transformed).norm() < min_distance) {
         closest_target = target_point;
@@ -205,17 +206,18 @@ void AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
 
 bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
   // Copy all the data to a list that we are going to modify as we optimize.
-  vector<slam_types::SLAMNodeSolution2D> solution;
+  vector<slam_types::SLAMNodeSolution2D> solution(problem.nodes.size());
   for (size_t i = 0; i < problem.nodes.size(); i++) {
     // Make sure that we marked all the data correctly earlier.
     CHECK_EQ(i, problem.nodes[i].node_idx);
-    solution.emplace_back(problem.nodes[i]);
+    SLAMNodeSolution2D sol_node(problem.nodes[i]);
+    solution[i] = sol_node;
   }
   // Setup ceres for evaluation of the problem.
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::DENSE_QR;
-  options.minimizer_progress_to_stdout = true;
+  options.minimizer_progress_to_stdout = false;
   // Add the visualization.
   VisualizationCallback vis_callback(problem, &solution, n);
   options.callbacks.push_back(&vis_callback);
@@ -229,9 +231,13 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
       // Add all the points to this, make a new problem. Minimize, continue.
       ceres::Problem ceres_problem;
       AddOdomFactors(problem, solution, &ceres_problem);
-      AddPointCloudFactors(problem, solution, &ceres_problem, node_j_index, node_i_index);
+      AddPointCloudFactors(problem,
+                           &solution,
+                           &ceres_problem,
+                           node_j_index,
+                           node_i_index);
       ceres::Solve(options, &ceres_problem, &summary);
-      printf("%s\n", summary.FullReport().c_str());
+      //printf("%s\n", summary.FullReport().c_str());
     }
   }
   return true;

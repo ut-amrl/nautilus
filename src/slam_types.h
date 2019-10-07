@@ -113,11 +113,13 @@ struct LidarFactor {
     // IDs of the poses
     uint64_t pose_id;
     std::vector<Eigen::Vector2f> pointcloud;
-    LidarFactor() {}
+    LidarFactor() {
+      pose_id = 0;
+    }
     LidarFactor(uint64_t pose_id,
-                const std::vector<Eigen::Vector2f> pointcloud) :
+                std::vector<Eigen::Vector2f> pointcloud) :
                 pose_id(pose_id),
-                pointcloud(pointcloud) {}
+                pointcloud(std::move(pointcloud)) {}
 };
 
 struct RobotPose {
@@ -276,10 +278,10 @@ struct SLAMProblem2D {
     // Default constructor, do nothing.
     SLAMProblem2D() = default;
     // Convenience constructor for initialization.
-    SLAMProblem2D(const std::vector<SLAMNode2D>& nodes,
-                  const std::vector<OdometryFactor2D>& odometry_factors) :
-            nodes(nodes),
-            odometry_factors(odometry_factors){}
+    SLAMProblem2D(std::vector<SLAMNode2D>  nodes,
+                  std::vector<OdometryFactor2D>  odometry_factors) :
+            nodes(std::move(nodes)),
+            odometry_factors(std::move(odometry_factors)){}
 };
 
 struct SLAMNodeSolution {
@@ -314,14 +316,12 @@ struct SLAMNodeSolution {
 
 struct SLAMNodeSolution2D {
     // Pose ID.
-    uint64_t node_idx;
+    uint64_t node_idx{};
     // Timestamp.
-    double timestamp;
+    double timestamp{};
     // 3DOF parameters: tx, ty, angle. Note that
     // angle_* are the coordinates in scaled angle-axis form.
     double pose[3];
-    // Corresponding flag of whether the point is to be part of the map.
-    std::vector<bool> point_in_map;
     // Convenience constructor, initialize all values.
     SLAMNodeSolution2D(const SLAMNode2D& n) :
                        node_idx(n.node_idx),
@@ -330,6 +330,14 @@ struct SLAMNodeSolution2D {
       pose[0] = n.pose.loc.x();
       pose[1] = n.pose.loc.y();
       pose[2] = n.pose.angle;
+    }
+
+    SLAMNodeSolution2D() {
+      pose[0] = 0;
+      pose[1] = 1;
+      pose[2] = 2;
+      node_idx = 0;
+      timestamp = 0.0f;
     }
 };
 
