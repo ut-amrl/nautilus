@@ -15,21 +15,21 @@ using slam_types::SLAMNode2D;
 using slam_types::SLAMProblem2D;
 
 void SLAMTypeBuilder::AddOdomFactor(
-        std::vector<OdometryFactor2D>* odom_factors) {
+        std::vector<OdometryFactor2D>& odom_factors) {
   CHECK_EQ(odom_initialized_, true);
-  const Eigen::Matrix2f last_rot_mat =
+  Eigen::Matrix2f last_rot_mat =
       Eigen::Rotation2D<float>(last_odom_angle_)
           .toRotationMatrix();
-  const Eigen::Vector2f translation =
+  Eigen::Vector2f translation =
       (odom_translation_ - last_odom_translation_);
-  const Eigen::Matrix2f curr_rot_mat =
+  Eigen::Matrix2f curr_rot_mat =
       Eigen::Rotation2D<float>(odom_angle_)
           .toRotationMatrix();
-  const Eigen::Matrix2f rotation =
+  Eigen::Matrix2f rotation =
       last_rot_mat.transpose() * curr_rot_mat;
   // Recover angle from rotation matrix.
-  const double angle = atan2(rotation(0, 1), rotation(0, 0));
-  odom_factors->emplace_back(pose_id_, pose_id_ + 1, translation, angle);
+  double angle = atan2(rotation(0, 1), rotation(0, 0));
+  odom_factors.emplace_back(pose_id_, pose_id_ + 1, translation, angle);
 }
 
 void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
@@ -43,12 +43,12 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
     SLAMNode2D slam_node(pose_id_, laser_scan.header.stamp.toSec(), pose,
                          lidar_factor);
     nodes_.push_back(slam_node);
-    AddOdomFactor(&odom_factors_);
+    AddOdomFactor(odom_factors_);
     pose_id_ += 1;
   }
 }
 
-float ZRadiansFromQuaterion(geometry_msgs::Quaternion q) {
+float ZRadiansFromQuaterion(geometry_msgs::Quaternion& q) {
   // Protect against case of gimbal lock which will give us a singular transformation.
   // http://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/
   if ((q.x * q.y) + (q.z * q.w) == 0.5) {

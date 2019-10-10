@@ -56,7 +56,6 @@ struct OdometryResidual {
 
       const Matrix2T error_rotation_mat =
               Rj.transpose() * Ri * R_odom.cast<T>();
-
       residual[0] = error_translation.x();
       residual[1] = error_translation.y();
       residual[2] = Eigen::Rotation2D<T>().fromRotationMatrix(error_rotation_mat).angle();
@@ -76,7 +75,8 @@ struct OdometryResidual {
 
     const Matrix2f R_odom;
     const Vector2f T_odom;
-};
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+  };
 
 struct LIDARPointResidual {
     template <typename T>
@@ -107,13 +107,13 @@ struct LIDARPointResidual {
       return true;
     }
 
-    LIDARPointResidual(Vector2f source_point,
-                       Vector2f target_point) :
-            source_point(std::move(source_point)),
-            target_point(std::move(target_point)) {}
+    LIDARPointResidual(Vector2f& source_point,
+                       Vector2f& target_point) :
+            source_point(source_point),
+            target_point(target_point) {}
 
     static AutoDiffCostFunction<LIDARPointResidual, 2, 3, 3>* create(
-            const Vector2f& source_point, const Vector2f& target_point) {
+            Vector2f& source_point, Vector2f& target_point) {
       LIDARPointResidual *residual = new LIDARPointResidual(source_point, target_point);
       return new AutoDiffCostFunction<LIDARPointResidual, 2, 3, 3>(residual);
     }
@@ -160,13 +160,13 @@ private:
 };
 
 void AddOdomFactors(const slam_types::SLAMProblem2D& problem,
-                    const vector<slam_types::SLAMNodeSolution2D>& solution,
+                    vector<slam_types::SLAMNodeSolution2D>& solution,
                     ceres::Problem* ceres_problem) {
   for (const OdometryFactor2D& odom_factor : problem.odometry_factors) {
-    double* pose_i_block =
-            const_cast<double*>(solution[odom_factor.pose_i].pose);
-    double* pose_j_block =
-            const_cast<double*>(solution[odom_factor.pose_j].pose);
+    double* pose_i_block = solution[odom_factor.pose_i].pose;
+    double* pose_j_block = solution[odom_factor.pose_j].pose;
+    VALGRIND_CHECK_MEM_IS_DEFINED(*pose_i_block, 3 * sizeof(double));
+    VALGRIND_CHECK_MEM_IS_DEFINED(*pose_j_block, 3 * sizeof(double));
     ceres_problem->AddResidualBlock(OdometryResidual::create(odom_factor),
                                     NULL,
                                     pose_i_block,
@@ -179,14 +179,14 @@ void AddOdomFactors(const slam_types::SLAMProblem2D& problem,
 
 // Source moves to target.
 void AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
-                          const vector<slam_types::SLAMNodeSolution2D>* solution_ptr,
+                          vector<slam_types::SLAMNodeSolution2D>* solution_ptr,
                           ceres::Problem* ceres_problem,
                           size_t source_node_index,
                           size_t target_node_index) {
   // Loop over the two point clouds finding the closest points.
-  const vector<SLAMNodeSolution2D>& solution = *solution_ptr;
-  const SLAMNodeSolution2D& source_solution = solution[source_node_index];
-  const SLAMNodeSolution2D& target_solution = solution[target_node_index];
+  vector<SLAMNodeSolution2D>& solution = *solution_ptr;
+  SLAMNodeSolution2D& source_solution = solution[source_node_index];
+  SLAMNodeSolution2D& target_solution = solution[target_node_index];
   const vector<Vector2f>& source_pointcloud =
           problem.nodes[source_node_index].lidar_factor.pointcloud;
   const vector<Vector2f>& target_pointcloud =
@@ -207,10 +207,11 @@ void AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
       }
     }
     // Minimize distance between closest points!
-    ceres_problem->AddResidualBlock(LIDARPointResidual::create(source_point, closest_target),
+    Vector2f source_point_modifiable = source_point;
+    ceres_problem->AddResidualBlock(LIDARPointResidual::create(source_point_modifiable, closest_target),
             NULL,
-            const_cast<double*>(source_solution.pose),
-            const_cast<double*>(target_solution.pose));
+            source_solution.pose,
+            target_solution.pose);
   }
 }
 

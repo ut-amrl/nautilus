@@ -117,9 +117,9 @@ struct LidarFactor {
       pose_id = 0;
     }
     LidarFactor(uint64_t pose_id,
-                std::vector<Eigen::Vector2f> pointcloud) :
+                std::vector<Eigen::Vector2f>& pointcloud) :
                 pose_id(pose_id),
-                pointcloud(std::move(pointcloud)) {}
+                pointcloud(pointcloud) {}
 };
 
 struct RobotPose {
@@ -141,6 +141,8 @@ struct RobotPose {
   Eigen::Affine3f WorldToRobotTf() const {
     return ((Eigen::Translation3f(loc) * angle).inverse());
   }
+
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
 struct RobotPose2D {
@@ -152,7 +154,7 @@ struct RobotPose2D {
     // Default constructor: do nothing.
     RobotPose2D() {}
     // Convenience constructor: initialize everything.
-    RobotPose2D(const Eigen::Vector2f  loc,
+    RobotPose2D(const Eigen::Vector2f&  loc,
                 const float angle) :
                 loc(loc), angle(angle) {}
     // Return a transform from the robot to the world frame for this pose.
@@ -180,31 +182,36 @@ struct OdometryFactor {
   // Rotation to go from pose i to pose j.
   Eigen::Quaternionf rotation;
   // Default constructor: do nothing.
-  OdometryFactor() {}
+  OdometryFactor() {
+    pose_i = 0;
+    pose_j = 0;
+  }
   // Convenience constructor: initialize everything.
   OdometryFactor(uint64_t pose_i,
                          uint64_t pose_j,
-                         Eigen::Vector3f translation,
-                         Eigen::Quaternionf rotation) :
+                         Eigen::Vector3f& translation,
+                         Eigen::Quaternionf& rotation) :
       pose_i(pose_i), pose_j(pose_j), translation(translation),
       rotation(rotation) {}
+
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
 struct OdometryFactor2D {
     // ID of first pose.
-    uint64_t pose_i;
+    uint64_t pose_i{};
     // ID of second pose.
-    uint64_t pose_j;
+    uint64_t pose_j{};
     // Translation to go from pose i to pose j.
     Eigen::Vector2f translation;
     // Rotation to go from pose i to pose j.
-    float rotation;
+    float rotation{};
     // Default constructor: do nothing.
-    OdometryFactor2D() {}
+    OdometryFactor2D() = default;
     // Convenience constructor: initialize everything.
     OdometryFactor2D(uint64_t pose_i,
                      uint64_t pose_j,
-                     Eigen::Vector2f translation,
+                     Eigen::Vector2f& translation,
                      float rotation) :
             pose_i(pose_i), pose_j(pose_j), translation(translation),
             rotation(rotation) {}
@@ -213,15 +220,15 @@ struct OdometryFactor2D {
 
 struct SLAMNode {
   // Pose index for this node in the nodes vector for the slam problem.
-  uint64_t node_idx;
+  uint64_t node_idx{};
   // Timestamp.
-  double timestamp;
+  double timestamp{};
   // 6DOF parameters.
   RobotPose pose;
   // Observed vision features.
   std::vector<VisionFeature> features;
   // Default constructor: do nothing.
-  SLAMNode() {}
+  SLAMNode() = default;
   // Convenience constructor, initialize all components.
   SLAMNode(uint64_t idx,
            double timestamp,
@@ -232,15 +239,15 @@ struct SLAMNode {
 
 struct SLAMNode2D {
     // Pose index for this node in the nodes vector for the slam problem.
-    uint64_t node_idx;
+    uint64_t node_idx{};
     // Timestamp.
-    double timestamp;
+    double timestamp{};
     // 3DOF parameters.
     RobotPose2D pose;
     // Observed Lidar Factor
     LidarFactor lidar_factor;
     // Default constructor: do nothing.
-    SLAMNode2D() {}
+    SLAMNode2D() = default;
     // Convenience constructor, initialize all components.
     SLAMNode2D(uint64_t idx,
              double timestamp,
@@ -260,7 +267,7 @@ struct SLAMProblem {
     // Odometry / IMU correspondences.
     std::vector<OdometryFactor> odometry_factors;
     // Default constructor, do nothing.
-    SLAMProblem() {}
+    SLAMProblem() = default;
     // Convenience constructor for initialization.
     SLAMProblem(const std::vector<SLAMNode>& nodes,
                 const std::vector<VisionFactor>& vision_factors,
@@ -321,24 +328,14 @@ struct SLAMNodeSolution2D {
     double timestamp{};
     // 3DOF parameters: tx, ty, angle. Note that
     // angle_* are the coordinates in scaled angle-axis form.
-    double pose[3];
+    double pose[3]{};
     // Convenience constructor, initialize all values.
-    SLAMNodeSolution2D(const SLAMNode2D& n) :
+    explicit SLAMNodeSolution2D(const SLAMNode2D& n) :
                        node_idx(n.node_idx),
                        timestamp(n.timestamp),
-                       pose{0, 0, 0} {
-      pose[0] = n.pose.loc.x();
-      pose[1] = n.pose.loc.y();
-      pose[2] = n.pose.angle;
-    }
+                       pose{n.pose.loc.x(), n.pose.loc.y(), n.pose.angle} {}
 
-    SLAMNodeSolution2D() {
-      pose[0] = 0;
-      pose[1] = 1;
-      pose[2] = 2;
-      node_idx = 0;
-      timestamp = 0.0f;
-    }
+    SLAMNodeSolution2D() = default;
 };
 
 }  // namespace slam_types

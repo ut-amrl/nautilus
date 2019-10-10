@@ -27,7 +27,7 @@ private:
     float last_odom_angle_;
     std::vector<slam_types::SLAMNode2D> nodes_;
     std::vector<slam_types::OdometryFactor2D> odom_factors_;
-    void AddOdomFactor(std::vector<slam_types::OdometryFactor2D>*);
+    void AddOdomFactor(std::vector<slam_types::OdometryFactor2D>&);
 };
 
 
