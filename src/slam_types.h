@@ -141,8 +141,6 @@ struct RobotPose {
   Eigen::Affine3f WorldToRobotTf() const {
     return ((Eigen::Translation3f(loc) * angle).inverse());
   }
-
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
 struct RobotPose2D {
@@ -193,8 +191,6 @@ struct OdometryFactor {
                          Eigen::Quaternionf& rotation) :
       pose_i(pose_i), pose_j(pose_j), translation(translation),
       rotation(rotation) {}
-
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
 struct OdometryFactor2D {
@@ -328,7 +324,7 @@ struct SLAMNodeSolution2D {
     double timestamp{};
     // 3DOF parameters: tx, ty, angle. Note that
     // angle_* are the coordinates in scaled angle-axis form.
-    double pose[3]{};
+    double pose[3]{0, 0, 0};
     // Convenience constructor, initialize all values.
     explicit SLAMNodeSolution2D(const SLAMNode2D& n) :
                        node_idx(n.node_idx),

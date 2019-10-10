@@ -52,7 +52,8 @@ struct OdometryResidual {
       const Vector2T Ti(pose_i[0], pose_i[1]);
       const Vector2T Tj(pose_j[0], pose_j[1]);
 
-      const Vector2T error_translation = Ti + T_odom.cast<T>() - Tj;
+      const Vector2T error_translation =
+              Rj.transpose() * (Ri * T_odom.cast<T>() - (Tj - Ti));
 
       const Matrix2T error_rotation_mat =
               Rj.transpose() * Ri * R_odom.cast<T>();
@@ -151,6 +152,7 @@ public:
       PubVisualization();
       return ceres::SOLVER_CONTINUE;
     }
+
 private:
     sensor_msgs::PointCloud2 all_points_marker;
     std::vector<Vector2f> all_points;
@@ -161,16 +163,16 @@ private:
 
 void AddOdomFactors(const slam_types::SLAMProblem2D& problem,
                     vector<slam_types::SLAMNodeSolution2D>& solution,
-                    ceres::Problem* ceres_problem) {
+                    ceres::Problem* ceres_problem, size_t node_i_index, size_t node_j_index) {
+
   for (const OdometryFactor2D& odom_factor : problem.odometry_factors) {
-    double* pose_i_block = solution[odom_factor.pose_i].pose;
-    double* pose_j_block = solution[odom_factor.pose_j].pose;
-    VALGRIND_CHECK_MEM_IS_DEFINED(*pose_i_block, 3 * sizeof(double));
-    VALGRIND_CHECK_MEM_IS_DEFINED(*pose_j_block, 3 * sizeof(double));
+    CHECK_LT(odom_factor.pose_i, odom_factor.pose_j);
+    CHECK_GT(solution.size(), odom_factor.pose_i);
+    CHECK_GT(solution.size(), odom_factor.pose_j);
     ceres_problem->AddResidualBlock(OdometryResidual::create(odom_factor),
                                     NULL,
-                                    pose_i_block,
-                                    pose_j_block);
+                                    solution[odom_factor.pose_i].pose,
+                                    solution[odom_factor.pose_j].pose);
   }
 }
 
@@ -178,12 +180,13 @@ void AddOdomFactors(const slam_types::SLAMProblem2D& problem,
 #define LIDAR_CONSTRAINT_AMOUNT 10
 
 // Source moves to target.
-void AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
-                          vector<slam_types::SLAMNodeSolution2D>* solution_ptr,
-                          ceres::Problem* ceres_problem,
-                          size_t source_node_index,
-                          size_t target_node_index) {
+double AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
+                            vector<slam_types::SLAMNodeSolution2D>* solution_ptr,
+                            ceres::Problem* ceres_problem,
+                            size_t source_node_index,
+                            size_t target_node_index) {
   // Loop over the two point clouds finding the closest points.
+  double difference = 0.0;
   vector<SLAMNodeSolution2D>& solution = *solution_ptr;
   SLAMNodeSolution2D& source_solution = solution[source_node_index];
   SLAMNodeSolution2D& target_solution = solution[target_node_index];
@@ -206,6 +209,7 @@ void AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
         min_distance = (target_point - source_point_transformed).norm();
       }
     }
+    difference += (closest_target - source_point_transformed).norm();
     // Minimize distance between closest points!
     Vector2f source_point_modifiable = source_point;
     ceres_problem->AddResidualBlock(LIDARPointResidual::create(source_point_modifiable, closest_target),
@@ -213,6 +217,7 @@ void AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
             source_solution.pose,
             target_solution.pose);
   }
+  return difference;
 }
 
 bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
@@ -228,7 +233,7 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::DENSE_QR;
-  options.minimizer_progress_to_stdout = true;
+  options.minimizer_progress_to_stdout = false;
   // Add the visualization.
   VisualizationCallback vis_callback(problem, &solution, n);
   options.callbacks.push_back(&vis_callback);
@@ -236,20 +241,24 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
   for (size_t node_i_index = LIDAR_CONSTRAINT_AMOUNT;
        node_i_index < problem.nodes.size();
        node_i_index++) {
-    for (size_t node_j_index = node_i_index - LIDAR_CONSTRAINT_AMOUNT;
-         node_j_index < node_i_index;
-         node_j_index++) {
-      // Add all the points to this, make a new problem. Minimize, continue.
-      ceres::Problem ceres_problem;
-      AddOdomFactors(problem, solution, &ceres_problem);
-      AddPointCloudFactors(problem,
-                           &solution,
-                           &ceres_problem,
-                           node_j_index,
-                           node_i_index);
-      ceres::Solve(options, &ceres_problem, &summary);
-      printf("%s\n", summary.FullReport().c_str());
-    }
+    double difference = 10;
+    do {
+      for (size_t node_j_index = node_i_index - LIDAR_CONSTRAINT_AMOUNT;
+           node_j_index < node_i_index;
+           node_j_index++) {
+        ceres::Problem ceres_problem;
+        // Add all the points to this, make a new problem. Minimize, continue.
+        AddOdomFactors(problem, solution, &ceres_problem, node_i_index,
+                       node_j_index);
+        difference = AddPointCloudFactors(problem,
+                                          &solution,
+                                          &ceres_problem,
+                                          node_j_index,
+                                          node_i_index);
+        ceres::Solve(options, &ceres_problem, &summary);
+        //printf("%s\n", summary.FullReport().c_str());
+      }
+    } while(difference > LIDAR_CONSTRAINT_AMOUNT * 0.1);
   }
   return true;
 }

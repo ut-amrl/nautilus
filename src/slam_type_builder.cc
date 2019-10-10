@@ -29,12 +29,14 @@ void SLAMTypeBuilder::AddOdomFactor(
       last_rot_mat.transpose() * curr_rot_mat;
   // Recover angle from rotation matrix.
   double angle = atan2(rotation(0, 1), rotation(0, 0));
-  odom_factors.emplace_back(pose_id_, pose_id_ + 1, translation, angle);
+  odom_factors.emplace_back(pose_id_ - 1, pose_id_, translation, angle);
+  last_odom_angle_ = odom_angle_;
+  last_odom_translation_ = odom_translation_;
 }
 
 void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
   // We only want one odometry between each lidar callback.
-  if (odom_initialized_) {
+  if (odom_initialized_ && (last_odom_translation_ - odom_translation_).norm() > 0.1) {
     // Transform this laser scan into a point cloud.s
     std::vector<Eigen::Vector2f> pointcloud = LaserScanToPointCloud(laser_scan);
     LidarFactor lidar_factor(pose_id_, pointcloud);
@@ -43,7 +45,9 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
     SLAMNode2D slam_node(pose_id_, laser_scan.header.stamp.toSec(), pose,
                          lidar_factor);
     nodes_.push_back(slam_node);
-    AddOdomFactor(odom_factors_);
+    if (pose_id_ > 0) {
+      AddOdomFactor(odom_factors_);
+    }
     pose_id_ += 1;
   }
 }
@@ -69,9 +73,6 @@ void SLAMTypeBuilder::OdometryCallback(nav_msgs::Odometry& odometry) {
     last_odom_translation_ = init_odom_translation_;
     last_odom_angle_ = init_odom_angle_;
     odom_initialized_ = true;
-  } else {
-    last_odom_translation_ = odom_translation_;
-    last_odom_angle_ = odom_angle_;
   }
   odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
   odom_translation_ = Eigen::Vector2f(odometry.pose.pose.position.x,
