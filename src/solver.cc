@@ -195,12 +195,23 @@ void AddOdomFactors(const slam_types::SLAMProblem2D& problem,
 
 #define LIDAR_CONSTRAINT_AMOUNT 10
 
+struct LidarPointMatch {
+  Vector2f source_point;
+  Vector2f target_point;
+  double *source_pose;
+  double *target_pose;
+  
+  LidarPointMatch(Vector2f source_point, Vector2f target_point, double* source_pose, double* target_pose) :
+                  source_point(source_point), target_point(target_point), source_pose(source_pose), target_pose(target_pose) {}
+  
+};
+
 // Source moves to target.
-double AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
-                            vector<slam_types::SLAMNodeSolution2D>* solution_ptr,
-                            ceres::Problem* ceres_problem,
-                            size_t source_node_index,
-                            size_t target_node_index) {
+double GetClosestTargetPoints(const slam_types::SLAMProblem2D& problem,
+                              vector<slam_types::SLAMNodeSolution2D>* solution_ptr,
+                              vector<LidarPointMatch>* matches,
+                              size_t source_node_index,
+                              size_t target_node_index) {
   gui_helpers::ClearMarker(&match_line_list);
   // Loop over the two point clouds finding the closest points.
   double difference = 0.0;
@@ -233,10 +244,7 @@ double AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
     }
     // Minimize distance between closest points!
     Vector2f source_point_modifiable = source_point;
-    ceres_problem->AddResidualBlock(LIDARPointResidual::create(source_point_modifiable, closest_target),
-            NULL,
-            source_solution.pose,
-            target_solution.pose);
+    matches->emplace_back(source_point_modifiable, closest_target, source_solution.pose, target_solution.pose);
     // Add a line from the matches that we are using.
     source_point_transformed = target_to_world * source_point_transformed;
     closest_target = target_to_world * closest_target;
@@ -245,6 +253,15 @@ double AddPointCloudFactors(const slam_types::SLAMProblem2D& problem,
     gui_helpers::AddLine(source_3d, target_3d, gui_helpers::Color4f::kBlue, &match_line_list);
   }
   return difference;
+}
+
+void AddLidarMatchResiduals(ceres::Problem* ceres_problem, vector<LidarPointMatch>& matches) {
+  for (LidarPointMatch& match : matches) {
+    ceres_problem->AddResidualBlock(LIDARPointResidual::create(match.source_point, match.target_point),
+              NULL,
+              match.source_pose,
+              match.target_pose);
+  }
 }
 
 bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
@@ -265,32 +282,40 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
   VisualizationCallback vis_callback(problem, &solution, n);
   options.callbacks.push_back(&vis_callback);
   // Continually solve and minimize.
+  vector<vector<LidarPointMatch>> past_constraints;
   for (size_t node_i_index = 0;
        node_i_index < problem.nodes.size();
        node_i_index++) {
     double difference = 0;
     double last_difference = 0;
     solution[node_i_index].visualize = true;
+    vector<LidarPointMatch> current_matches;
     do {
+      current_matches.clear();
       last_difference = difference;
       difference = 0;
       ceres::Problem ceres_problem;
+      AddOdomFactors(problem, solution, &ceres_problem);
       for (size_t node_j_index = std::max((long)(node_i_index) - LIDAR_CONSTRAINT_AMOUNT, 0l);
            node_j_index < node_i_index;
            node_j_index++) {
         // Add all the points to this, make a new problem. Minimize, continue.
-        AddOdomFactors(problem, solution, &ceres_problem);
-        difference += AddPointCloudFactors(problem,
-                                          &solution,
-                                          &ceres_problem,
-                                          node_j_index,
-                                          node_i_index);
+        difference += GetClosestTargetPoints(problem,
+                                            &solution,
+                                            &current_matches,
+                                            node_j_index,
+                                            node_i_index);
+      }
+      AddLidarMatchResiduals(&ceres_problem, current_matches);
+      for (vector<LidarPointMatch> matches : past_constraints) {
+        AddLidarMatchResiduals(&ceres_problem, matches);
       }
       vis_callback.PubVisualization();
       ceres::Solve(options, &ceres_problem, &summary);
 //       printf("%s\n", summary.FullReport().c_str());
 //       sleep(1);
-    } while(abs(difference - last_difference) > 0.01);
+    } while(abs(difference - last_difference) > 0.03);
+    past_constraints.emplace_back(current_matches);
     printf("Solved for 1 i_node\n");
   }
   return true;
