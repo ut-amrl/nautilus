@@ -318,6 +318,7 @@ struct SLAMNodeSolution {
 };
 
 struct SLAMNodeSolution2D {
+    bool visualize = false;
     // Pose ID.
     uint64_t node_idx{};
     // Timestamp.

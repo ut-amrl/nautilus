@@ -21,12 +21,12 @@ void SLAMTypeBuilder::AddOdomFactor(
       Eigen::Rotation2D<float>(last_odom_angle_)
           .toRotationMatrix();
   Eigen::Vector2f translation =
-      (odom_translation_ - last_odom_translation_);
+      last_rot_mat.inverse() * (odom_translation_ - last_odom_translation_);
   Eigen::Matrix2f curr_rot_mat =
       Eigen::Rotation2D<float>(odom_angle_)
           .toRotationMatrix();
   Eigen::Matrix2f rotation =
-      last_rot_mat.transpose() * curr_rot_mat;
+      curr_rot_mat * last_rot_mat.transpose();
   // Recover angle from rotation matrix.
   double angle = atan2(rotation(0, 1), rotation(0, 0));
   odom_factors.emplace_back(pose_id_ - 1, pose_id_, translation, angle);
@@ -35,20 +35,24 @@ void SLAMTypeBuilder::AddOdomFactor(
 }
 
 void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
+  if (lidar_callback_count >= LIDAR_CALLBACK_CUTOFF) {
+    return;
+  }
   // We only want one odometry between each lidar callback.
-  if (odom_initialized_ && (last_odom_translation_ - odom_translation_).norm() > 0.1) {
+  if (odom_initialized_ && ((last_odom_translation_ - odom_translation_).norm() > 0.1 || (abs(odom_angle_ - last_odom_angle_) > M_PI / 4))) {
     // Transform this laser scan into a point cloud.s
     std::vector<Eigen::Vector2f> pointcloud = LaserScanToPointCloud(laser_scan);
     LidarFactor lidar_factor(pose_id_, pointcloud);
     RobotPose2D pose(odom_translation_ - init_odom_translation_,
-                     odom_angle_ - init_odom_angle_);
+                     odom_angle_); //TODO: Maybe not good idea to not subtract initial angle.
     SLAMNode2D slam_node(pose_id_, laser_scan.header.stamp.toSec(), pose,
                          lidar_factor);
     nodes_.push_back(slam_node);
     if (pose_id_ > 0) {
       AddOdomFactor(odom_factors_);
     }
-    pose_id_ += 1;
+    pose_id_++;
+    lidar_callback_count++;
   }
 }
 
@@ -73,6 +77,7 @@ void SLAMTypeBuilder::OdometryCallback(nav_msgs::Odometry& odometry) {
     last_odom_translation_ = init_odom_translation_;
     last_odom_angle_ = init_odom_angle_;
     odom_initialized_ = true;
+    printf("Initial Angle in Rad: %lf\n", init_odom_angle_);
   }
   odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
   odom_translation_ = Eigen::Vector2f(odometry.pose.pose.position.x,

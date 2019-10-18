@@ -11,6 +11,8 @@
 
 #include "slam_types.h"
 
+#define LIDAR_CALLBACK_CUTOFF 30
+
 class SLAMTypeBuilder {
 public:
     void LidarCallback(sensor_msgs::LaserScan& laser_scan);
@@ -28,6 +30,7 @@ private:
     std::vector<slam_types::SLAMNode2D> nodes_;
     std::vector<slam_types::OdometryFactor2D> odom_factors_;
     void AddOdomFactor(std::vector<slam_types::OdometryFactor2D>&);
+    uint64_t lidar_callback_count = 0;
 };
 
 
