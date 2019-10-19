@@ -47,11 +47,11 @@ slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path, ros::NodeHandle& 
   SLAMTypeBuilder slam_builder;
   // Iterate through the bag
   // TODO: Temporary cut-off for testing.
-  int TEMP_INDEX = 0;
-  int CUTOFF = 1000;
+  //int TEMP_INDEX = 0;
+  //int CUTOFF = 1000;
   for (rosbag::View::iterator it = view.begin();
-       ros::ok() && it != view.end() && TEMP_INDEX < CUTOFF;
-       ++it, ++TEMP_INDEX) {
+       ros::ok() && it != view.end();
+       ++it) {
     const rosbag::MessageInstance &message = *it;
     {
       // Load all the point clouds into memory.

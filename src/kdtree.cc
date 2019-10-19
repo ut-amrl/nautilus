@@ -25,6 +25,8 @@
 #include <algorithm>
 #include <vector>
 #include "glog/logging.h"
+#include "eigen3/Eigen/Dense"
+#include "eigen3/Eigen/Geometry"
 
 using std::vector;
 using Eigen::Matrix;
@@ -137,6 +139,29 @@ KDTree< T, K >* KDTree<T, K>::BuildKDTree(
     right_tree_->parent_tree_ = this;
   }
   return this;
+}
+
+template<typename T, unsigned int K>
+std::vector<KDNodeValue<T, K>>
+KDTree<T, K>::EigenToKD(std::vector<Eigen::Matrix<T, K, 1>>& values)
+{
+  std::vector<KDNodeValue<T, K>> point_nodes;
+  CHECK_GE(values.size(), 0);
+  for (size_t node_index = 0; node_index < values.size(); node_index++) {
+    Eigen::Matrix<T, K, 1> closest_value = values[0];
+    for(size_t target_index = 0; target_index < values.size(); target_index++) {
+      if (node_index == target_index) {
+        continue;
+      }
+      if ((values[node_index] - closest_value).norm() > (values[node_index] - values[target_index]).norm()) {
+        closest_value = values[target_index];
+      }
+    }
+    Eigen::Hyperplane<T, K> surface_line = Eigen::Hyperplane<T, K>::Through(values[node_index], closest_value);
+    Eigen::Matrix<T, K, 1> normal = surface_line.normal();
+    point_nodes.emplace_back(values[node_index], normal, node_index);
+  }
+  return point_nodes;
 }
 
 template<typename T, unsigned int K>

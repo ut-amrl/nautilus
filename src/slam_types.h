@@ -30,6 +30,7 @@
 #include "eigen3/Eigen/Geometry"
 
 #include "math_util.h"
+#include "kdtree.h"
 
 
 namespace slam_types {
@@ -113,13 +114,17 @@ struct LidarFactor {
     // IDs of the poses
     uint64_t pose_id;
     std::vector<Eigen::Vector2f> pointcloud;
+    KDTree<float, 2>* pointcloud_tree;
     LidarFactor() {
       pose_id = 0;
     }
     LidarFactor(uint64_t pose_id,
                 std::vector<Eigen::Vector2f>& pointcloud) :
                 pose_id(pose_id),
-                pointcloud(pointcloud) {}
+                pointcloud(pointcloud)
+                {
+      pointcloud_tree = new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(pointcloud));
+    }
 };
 
 struct RobotPose {

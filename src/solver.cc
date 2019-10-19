@@ -20,6 +20,10 @@
 #include "pointcloud_helpers.h"
 #include "gui_helpers.h"
 #include <queue>
+#include "kdtree.h"
+
+#define LIDAR_CONSTRAINT_AMOUNT 10
+#define OUTLIER_THRESHOLD 0.80
 
 using std::vector;
 using slam_types::OdometryFactor2D;
@@ -94,36 +98,34 @@ struct LIDARPointResidual {
                      T* residuals) const {
       typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
-      typedef Eigen::Hyperplane<T,2> Line;
-      Line surface_line = Line::Through(target_point_1.cast<T>(), target_point_2.cast<T>());
       Affine2T source_to_world = PoseArrayToAffine(&source_pose[2], &source_pose[0]);
       Affine2T target_to_world = PoseArrayToAffine(&target_pose[2], &target_pose[0]);
       Vector2T source_pointT = source_point.cast<T>();
-      Vector2T target_pointT = target_point_1.cast<T>();
+      Vector2T target_pointT = target_point.cast<T>();
       // Transform source_point into the frame of target_point
       source_pointT = target_to_world.inverse() * source_to_world * source_pointT;
-      T result = surface_line.normal().dot(source_pointT - target_pointT);
+      T result = target_normal.cast<T>().dot(source_pointT - target_pointT);
       residuals[0] = result;
       //residuals[1] = result.y();
       return true;
     }
 
     LIDARPointResidual(Vector2f& source_point,
-                       Vector2f& target_point_1,
-                       Vector2f& target_point_2) :
+                       Vector2f& target_point,
+                       Vector2f& target_normal) :
             source_point(source_point),
-            target_point_1(target_point_1),
-            target_point_2(target_point_2) {}
+            target_point(target_point),
+            target_normal(target_normal) {}
 
     static AutoDiffCostFunction<LIDARPointResidual, 1, 3, 3>* create(
-            Vector2f& source_point, Vector2f& target_point_1, Vector2f& target_point_2) {
-      LIDARPointResidual *residual = new LIDARPointResidual(source_point, target_point_1, target_point_2);
+            Vector2f& source_point, Vector2f& target_point, Vector2f& target_normal) {
+      LIDARPointResidual *residual = new LIDARPointResidual(source_point, target_point, target_normal);
       return new AutoDiffCostFunction<LIDARPointResidual, 1, 3, 3>(residual);
     }
 
     const Vector2f source_point;
-    const Vector2f target_point_1;
-    const Vector2f target_point_2;
+    const Vector2f target_point;
+    const Vector2f target_normal;
 };
 
 class VisualizationCallback : public ceres::IterationCallback {
@@ -201,30 +203,20 @@ void AddOdomFactors(const slam_types::SLAMProblem2D& problem,
   }
 }
 
-
-#define LIDAR_CONSTRAINT_AMOUNT 10
-
 struct LidarPointMatch {
   Vector2f source_point;
-  Vector2f target_point_1;
-  Vector2f target_point_2;
+  Vector2f target_point;
+  Vector2f target_normal;
   double *source_pose;
   double *target_pose;
   
-  LidarPointMatch(Vector2f source_point, Vector2f target_point_1, Vector2f target_point_2, double* source_pose, double* target_pose) :
-                  source_point(source_point), target_point_1(target_point_1), target_point_2(target_point_2), source_pose(source_pose), target_pose(target_pose) {}
+  LidarPointMatch(Vector2f source_point, Vector2f target_point, Vector2f target_normal, double* source_pose, double* target_pose) :
+                  source_point(source_point), target_point(target_point), target_normal(target_normal), source_pose(source_pose), target_pose(target_pose) {}
   
 };
 
-void AddToQueue(std::queue<Vector2f>& queue, Vector2f& value) {
-  queue.push(value);
-  if (queue.size() > 2) {
-    queue.pop();
-  }
-}
-
 // Source moves to target.
-double GetClosestTargetPoints(const slam_types::SLAMProblem2D& problem,
+double GetClosestTargetPointAndNormal(const slam_types::SLAMProblem2D& problem,
                               vector<slam_types::SLAMNodeSolution2D>* solution_ptr,
                               vector<LidarPointMatch>* matches,
                               size_t source_node_index,
@@ -237,41 +229,40 @@ double GetClosestTargetPoints(const slam_types::SLAMProblem2D& problem,
   SLAMNodeSolution2D& target_solution = solution[target_node_index];
   const vector<Vector2f>& source_pointcloud =
           problem.nodes[source_node_index].lidar_factor.pointcloud;
-  const vector<Vector2f>& target_pointcloud =
-          problem.nodes[target_node_index].lidar_factor.pointcloud;
+  LidarFactor target_lidar =
+          problem.nodes[target_node_index].lidar_factor;
   Eigen::Affine2f source_to_world =
           PoseArrayToAffine(&source_solution.pose[2], &source_solution.pose[0]).cast<float>();
   Eigen::Affine2f target_to_world =
           PoseArrayToAffine(&target_solution.pose[2], &target_solution.pose[0]).cast<float>();
   for (const Vector2f& source_point : source_pointcloud) {
+    // Transform the source point to the target frame.
     Vector2f source_point_transformed =
             target_to_world.inverse() * source_to_world * source_point;
-    CHECK_GE(target_pointcloud.size(), 1);
-    Vector2f closest_target = target_pointcloud[0];
-    std::queue<Vector2f> closest;
-    closest.push(target_pointcloud[0]);
-    closest.push(target_pointcloud[1]);
-    float min_distance = (closest_target - source_point_transformed).norm();
-    for(const Vector2f& target_point : target_pointcloud) {
-      if ((target_point - source_point_transformed).norm() < min_distance) {
-        closest_target = target_point;
-        AddToQueue(closest, closest_target);
-        min_distance = (target_point - source_point_transformed).norm();
-      }
-    }
-    difference += (closest_target - source_point_transformed).norm();
-    // Outlier rejection.
-    if ((closest_target - source_point_transformed).norm() > 0.20) {
+    // Get the closest point and the closest surface normal.
+    KDNodeValue<float, 2> closest_target;
+    float dist = target_lidar.pointcloud_tree->FindNearestPoint(source_point_transformed,
+                                                                OUTLIER_THRESHOLD,
+                                                                &closest_target);
+    // Outlier rejection
+    if (dist >= OUTLIER_THRESHOLD) {
+      // No point was found within our given threshold.
       continue;
     }
+    difference += dist;
     // Minimize distance between closest points!
     Vector2f source_point_modifiable = source_point;
-    matches->emplace_back(source_point_modifiable, closest.back(), closest.front(), source_solution.pose, target_solution.pose);
+    matches->emplace_back(source_point_modifiable,
+                          closest_target.point,
+                          closest_target.normal,
+                          source_solution.pose,
+                          target_solution.pose);
     // Add a line from the matches that we are using.
+    // Transform everything to the world frame.
     source_point_transformed = target_to_world * source_point_transformed;
-    closest_target = target_to_world * closest_target;
+    Vector2f closest_point_in_target = target_to_world * closest_target.point;
     Eigen::Vector3f source_3d(source_point_transformed.x(), source_point_transformed.y(), 0.0f);
-    Eigen::Vector3f target_3d(closest_target.x(), closest_target.y(), 0.0f);
+    Eigen::Vector3f target_3d(closest_point_in_target.x(), closest_point_in_target.y(), 0.0f);
     gui_helpers::AddLine(source_3d, target_3d, gui_helpers::Color4f::kBlue, &match_line_list);
   }
   return difference;
@@ -279,7 +270,7 @@ double GetClosestTargetPoints(const slam_types::SLAMProblem2D& problem,
 
 void AddLidarMatchResiduals(ceres::Problem* ceres_problem, vector<LidarPointMatch>& matches) {
   for (LidarPointMatch& match : matches) {
-    ceres_problem->AddResidualBlock(LIDARPointResidual::create(match.source_point, match.target_point_1, match.target_point_2),
+    ceres_problem->AddResidualBlock(LIDARPointResidual::create(match.source_point, match.target_point, match.target_normal),
               NULL,
               match.source_pose,
               match.target_pose);
@@ -331,7 +322,7 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
            node_j_index < node_i_index;
            node_j_index++) {
         // Add all the points to this, make a new problem. Minimize, continue.
-        difference += GetClosestTargetPoints(problem,
+        difference += GetClosestTargetPointAndNormal(problem,
                                             &solution,
                                             &current_matches,
                                             node_j_index,
