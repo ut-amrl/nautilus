@@ -296,16 +296,24 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
     solution[i] = sol_node;
   }
   // Setup ceres for evaluation of the problem.
-  ceres::Solver::Options options;
+  ceres::Problem global_problem;
+  ceres::Solver::Options global_options;
+  ceres::Solver::Options local_options;
   ceres::Solver::Summary summary;
-  options.linear_solver_type = ceres::DENSE_QR;
-  options.minimizer_progress_to_stdout = false;
-  options.num_threads = 4;
-  // Add the visualization.
+  global_options.linear_solver_type = ceres::DENSE_QR;
+  global_options.minimizer_progress_to_stdout = false;
+  global_options.num_threads = 4;
+  local_options.linear_solver_type = ceres::DENSE_QR;
+  local_options.minimizer_progress_to_stdout = false;
+  local_options.num_threads = 4;
+  /* 
+   * Add the visualization to the global problem.
+   * We don't want to run it on each iteration of the local problem
+   * because that will slow things down.
+   */
   VisualizationCallback vis_callback(problem, &solution, n);
-  options.callbacks.push_back(&vis_callback);
-  // Continually solve and minimize.
-  vector<vector<LidarPointMatch>> past_constraints;
+  //global_options.callbacks.push_back(&vis_callback);
+  AddOdomFactors(problem, solution, &global_problem);
   for (size_t node_i_index = 0;
        node_i_index < problem.nodes.size();
        node_i_index++) {
@@ -317,8 +325,8 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
       current_matches.clear();
       last_difference = difference;
       difference = 0;
-      ceres::Problem ceres_problem;
-      AddOdomFactors(problem, solution, &ceres_problem);
+      ceres::Problem local_problem;
+      AddOdomFactors(problem, solution, &local_problem);
       for (size_t node_j_index = std::max((long)(node_i_index) - LIDAR_CONSTRAINT_AMOUNT, 0l);
            node_j_index < node_i_index;
            node_j_index++) {
@@ -329,16 +337,17 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
                                             node_j_index,
                                             node_i_index);
       }
-      AddLidarMatchResiduals(&ceres_problem, current_matches);
-      for (vector<LidarPointMatch> matches : past_constraints) {
-        AddLidarMatchResiduals(&ceres_problem, matches);
-      }
-      ceres::Solve(options, &ceres_problem, &summary);
-    } while(abs(difference - last_difference) > 0.03);
+      AddLidarMatchResiduals(&local_problem, current_matches);
+      ceres::Solve(local_options, &local_problem, &summary);
+    } while(abs(difference - last_difference) > 0.05);
+    AddLidarMatchResiduals(&global_problem, current_matches);
+    ceres::Solve(global_options, &global_problem, &summary);
+    // Sometimes ceres doesn't actually call the visualization.
     vis_callback.PubVisualization();
-    past_constraints.emplace_back(current_matches);
-    printf("Solved for 1 i_node\n");
+    printf("Solved for a lidar node.\n");
   }
+  // Call the visualization once more to see the finished optimization.
+  vis_callback.PubVisualization();
   return true;
 }
 
