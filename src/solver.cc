@@ -109,12 +109,13 @@ struct LIDARPointBlobResidual {
       typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
       Affine2T source_to_world = PoseArrayToAffine(&source_pose[2], &source_pose[0]);
-      Affine2T target_to_world = PoseArrayToAffine(&target_pose[2], &target_pose[0]);
+      Affine2T world_to_target = PoseArrayToAffine(&target_pose[2], &target_pose[0]).inverse();
+      Affine2T source_to_target = world_to_target * source_to_world;
       for (size_t index = 0; index < source_points.size(); index++) {
         Vector2T source_pointT = source_points[index].cast<T>();
         Vector2T target_pointT = target_points[index].cast<T>();
         // Transform source_point into the frame of target_point
-        source_pointT = target_to_world.inverse() * source_to_world * source_pointT;
+        source_pointT = source_to_target * source_pointT;
         T result = target_normals[index].cast<T>().dot(source_pointT - target_pointT);
         residuals[index] = result;
       }
