@@ -1,6 +1,0 @@
-#0  0x00005555555e8264 in ceres::internal::Program::SetParameterOffsetsAndIndex() ()
-#1  0x00005555555f7747 in ceres::Solver::Solve(ceres::Solver::Options const&, ceres::Problem*, ceres::Solver::Summary*) ()
-#2  0x00005555555f9289 in ceres::Solve(ceres::Solver::Options const&, ceres::Problem*, ceres::Solver::Summary*) ()
-#3  0x00005555555d1932 in solver::SolveSLAM (problem=..., n=...) at /home/jack/Dev/Lab/lidar_slam/src/solver.cc:254
-#4  0x00005555555c0750 in main (argc=<optimized out>, argv=<optimized out>) at /home/jack/Dev/Lab/lidar_slam/src/main.cc:93
-

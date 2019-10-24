@@ -12,7 +12,7 @@ using slam_types::LidarFactor;
 using slam_types::RobotPose2D;
 using slam_types::OdometryFactor2D;
 using slam_types::SLAMNode2D;
-using slam_types::SLAMProblem2D;
+using slam_types::GetPointCorrespondences;
 
 void SLAMTypeBuilder::AddOdomFactor(
         std::vector<OdometryFactor2D>& odom_factors) {
@@ -84,7 +84,7 @@ void SLAMTypeBuilder::OdometryCallback(nav_msgs::Odometry& odometry) {
                                       odometry.pose.pose.position.y);
 }
 
-slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
-  SLAMProblem2D slam_problem(nodes_, odom_factors_);
+slam_types::GetPointCorrespondences SLAMTypeBuilder::GetSlamProblem() {
+    GetPointCorrespondences slam_problem(nodes_, odom_factors_);
   return slam_problem;
 }

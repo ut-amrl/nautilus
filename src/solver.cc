@@ -35,6 +35,16 @@ using slam_types::SLAMNodeSolution2D;
 
 visualization_msgs::Marker match_line_list;
 
+struct PointCorrespondences {
+  vector<Vector2f> source_points;
+  vector<Vector2f> target_points;
+  vector<Vector2f> target_normals;
+  double *source_pose;
+  double *target_pose;
+  PointCorrespondences(double* source_pose, double* target_pose)
+  : source_pose(source_pose), target_pose(target_pose) {}
+};
+
 template<typename T> Eigen::Transform<T, 2, Eigen::Affine>
 PoseArrayToAffine(const T* rotation, const T* translation) {
   typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
@@ -91,7 +101,7 @@ struct OdometryResidual {
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   };
 
-struct LIDARPointResidual {
+struct LIDARPointBlobResidual {
     template <typename T>
     bool operator() (const T* source_pose,
                      const T* target_pose,
@@ -100,39 +110,40 @@ struct LIDARPointResidual {
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
       Affine2T source_to_world = PoseArrayToAffine(&source_pose[2], &source_pose[0]);
       Affine2T target_to_world = PoseArrayToAffine(&target_pose[2], &target_pose[0]);
-      Vector2T source_pointT = source_point.cast<T>();
-      Vector2T target_pointT = target_point.cast<T>();
-      // Transform source_point into the frame of target_point
-      source_pointT = target_to_world.inverse() * source_to_world * source_pointT;
-      T result = target_normal.cast<T>().dot(source_pointT - target_pointT);
-      residuals[0] = result;
-      //residuals[1] = result.y();
+      for (size_t index = 0; index < source_points.size(); index++) {
+        Vector2T source_pointT = source_points[index].cast<T>();
+        Vector2T target_pointT = target_points[index].cast<T>();
+        // Transform source_point into the frame of target_point
+        source_pointT = target_to_world.inverse() * source_to_world * source_pointT;
+        T result = target_normals[index].cast<T>().dot(source_pointT - target_pointT);
+        residuals[index] = result;
+      }
       return true;
     }
 
-    LIDARPointResidual(Vector2f& source_point,
-                       Vector2f& target_point,
-                       Vector2f& target_normal) :
-            source_point(source_point),
-            target_point(target_point),
-            target_normal(target_normal) {}
-
-    static AutoDiffCostFunction<LIDARPointResidual, 1, 3, 3>* create(
-            Vector2f& source_point, Vector2f& target_point, Vector2f& target_normal) {
-      LIDARPointResidual *residual = new LIDARPointResidual(source_point, target_point, target_normal);
-      return new AutoDiffCostFunction<LIDARPointResidual, 1, 3, 3>(residual);
+    LIDARPointBlobResidual(PointCorrespondences& corr) :
+                           source_points(corr.source_points),
+                           target_points(corr.target_points),
+                           target_normals(corr.target_normals) {
+      CHECK_EQ(source_points.size(), target_points.size());
+      CHECK_EQ(target_points.size(), target_normals.size());
     }
 
-    const Vector2f source_point;
-    const Vector2f target_point;
-    const Vector2f target_normal;
+    static AutoDiffCostFunction<LIDARPointBlobResidual, ceres::DYNAMIC, 3, 3>* create(PointCorrespondences& corr) {
+      LIDARPointBlobResidual *residual = new LIDARPointBlobResidual(corr);
+      return new AutoDiffCostFunction<LIDARPointBlobResidual, ceres::DYNAMIC, 3, 3>(residual, corr.source_points.size());
+    }
+
+    const vector<Vector2f> source_points;
+    const vector<Vector2f> target_points;
+    const vector<Vector2f> target_normals;
 };
 
 class VisualizationCallback : public ceres::IterationCallback {
 public:
-    VisualizationCallback(const slam_types::SLAMProblem2D& problem,
-            const vector<slam_types::SLAMNodeSolution2D>* solution,
-            ros::NodeHandle& n) : problem(problem), solution(solution) {
+    VisualizationCallback(const slam_types::GetPointCorrespondences& problem,
+                          const vector<slam_types::SLAMNodeSolution2D>* solution,
+                          ros::NodeHandle& n) : problem(problem), solution(solution) {
       pointcloud_helpers::InitPointcloud(&all_points_marker);
       pointcloud_helpers::InitPointcloud(&new_points_marker);
       all_points.clear();
@@ -147,7 +158,7 @@ public:
     void PubVisualization() {
       const vector<slam_types::SLAMNodeSolution2D>& solution_c = *solution;
       vector<Vector2f> new_points;
-      for (size_t i = 0; i < solution_c.size() && solution_c[i].visualize; i++) {
+      for (size_t i = 0; i < solution_c.size(); i++) {
         if (new_points.size() > 0) {
           all_points.insert(all_points.end(), new_points.begin(), new_points.end());
                 new_points.clear();
@@ -179,7 +190,7 @@ private:
     sensor_msgs::PointCloud2 all_points_marker;
     sensor_msgs::PointCloud2 new_points_marker;
     std::vector<Vector2f> all_points;
-    const slam_types::SLAMProblem2D& problem;
+    const slam_types::GetPointCorrespondences& problem;
     const vector<slam_types::SLAMNodeSolution2D>* solution;
     ros::Publisher point_pub;
     ros::Publisher pose_pub;
@@ -188,10 +199,9 @@ private:
     visualization_msgs::Marker pose_array;
 };
 
-void AddOdomFactors(const slam_types::SLAMProblem2D& problem,
+void AddOdomFactors(const slam_types::GetPointCorrespondences& problem,
                     vector<slam_types::SLAMNodeSolution2D>& solution,
                     ceres::Problem* ceres_problem) {
-
   for (const OdometryFactor2D& odom_factor : problem.odometry_factors) {
     CHECK_LT(odom_factor.pose_i, odom_factor.pose_j);
     CHECK_GT(solution.size(), odom_factor.pose_i);
@@ -203,26 +213,14 @@ void AddOdomFactors(const slam_types::SLAMProblem2D& problem,
   }
 }
 
-struct LidarPointMatch {
-  Vector2f source_point;
-  Vector2f target_point;
-  Vector2f target_normal;
-  double *source_pose;
-  double *target_pose;
-  
-  LidarPointMatch(Vector2f source_point, Vector2f target_point, Vector2f target_normal, double* source_pose, double* target_pose) :
-                  source_point(source_point), target_point(target_point), target_normal(target_normal), source_pose(source_pose), target_pose(target_pose) {}
-  
-};
-
 // Source moves to target.
-double GetClosestTargetPointAndNormal(const slam_types::SLAMProblem2D& problem,
-                              vector<slam_types::SLAMNodeSolution2D>* solution_ptr,
-                              vector<LidarPointMatch>* matches,
-                              size_t source_node_index,
-                              size_t target_node_index) {
+double GetPointCorrespondences(const slam_types::GetPointCorrespondences& problem,
+                               vector<slam_types::SLAMNodeSolution2D>* solution_ptr,
+                               PointCorrespondences* point_correspondences,
+                               size_t source_node_index,
+                               size_t target_node_index) {
   gui_helpers::ClearMarker(&match_line_list);
-  // Loop over the two point clouds finding the closest points.
+  // Get all the data we might need in an easier to use format.
   double difference = 0.0;
   vector<SLAMNodeSolution2D>& solution = *solution_ptr;
   SLAMNodeSolution2D& source_solution = solution[source_node_index];
@@ -235,6 +233,7 @@ double GetClosestTargetPointAndNormal(const slam_types::SLAMProblem2D& problem,
           PoseArrayToAffine(&source_solution.pose[2], &source_solution.pose[0]).cast<float>();
   Eigen::Affine2f target_to_world =
           PoseArrayToAffine(&target_solution.pose[2], &target_solution.pose[0]).cast<float>();
+  // Create a point correspondence to track the closest points.
   for (const Vector2f& source_point : source_pointcloud) {
     // Transform the source point to the target frame.
     Vector2f source_point_transformed =
@@ -252,13 +251,12 @@ double GetClosestTargetPointAndNormal(const slam_types::SLAMProblem2D& problem,
     difference += dist;
     // Minimize distance between closest points!
     Vector2f source_point_modifiable = source_point;
-    matches->emplace_back(source_point_modifiable,
-                          closest_target.point,
-                          closest_target.normal,
-                          source_solution.pose,
-                          target_solution.pose);
+    point_correspondences->source_points.push_back(source_point_modifiable);
+    point_correspondences->target_points.push_back(closest_target.point);
+    point_correspondences->target_normals.push_back(closest_target.normal);
     // Add a line from the matches that we are using.
     // Transform everything to the world frame.
+    // This is for the visualization.
     source_point_transformed = target_to_world * source_point_transformed;
     Vector2f closest_point_in_target = target_to_world * closest_target.point;
     Eigen::Vector3f source_3d(source_point_transformed.x(), source_point_transformed.y(), 0.0f);
@@ -268,16 +266,7 @@ double GetClosestTargetPointAndNormal(const slam_types::SLAMProblem2D& problem,
   return difference;
 }
 
-void AddLidarMatchResiduals(ceres::Problem* ceres_problem, vector<LidarPointMatch>& matches) {
-  for (LidarPointMatch& match : matches) {
-    ceres_problem->AddResidualBlock(LIDARPointResidual::create(match.source_point, match.target_point, match.target_normal),
-              NULL,
-              match.source_pose,
-              match.target_pose);
-  }
-}
-
-bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
+bool solver::SolveSLAM(slam_types::GetPointCorrespondences& problem, ros::NodeHandle& n) {
   // Copy all the data to a list that we are going to modify as we optimize.
   vector<slam_types::SLAMNodeSolution2D> solution(problem.nodes.size());
   for (size_t i = 0; i < problem.nodes.size(); i++) {
@@ -287,56 +276,42 @@ bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
     solution[i] = sol_node;
   }
   // Setup ceres for evaluation of the problem.
-  ceres::Problem global_problem;
-  ceres::Solver::Options global_options;
-  ceres::Solver::Options local_options;
+  ceres::Solver::Options options;
   ceres::Solver::Summary summary;
-  global_options.linear_solver_type = ceres::DENSE_QR;
-  global_options.minimizer_progress_to_stdout = false;
-  global_options.num_threads = 4;
-  local_options.linear_solver_type = ceres::DENSE_QR;
-  local_options.minimizer_progress_to_stdout = false;
-  local_options.num_threads = 4;
-  /* 
-   * Add the visualization to the global problem.
-   * We don't want to run it on each iteration of the local problem
-   * because that will slow things down.
-   */
+  options.linear_solver_type = ceres::DENSE_QR;
+  options.minimizer_progress_to_stdout = false;
+  options.num_threads = 4;
   VisualizationCallback vis_callback(problem, &solution, n);
-  //global_options.callbacks.push_back(&vis_callback);
-  AddOdomFactors(problem, solution, &global_problem);
-  for (size_t node_i_index = 0;
-       node_i_index < problem.nodes.size();
-       node_i_index++) {
-    double difference = 0;
-    double last_difference = 0;
-    solution[node_i_index].visualize = true;
-    vector<LidarPointMatch> current_matches;
-    do {
-      current_matches.clear();
-      last_difference = difference;
-      difference = 0;
-      ceres::Problem local_problem;
-      AddOdomFactors(problem, solution, &local_problem);
-      for (size_t node_j_index = std::max((long)(node_i_index) - LIDAR_CONSTRAINT_AMOUNT, 0l);
-           node_j_index < node_i_index;
-           node_j_index++) {
-        // Add all the points to this, make a new problem. Minimize, continue.
-        difference += GetClosestTargetPointAndNormal(problem,
-                                            &solution,
-                                            &current_matches,
-                                            node_j_index,
-                                            node_i_index);
+  options.callbacks.push_back(&vis_callback);
+  double difference = 0;
+  double last_difference = 0;
+  do {
+    last_difference = difference;
+    difference = 0;
+    ceres::Problem ceres_problem;
+    AddOdomFactors(problem, solution, &ceres_problem);
+    for (size_t node_i_index = 0;
+        node_i_index < problem.nodes.size();
+        node_i_index++) {
+      // Set the first pose to be constant.
+      if (node_i_index == 0) {
+        ceres_problem.SetParameterBlockConstant(solution[0].pose);
       }
-      AddLidarMatchResiduals(&local_problem, current_matches);
-      ceres::Solve(local_options, &local_problem, &summary);
-    } while(abs(difference - last_difference) > 0.05);
-    AddLidarMatchResiduals(&global_problem, current_matches);
-    ceres::Solve(global_options, &global_problem, &summary);
-    // Sometimes ceres doesn't actually call the visualization.
-    vis_callback.PubVisualization();
-    printf("Solved for a lidar node.\n");
-  }
+      for (size_t node_j_index = std::max((long)(node_i_index) - LIDAR_CONSTRAINT_AMOUNT, 0l);
+          node_j_index < node_i_index;
+          node_j_index++) {
+        // Add all the points to this, make a new problem. Minimize, continue.
+        PointCorrespondences correspondence(solution[node_j_index].pose, solution[node_i_index].pose);
+        difference += GetPointCorrespondences(problem,
+                                              &solution,
+                                              &correspondence,
+                                              node_j_index,
+                                              node_i_index);
+        ceres_problem.AddResidualBlock(LIDARPointBlobResidual::create(correspondence), NULL, correspondence.source_pose, correspondence.target_pose);
+      }
+    }
+    ceres::Solve(options, &ceres_problem, &summary);
+  } while(abs(difference - last_difference) > 0.05);
   // Call the visualization once more to see the finished optimization.
   vis_callback.PubVisualization();
   return true;

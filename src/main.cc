@@ -26,7 +26,7 @@ DEFINE_string(lidar_topic,
         "/velodyne_2dscan_high_beams",
         "The topic that lidar messages are published over.");
 
-slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path, ros::NodeHandle& n) {
+slam_types::GetPointCorrespondences ProcessBagFile(const char* bag_path, ros::NodeHandle& n) {
   /*
    * Loads and processes the bag file pulling out the lidar data
    * and the odometry data. Keeps track of the current pose and produces
@@ -37,7 +37,7 @@ slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path, ros::NodeHandle& 
     bag.open(bag_path, rosbag::bagmode::Read);
   } catch (rosbag::BagException& exception) {
     printf("Unable to read %s, reason %s:", bag_path, exception.what());
-    return slam_types::SLAMProblem2D();
+    return slam_types::GetPointCorrespondences();
   }
   // Get the topics we want
   vector<string> topics;
@@ -47,11 +47,11 @@ slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path, ros::NodeHandle& 
   SLAMTypeBuilder slam_builder;
   // Iterate through the bag
   // TODO: Temporary cut-off for testing.
-  //int TEMP_INDEX = 0;
-  //int CUTOFF = 1000;
+  int TEMP_INDEX = 0;
+  int CUTOFF = 1000;
   for (rosbag::View::iterator it = view.begin();
-       ros::ok() && it != view.end();
-       ++it) {
+       ros::ok() && it != view.end() && TEMP_INDEX < CUTOFF;
+       ++it, TEMP_INDEX++) {
     const rosbag::MessageInstance &message = *it;
     {
       // Load all the point clouds into memory.
@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
   ros::NodeHandle n;
   signal(SIGINT, SignalHandler);
   // Load and pre-process the data.
-  slam_types::SLAMProblem2D slam_problem =
+  slam_types::GetPointCorrespondences slam_problem =
           ProcessBagFile(FLAGS_bag_path.c_str(), n);
   // Load all the residuals into the problem and run!
   solver::SolveSLAM(slam_problem, n);

@@ -278,15 +278,15 @@ struct SLAMProblem {
             odometry_factors(odometry_factors) {}
 };
 
-struct SLAMProblem2D {
+struct GetPointCorrespondences {
     // Nodes in the pose graph.
     std::vector<SLAMNode2D> nodes;
     // Odometry / IMU correspondences.
     std::vector<OdometryFactor2D> odometry_factors;
     // Default constructor, do nothing.
-    SLAMProblem2D() = default;
+    GetPointCorrespondences() = default;
     // Convenience constructor for initialization.
-    SLAMProblem2D(std::vector<SLAMNode2D>  nodes,
+    GetPointCorrespondences(std::vector<SLAMNode2D>  nodes,
                   std::vector<OdometryFactor2D>  odometry_factors) :
             nodes(std::move(nodes)),
             odometry_factors(std::move(odometry_factors)){}
@@ -323,7 +323,6 @@ struct SLAMNodeSolution {
 };
 
 struct SLAMNodeSolution2D {
-    bool visualize = false;
     // Pose ID.
     uint64_t node_idx{};
     // Timestamp.

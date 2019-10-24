@@ -17,7 +17,7 @@ class SLAMTypeBuilder {
 public:
     void LidarCallback(sensor_msgs::LaserScan& laser_scan);
     void OdometryCallback(nav_msgs::Odometry& odometry);
-    slam_types::SLAMProblem2D GetSlamProblem();
+    slam_types::GetPointCorrespondences GetSlamProblem();
 private:
     uint64_t pose_id_ = 0;
     bool odom_initialized_ = false;
