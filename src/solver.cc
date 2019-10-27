@@ -14,7 +14,7 @@
 #include <utility>
 #include <queue>
 #include <algorithm>
-#include "valgrind/memcheck.h"
+#include <omp.h>
 #include "slam_types.h"
 #include "math_util.h"
 #include "pointcloud_helpers.h"
@@ -111,6 +111,7 @@ struct LIDARPointBlobResidual {
       Affine2T source_to_world = PoseArrayToAffine(&source_pose[2], &source_pose[0]);
       Affine2T world_to_target = PoseArrayToAffine(&target_pose[2], &target_pose[0]).inverse();
       Affine2T source_to_target = world_to_target * source_to_world;
+      #pragma omp parallel for
       for (size_t index = 0; index < source_points.size(); index++) {
         Vector2T source_pointT = source_points[index].cast<T>();
         Vector2T target_pointT = target_points[index].cast<T>();
