@@ -12,7 +12,7 @@
 
 
 namespace solver {
-  bool SolveSLAM(slam_types::GetPointCorrespondences&, ros::NodeHandle&);
+  bool SolveSLAM(slam_types::SLAMProblem2D&, ros::NodeHandle&);
 };
 
 

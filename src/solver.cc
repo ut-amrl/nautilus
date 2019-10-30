@@ -143,7 +143,7 @@ struct LIDARPointBlobResidual {
 
 class VisualizationCallback : public ceres::IterationCallback {
 public:
-    VisualizationCallback(const slam_types::GetPointCorrespondences& problem,
+    VisualizationCallback(const slam_types::SLAMProblem2D& problem,
                           const vector<slam_types::SLAMNodeSolution2D>* solution,
                           ros::NodeHandle& n) : problem(problem), solution(solution) {
       pointcloud_helpers::InitPointcloud(&all_points_marker);
@@ -192,7 +192,7 @@ private:
     sensor_msgs::PointCloud2 all_points_marker;
     sensor_msgs::PointCloud2 new_points_marker;
     std::vector<Vector2f> all_points;
-    const slam_types::GetPointCorrespondences& problem;
+    const slam_types::SLAMProblem2D& problem;
     const vector<slam_types::SLAMNodeSolution2D>* solution;
     ros::Publisher point_pub;
     ros::Publisher pose_pub;
@@ -201,7 +201,7 @@ private:
     visualization_msgs::Marker pose_array;
 };
 
-void AddOdomFactors(const slam_types::GetPointCorrespondences& problem,
+void AddOdomFactors(const slam_types::SLAMProblem2D& problem,
                     vector<slam_types::SLAMNodeSolution2D>& solution,
                     ceres::Problem* ceres_problem) {
   for (const OdometryFactor2D& odom_factor : problem.odometry_factors) {
@@ -216,7 +216,7 @@ void AddOdomFactors(const slam_types::GetPointCorrespondences& problem,
 }
 
 // Source moves to target.
-double GetPointCorrespondences(const slam_types::GetPointCorrespondences& problem,
+double GetPointCorrespondences(const slam_types::SLAMProblem2D& problem,
                                vector<slam_types::SLAMNodeSolution2D>* solution_ptr,
                                PointCorrespondences* point_correspondences,
                                size_t source_node_index,
@@ -268,7 +268,7 @@ double GetPointCorrespondences(const slam_types::GetPointCorrespondences& proble
   return difference;
 }
 
-bool solver::SolveSLAM(slam_types::GetPointCorrespondences& problem, ros::NodeHandle& n) {
+bool solver::SolveSLAM(slam_types::SLAMProblem2D& problem, ros::NodeHandle& n) {
   // Copy all the data to a list that we are going to modify as we optimize.
   vector<slam_types::SLAMNodeSolution2D> solution(problem.nodes.size());
   for (size_t i = 0; i < problem.nodes.size(); i++) {

@@ -20,6 +20,7 @@ FIND_PACKAGE(Ceres REQUIRED)
 INCLUDE_DIRECTORIES(${CERES_INCLUDE_DIRS})
 FIND_PACKAGE(OpenCV REQUIRED)
 INCLUDE_DIRECTORIES(${OpenCV_INCLUDE_DIRS})
+FIND_PACKAGE(OpenMP REQUIRED)
 
 INCLUDE($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
 
@@ -36,7 +37,7 @@ SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
 
 rosbuild_genmsg()
 
-SET(libs roslib roscpp rosbag console_bridge cv_bridge glog gflags opencv_xfeatures2d boost_system m)
+SET(libs roslib roscpp rosbag console_bridge cv_bridge glog gflags opencv_xfeatures2d boost_system m OpenMP::OpenMP_CXX)
 
 ROSBUILD_ADD_EXECUTABLE(lidar_slam
         src/main.cc
