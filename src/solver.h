@@ -17,6 +17,7 @@
 
 using std::vector;
 using Eigen::Vector2f;
+using slam_types::OdometryFactor2D;
 
 class Solver {
  public:
@@ -32,14 +33,15 @@ class Solver {
   Solver(double translation_weight,
          double rotation_weight,
          double stopping_accuracy);
-  bool SolveSLAM(slam_types::SLAMProblem2D&, ros::NodeHandle&);
+  vector<slam_types::SLAMNodeSolution2D>
+    SolveSLAM(slam_types::SLAMProblem2D&, ros::NodeHandle&);
   double GetPointCorrespondences(const slam_types::SLAMProblem2D& problem,
                                  vector<slam_types::SLAMNodeSolution2D>*
                                    solution_ptr,
                                  PointCorrespondences* point_correspondences,
                                  size_t source_node_index,
                                  size_t target_node_index);
-  void AddOdomFactors(const slam_types::SLAMProblem2D& problem,
+  void AddOdomFactors(const vector<OdometryFactor2D>& odom_factors,
                       vector<slam_types::SLAMNodeSolution2D>& solution,
                       ceres::Problem* ceres_problem);
 

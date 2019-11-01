@@ -174,7 +174,7 @@ class VisualizationCallback : public ceres::IterationCallback {
                                   &pose_array);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
                                   gui_helpers::Color4f::kBlue,
-                                  0.01,
+                                  0.003,
                                   0.0,
                                   0.0,
                                   &match_line_list);
@@ -234,10 +234,10 @@ class VisualizationCallback : public ceres::IterationCallback {
   visualization_msgs::Marker pose_array;
 };
 
-void Solver::AddOdomFactors(const slam_types::SLAMProblem2D& problem,
+void Solver::AddOdomFactors(const vector<OdometryFactor2D>& odom_factors,
                             vector<slam_types::SLAMNodeSolution2D>& solution,
                             ceres::Problem* ceres_problem) {
-  for (const OdometryFactor2D& odom_factor : problem.odometry_factors) {
+  for (const OdometryFactor2D& odom_factor : odom_factors) {
     CHECK_LT(odom_factor.pose_i, odom_factor.pose_j);
     CHECK_GT(solution.size(), odom_factor.pose_i);
     CHECK_GT(solution.size(), odom_factor.pose_j);
@@ -249,6 +249,10 @@ void Solver::AddOdomFactors(const slam_types::SLAMProblem2D& problem,
       solution[odom_factor.pose_i].pose,
       solution[odom_factor.pose_j].pose);
   }
+}
+
+bool NormalsWithin(Vector2f& normal_1, Vector2f& normal_2, double threshold) {
+  return acos(normal_1.dot(normal_2) / (normal_1.norm() * normal_2.norm())) < threshold;
 }
 
 // Source moves to target.
@@ -265,8 +269,8 @@ Solver::GetPointCorrespondences(const slam_types::SLAMProblem2D& problem,
   vector<SLAMNodeSolution2D>& solution = *solution_ptr;
   SLAMNodeSolution2D& source_solution = solution[source_node_index];
   SLAMNodeSolution2D& target_solution = solution[target_node_index];
-  const vector<Vector2f>& source_pointcloud =
-    problem.nodes[source_node_index].lidar_factor.pointcloud;
+  LidarFactor source_lidar =
+    problem.nodes[source_node_index].lidar_factor;
   LidarFactor target_lidar =
     problem.nodes[target_node_index].lidar_factor;
   Eigen::Affine2f source_to_world =
@@ -276,16 +280,44 @@ Solver::GetPointCorrespondences(const slam_types::SLAMProblem2D& problem,
     PoseArrayToAffine(&target_solution.pose[2],
                       &target_solution.pose[0]).cast<float>();
   // Create a point correspondence to track the closest points.
-  for (const Vector2f& source_point : source_pointcloud) {
+  for (const Vector2f& source_point : source_lidar.pointcloud) {
     // Transform the source point to the target frame.
     Vector2f source_point_transformed =
       target_to_world.inverse() * source_to_world * source_point;
     // Get the closest point and the closest surface normal.
     KDNodeValue<float, 2> closest_target;
-    float dist =
-      target_lidar.pointcloud_tree->FindNearestPoint(source_point_transformed,
+    vector<KDNodeValue<float, 2>> neighbors;
+    target_lidar.pointcloud_tree->FindNeighborPoints(source_point_transformed,
                                                      OUTLIER_THRESHOLD,
-                                                     &closest_target);
+                                                     &neighbors);
+    KDNodeValue<float, 2> source_point_with_normal;
+    float found_dist =
+      source_lidar.pointcloud_tree->FindNearestPoint(source_point,
+                                                     OUTLIER_THRESHOLD,
+                                                     &source_point_with_normal);
+    if (found_dist != 0.0) {
+      std::cerr << "Something is wrong, this point is not in its KDTree!" << std::endl;
+      exit(1);
+    }
+    float dist = OUTLIER_THRESHOLD;
+    // Sort the neighbor points so we will always get the smallest distance, and best
+    // normal.
+    std::sort(neighbors.begin(),
+              neighbors.end(),
+              [&source_point_transformed](KDNodeValue<float, 2> point_1,
+                                          KDNodeValue<float, 2> point_2) {
+      return (source_point_transformed - point_1.point).norm() <
+             (source_point_transformed - point_2.point).norm();
+    });
+    for (KDNodeValue<float, 2> current_target : neighbors) {
+      if (NormalsWithin(current_target.normal,
+                        source_point_with_normal.normal,
+                        M_PI / 9)) {
+        closest_target = current_target;
+        dist = (source_point_transformed - current_target.point).norm();
+        break;
+      }
+    }
     // Outlier rejection
     if (dist >= OUTLIER_THRESHOLD) {
       // No point was found within our given threshold.
@@ -314,7 +346,8 @@ Solver::GetPointCorrespondences(const slam_types::SLAMProblem2D& problem,
   return difference;
 }
 
-bool Solver::SolveSLAM(slam_types::SLAMProblem2D& problem,
+vector<slam_types::SLAMNodeSolution2D>
+Solver::SolveSLAM(slam_types::SLAMProblem2D& problem,
                        ros::NodeHandle& n) {
   // Copy all the data to a list that we are going to modify as we optimize.
   vector<slam_types::SLAMNodeSolution2D> solution(problem.nodes.size());
@@ -332,13 +365,14 @@ bool Solver::SolveSLAM(slam_types::SLAMProblem2D& problem,
   options.num_threads = 4;
   VisualizationCallback vis_callback(problem, &solution, n);
   options.callbacks.push_back(&vis_callback);
+  // Sliding window for solving for initial guesses.
   double difference = 0;
   double last_difference = 0;
   do {
     last_difference = difference;
     difference = 0;
     ceres::Problem ceres_problem;
-    AddOdomFactors(problem, solution, &ceres_problem);
+    AddOdomFactors(problem.odometry_factors, solution, &ceres_problem);
     for (size_t node_i_index = 0;
         node_i_index < problem.nodes.size();
         node_i_index++) {
@@ -374,7 +408,7 @@ bool Solver::SolveSLAM(slam_types::SLAMProblem2D& problem,
     vis_callback.PubVisualization();
     sleep(1);
   }
-  return true;
+  return solution;
 }
 
 Solver::Solver(double translation_weight,

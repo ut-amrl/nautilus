@@ -193,18 +193,18 @@ struct OdometryFactor {
   }
   // Convenience constructor: initialize everything.
   OdometryFactor(uint64_t pose_i,
-                         uint64_t pose_j,
-                         Eigen::Vector3f& translation,
-                         Eigen::Quaternionf& rotation) :
+                 uint64_t pose_j,
+                 Eigen::Vector3f& translation,
+                 Eigen::Quaternionf& rotation) :
       pose_i(pose_i), pose_j(pose_j), translation(translation),
       rotation(rotation) {}
 };
 
 struct OdometryFactor2D {
     // ID of first pose.
-    uint64_t pose_i{};
+    uint64_t pose_i{0};
     // ID of second pose.
-    uint64_t pose_j{};
+    uint64_t pose_j{0};
     // Translation to go from pose i to pose j.
     Eigen::Vector2f translation;
     // Rotation to go from pose i to pose j.
