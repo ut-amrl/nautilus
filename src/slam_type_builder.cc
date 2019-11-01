@@ -48,6 +48,7 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
     SLAMNode2D slam_node(pose_id_, laser_scan.header.stamp.toSec(), pose,
                          lidar_factor);
     nodes_.push_back(slam_node);
+    CHECK_EQ(nodes_.size(), pose_id_ + 1);
     if (pose_id_ > 0) {
       AddOdomFactor(odom_factors_);
     }
@@ -77,7 +78,6 @@ void SLAMTypeBuilder::OdometryCallback(nav_msgs::Odometry& odometry) {
     last_odom_translation_ = init_odom_translation_;
     last_odom_angle_ = init_odom_angle_;
     odom_initialized_ = true;
-    printf("Initial Angle in Rad: %lf\n", init_odom_angle_);
   }
   odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
   odom_translation_ = Eigen::Vector2f(odometry.pose.pose.position.x,

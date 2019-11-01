@@ -24,8 +24,8 @@
 
 #include "glog/logging.h"
 
-#ifndef SRC_MATH_MATH_UTIL_H_
-#define SRC_MATH_MATH_UTIL_H_
+#ifndef SRC_MATH_UTIL_H_
+#define SRC_MATH_UTIL_H_
 
 #define M_2PI (2.0 * M_PI)
 
@@ -220,4 +220,4 @@ unsigned int SolveCubic(const T& a, const T& b, const T& c, const T& d, T* r0,
 
 }  // namespace math_util
 
-#endif  // SRC_MATH_MATH_UTIL_H_
+#endif  // SRC_MATH_UTIL_H_

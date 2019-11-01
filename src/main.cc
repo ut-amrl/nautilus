@@ -1,32 +1,47 @@
-#include <ros/node_handle.h>
 #include <csignal>
 
+#include "ros/node_handle.h"
 #include "gflags/gflags.h"
 #include "glog/logging.h"
 #include "rosbag/bag.h"
 #include "rosbag/view.h"
 #include "sensor_msgs/LaserScan.h"
 #include "nav_msgs/Odometry.h"
-#include "slam_type_builder.h"
-#include "slam_types.h"
-#include "solver.h"
 
-#include "valgrind/memcheck.h"
+#include "./slam_type_builder.h"
+#include "./slam_types.h"
+#include "./solver.h"
 
 using std::string;
 using std::vector;
 
-DEFINE_string(bag_path,
-        "",
-        "The location of the bag file to run SLAM on.");
-DEFINE_string(odom_topic,
-        "/odometry/filtered",
-        "The topic that odometry messagse are published over.");
-DEFINE_string(lidar_topic,
-        "/velodyne_2dscan_high_beams",
-        "The topic that lidar messages are published over.");
+DEFINE_string(
+  bag_path,
+  "",
+  "The location of the bag file to run SLAM on.");
+DEFINE_string(
+  odom_topic,
+  "/odometry/filtered",
+  "The topic that odometry messagse are published over.");
+DEFINE_string(
+  lidar_topic,
+  "/velodyne_2dscan_high_beams",
+  "The topic that lidar messages are published over.");
+DEFINE_double(
+  translation_weight,
+  1.0,
+  "Weight multiplier for changing the odometry predicted translation.");
+DEFINE_double(
+  rotation_weight,
+  1.0,
+  "Weight multiplier for changing the odometry predicted rotation.");
+DEFINE_double(
+  stopping_accuracy,
+  0.05,
+  "Threshold of accuracy for stopping.");
 
-slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path, ros::NodeHandle& n) {
+slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path,
+                                         const ros::NodeHandle& n) {
   /*
    * Loads and processes the bag file pulling out the lidar data
    * and the odometry data. Keeps track of the current pose and produces
@@ -65,6 +80,7 @@ slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path, ros::NodeHandle& 
       }
     }
   }
+  bag.close();
   return slam_builder.GetSlamProblem();
 }
 
@@ -86,7 +102,13 @@ int main(int argc, char** argv) {
   // Load and pre-process the data.
   slam_types::SLAMProblem2D slam_problem =
           ProcessBagFile(FLAGS_bag_path.c_str(), n);
+  CHECK_GT(slam_problem.nodes.size(), 1)
+    << "Not enough nodes were processed"
+    << "you probably didn't specify the correct topics!\n";
   // Load all the residuals into the problem and run!
-  solver::SolveSLAM(slam_problem, n);
+  Solver solver(FLAGS_translation_weight,
+                FLAGS_rotation_weight,
+                FLAGS_stopping_accuracy);
+  solver.SolveSLAM(slam_problem, n);
   return 0;
 }

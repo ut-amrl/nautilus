@@ -2,7 +2,7 @@
 // Created by jack on 9/15/19.
 //
 
-#include "pointcloud_helpers.h"
+#include "./pointcloud_helpers.h"
 
 #include "ros/package.h"
 #include "eigen3/Eigen/Dense"
@@ -55,16 +55,18 @@ void pointcloud_helpers::InitPointcloud(PointCloud2* point) {
   point->is_dense = true;
 }
 
-void pointcloud_helpers::PushBackBytes(float val, sensor_msgs::PointCloud2& ptr) {
+void pointcloud_helpers::PushBackBytes(float val,
+                                       sensor_msgs::PointCloud2& ptr) {
   uint8_t *data_ptr = reinterpret_cast<uint8_t*>(&val);
   for (int i = 0; i < 4; i++) {
     ptr.data.push_back(data_ptr[i]);
   }
 }
 
-void pointcloud_helpers::PublishPointcloud(const std::vector<Vector2f>& points,
-                                           PointCloud2& point_cloud,
-                                           Publisher& pub) {
+void
+pointcloud_helpers::PublishPointcloud(const std::vector<Vector2f>& points,
+                                      PointCloud2& point_cloud,
+                                      Publisher& pub) {
   for (uint64_t i = 0; i < points.size(); i++) {
     Vector2f vec = points[i];
     PushBackBytes(vec[0], point_cloud);

@@ -2,8 +2,8 @@
 // Created by jack on 9/15/19.
 //
 
-#ifndef ICP_POINTCLOUD_HELPERS_H
-#define ICP_POINTCLOUD_HELPERS_H
+#ifndef SRC_POINTCLOUD_HELPERS_H_
+#define SRC_POINTCLOUD_HELPERS_H_
 
 #include <sensor_msgs/LaserScan.h>
 #include "ros/package.h"
@@ -25,4 +25,4 @@ namespace pointcloud_helpers {
       LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan);
 
 };
-#endif //ICP_POINTCLOUD_HELPERS_H
+#endif // SRC_POINTCLOUD_HELPERS_H_

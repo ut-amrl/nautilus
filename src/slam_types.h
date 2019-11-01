@@ -25,6 +25,7 @@
 
 #include <utility>
 #include <vector>
+#include <memory>
 
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
@@ -114,16 +115,17 @@ struct LidarFactor {
     // IDs of the poses
     uint64_t pose_id;
     std::vector<Eigen::Vector2f> pointcloud;
-    KDTree<float, 2>* pointcloud_tree;
+    std::shared_ptr<KDTree<float, 2>> pointcloud_tree;
     LidarFactor() {
       pose_id = 0;
+      pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(nullptr);
     }
     LidarFactor(uint64_t pose_id,
                 std::vector<Eigen::Vector2f>& pointcloud) :
                 pose_id(pose_id),
-                pointcloud(pointcloud)
-                {
-      pointcloud_tree = new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(pointcloud));
+                pointcloud(pointcloud) {
+      KDTree<float, 2>* tree_ptr = new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(pointcloud));
+      pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(tree_ptr);
     }
 };
 

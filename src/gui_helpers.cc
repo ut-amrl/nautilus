@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "gui_helpers.h"
+#include "./gui_helpers.h"
 
 #include "glog/logging.h"
 #include "ros/ros.h"

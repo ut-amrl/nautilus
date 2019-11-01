@@ -21,8 +21,8 @@
 #include <eigen3/Eigen/Core>
 #include <vector>
 
-#ifndef KDTREE_H
-#define KDTREE_H
+#ifndef SRC_KDTREE_H_
+#define SRC_KDTREE_H_
 
 template<typename T, unsigned int K>
 struct KDNodeValue {
@@ -49,16 +49,16 @@ class KDTree {
   ~KDTree();
 
   // Disallow the copy constructor.
-  KDTree(const KDTree<T, K>& other);
+  KDTree(const KDTree<T, K>& other) = delete;
 
   // Disallow the assignment operator.
-  KDTree<T, K>& operator=(const KDTree<T, K>& other);
+  KDTree<T, K>& operator=(const KDTree<T, K>& other) = delete;
 
   // Construct the KDTree using the @values provided.
   explicit KDTree(const std::vector<KDNodeValue<T, K> >& values);
 
   static std::vector<KDNodeValue<T, K>>
-  EigenToKD(std::vector<Eigen::Matrix<T, K, 1>>& values);
+  EigenToKD(const std::vector<Eigen::Matrix<T, K, 1>>& values);
 
   // Rebuild the KDTree using the @values provided.
   KDTree<T, K>* BuildKDTree(std::vector<KDNodeValue<T, K> > values);
@@ -99,4 +99,4 @@ class KDTree {
   KDTree* parent_tree_;
 };
 
-#endif  // KDTREE_H
+#endif  // SRC_KDTREE_H_

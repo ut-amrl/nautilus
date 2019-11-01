@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef GUI_HELPERS_H
-#define GUI_HELPERS_H
+#ifndef SRC_GUI_HELPERS_H_
+#define SRC_GUI_HELPERS_H_
 
 #include <stdio.h>
 #include <vector>
@@ -98,7 +98,6 @@ template <class Vector3>
 void AddPoint(const Vector3& v,
               const Color4f& color,
               visualization_msgs::Marker* msg) {
-  //CHECK_EQ(msg->type, visualization_msgs::Marker::POINTS);
   msg->points.push_back(StdPoint(v));
   msg->colors.push_back(StdColor(color));
 }
@@ -110,4 +109,4 @@ void ClearMarker(visualization_msgs::Marker* msg) {
 
 }  // namespace gui_helpers
 
-#endif  // GUI_HELPERS_H
+#endif  // SRC_GUI_HELPERS_H_
