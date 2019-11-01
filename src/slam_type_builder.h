@@ -11,14 +11,14 @@
 
 #include "slam_types.h"
 
-#define LIDAR_CALLBACK_CUTOFF 30
-
 class SLAMTypeBuilder {
 public:
+    SLAMTypeBuilder(uint64_t pose_num);
     void LidarCallback(sensor_msgs::LaserScan& laser_scan);
     void OdometryCallback(nav_msgs::Odometry& odometry);
     slam_types::SLAMProblem2D GetSlamProblem();
 private:
+    uint64_t pose_num_max_ = 0;
     uint64_t pose_id_ = 0;
     bool odom_initialized_ = false;
     Eigen::Vector2f init_odom_translation_;

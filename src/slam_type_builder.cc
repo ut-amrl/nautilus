@@ -35,11 +35,11 @@ void SLAMTypeBuilder::AddOdomFactor(
 }
 
 void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
-  if (lidar_callback_count >= LIDAR_CALLBACK_CUTOFF) {
+  if (lidar_callback_count >= pose_num_max_) {
     return;
   }
   // We only want one odometry between each lidar callback.
-  if (odom_initialized_ && ((last_odom_translation_ - odom_translation_).norm() > 0.40 || (abs(odom_angle_ - last_odom_angle_) > M_PI / 4))) {
+  if (odom_initialized_ && ((last_odom_translation_ - odom_translation_).norm() > 0.2 || (abs(odom_angle_ - last_odom_angle_) > M_PI / 18))) {
     // Transform this laser scan into a point cloud.s
     std::vector<Eigen::Vector2f> pointcloud = LaserScanToPointCloud(laser_scan);
     LidarFactor lidar_factor(pose_id_, pointcloud);
@@ -88,3 +88,5 @@ slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
     SLAMProblem2D slam_problem(nodes_, odom_factors_);
   return slam_problem;
 }
+
+SLAMTypeBuilder::SLAMTypeBuilder(uint64_t pose_num) : pose_num_max_(pose_num) {}

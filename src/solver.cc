@@ -25,7 +25,7 @@
 #include "./gui_helpers.h"
 
 #define LIDAR_CONSTRAINT_AMOUNT 10
-#define OUTLIER_THRESHOLD 0.80
+#define OUTLIER_THRESHOLD 0.25
 
 using std::vector;
 using slam_types::OdometryFactor2D;
@@ -218,7 +218,6 @@ class VisualizationCallback : public ceres::IterationCallback {
   ceres::CallbackReturnType operator()(const ceres::IterationSummary& summary)
   override {
     PubVisualization();
-    usleep(100);
     return ceres::SOLVER_CONTINUE;
   }
 

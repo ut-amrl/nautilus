@@ -39,6 +39,10 @@ DEFINE_double(
   stopping_accuracy,
   0.05,
   "Threshold of accuracy for stopping.");
+DEFINE_int64(
+  pose_num,
+  30,
+  "The number of poses to process.");
 
 slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path,
                                          const ros::NodeHandle& n) {
@@ -59,7 +63,7 @@ slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path,
   topics.emplace_back(FLAGS_odom_topic.c_str());
   topics.emplace_back(FLAGS_lidar_topic.c_str());
   rosbag::View view(bag, rosbag::TopicQuery(topics));
-  SLAMTypeBuilder slam_builder;
+  SLAMTypeBuilder slam_builder(FLAGS_pose_num);
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
        ros::ok() && it != view.end();
