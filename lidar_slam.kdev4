@@ -1,4 +1,4 @@
 [Project]
-CreatedFrom=Makefile
-Manager=KDevCustomMakeManager
+CreatedFrom=CMakeLists.txt
+Manager=KDevCMakeManager
 Name=lidar_slam

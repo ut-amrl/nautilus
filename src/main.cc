@@ -51,6 +51,8 @@ slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path,
    * and the odometry data. Keeps track of the current pose and produces
    * a list of poses / pointclouds. Also keeps a list of the odometry data.
    */
+  printf("Loading bag file... ");
+  fflush(stdout);
   rosbag::Bag bag;
   try {
     bag.open(bag_path, rosbag::bagmode::Read);
@@ -85,6 +87,8 @@ slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path,
     }
   }
   bag.close();
+  printf("Done.\n");
+  fflush(stdout);
   return slam_builder.GetSlamProblem();
 }
 
