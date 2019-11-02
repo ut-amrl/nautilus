@@ -6,6 +6,7 @@
 
 #include "slam_type_builder.h"
 #include "pointcloud_helpers.h"
+#include "math_util.h"
 
 using pointcloud_helpers::LaserScanToPointCloud;
 using slam_types::LidarFactor;
@@ -13,6 +14,7 @@ using slam_types::RobotPose2D;
 using slam_types::OdometryFactor2D;
 using slam_types::SLAMNode2D;
 using slam_types::SLAMProblem2D;
+using math_util::AngleDist;
 
 void SLAMTypeBuilder::AddOdomFactor(
         std::vector<OdometryFactor2D>& odom_factors) {
@@ -39,7 +41,9 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
     return;
   }
   // We only want one odometry between each lidar callback.
-  if (odom_initialized_ && ((last_odom_translation_ - odom_translation_).norm() > 0.2 || (abs(odom_angle_ - last_odom_angle_) > M_PI / 18))) {
+  if (odom_initialized_ &&
+      ((last_odom_translation_ - odom_translation_).norm() > 0.2 ||
+        (AngleDist(odom_angle_, last_odom_angle_) > M_PI / 18.0))) {
     // Transform this laser scan into a point cloud.s
     std::vector<Eigen::Vector2f> pointcloud = LaserScanToPointCloud(laser_scan);
     LidarFactor lidar_factor(pose_id_, pointcloud);
