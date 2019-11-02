@@ -24,6 +24,7 @@
 #include "./math_util.h"
 #include "./pointcloud_helpers.h"
 #include "./gui_helpers.h"
+#include "timer.h"
 
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
@@ -252,9 +253,11 @@ void Solver::AddOdomFactors(const vector<OdometryFactor2D>& odom_factors,
   }
 }
 
-bool NormalsWithin(Vector2f& normal_1, Vector2f& normal_2, double threshold) {
+inline bool NormalsWithin(Vector2f& normal_1, Vector2f& normal_2, double threshold) {
   return acos(normal_1.dot(normal_2) / (normal_1.norm() * normal_2.norm())) < threshold;
 }
+
+CumulativeFunctionTimer point_correspondences_timer("GetPointCorrespondences");
 
 // Source moves to target.
 double
@@ -264,6 +267,7 @@ Solver::GetPointCorrespondences(const slam_types::SLAMProblem2D& problem,
                                 PointCorrespondences* point_correspondences,
                                 size_t source_node_index,
                                 size_t target_node_index) {
+  CumulativeFunctionTimer::Invocation invoke(&point_correspondences_timer);
   gui_helpers::ClearMarker(&match_line_list);
   // Get all the data we might need in an easier to use format.
   double difference = 0.0;
@@ -289,12 +293,12 @@ Solver::GetPointCorrespondences(const slam_types::SLAMProblem2D& problem,
     KDNodeValue<float, 2> closest_target;
     vector<KDNodeValue<float, 2>> neighbors;
     target_lidar.pointcloud_tree->FindNeighborPoints(source_point_transformed,
-                                                     OUTLIER_THRESHOLD,
+                                                     OUTLIER_THRESHOLD / 6,
                                                      &neighbors);
     KDNodeValue<float, 2> source_point_with_normal;
     float found_dist =
       source_lidar.pointcloud_tree->FindNearestPoint(source_point,
-                                                     OUTLIER_THRESHOLD,
+                                                     0.1,
                                                      &source_point_with_normal);
     if (found_dist != 0.0) {
       std::cerr << "Something is wrong, this point is not in its KDTree!" << std::endl;
@@ -322,7 +326,30 @@ Solver::GetPointCorrespondences(const slam_types::SLAMProblem2D& problem,
     // Outlier rejection
     if (dist >= OUTLIER_THRESHOLD) {
       // No point was found within our given threshold.
-      continue;
+      neighbors.clear();
+      target_lidar.pointcloud_tree->FindNeighborPoints(source_point_transformed,
+                                                       OUTLIER_THRESHOLD,
+                                                       &neighbors);
+      std::sort(neighbors.begin(),
+                neighbors.end(),
+                [&source_point_transformed](KDNodeValue<float, 2> point_1,
+                                            KDNodeValue<float, 2> point_2) {
+        return (source_point_transformed - point_1.point).norm() <
+              (source_point_transformed - point_2.point).norm();
+      });
+      vector<KDNodeValue<float, 2>> unchecked_neighbors(neighbors.begin() + (OUTLIER_THRESHOLD / 6), neighbors.end());
+      for (KDNodeValue<float, 2> current_target : unchecked_neighbors) {
+        if (NormalsWithin(current_target.normal,
+                          source_point_with_normal.normal,
+                          M_PI / 9)) {
+          closest_target = current_target;
+          dist = (source_point_transformed - current_target.point).norm();
+          break;
+        }
+      }
+      if (dist >= OUTLIER_THRESHOLD) {
+        continue;
+      }
     }
     difference += dist;
     // Minimize distance between closest points!
