@@ -17,6 +17,8 @@ public:
     void LidarCallback(sensor_msgs::LaserScan& laser_scan);
     void OdometryCallback(nav_msgs::Odometry& odometry);
     slam_types::SLAMProblem2D GetSlamProblem();
+    bool Done();
+
 private:
     uint64_t pose_num_max_ = 0;
     uint64_t pose_id_ = 0;

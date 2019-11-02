@@ -68,7 +68,7 @@ slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path,
   SLAMTypeBuilder slam_builder(FLAGS_pose_num);
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
-       ros::ok() && it != view.end();
+       ros::ok() && it != view.end() && !slam_builder.Done();
        ++it) {
     const rosbag::MessageInstance &message = *it;
     {

@@ -36,6 +36,10 @@ void SLAMTypeBuilder::AddOdomFactor(
   last_odom_translation_ = odom_translation_;
 }
 
+bool SLAMTypeBuilder::Done() {
+  return (lidar_callback_count >= pose_num_max_);
+}
+
 void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
   if (lidar_callback_count >= pose_num_max_) {
     return;
