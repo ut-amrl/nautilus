@@ -9,6 +9,7 @@
 #include <queue>
 #include <algorithm>
 #include <queue>
+#include <thread>
 #include <vector>
 
 #include "ceres/ceres.h"
@@ -389,7 +390,7 @@ Solver::SolveSLAM(slam_types::SLAMProblem2D& problem,
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::SPARSE_SCHUR;
   options.minimizer_progress_to_stdout = false;
-  options.num_threads = 4;
+  options.num_threads = std::thread::hardware_concurrency();
   VisualizationCallback vis_callback(problem, &solution, n);
   options.callbacks.push_back(&vis_callback);
   // Sliding window for solving for initial guesses.
