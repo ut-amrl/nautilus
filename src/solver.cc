@@ -38,6 +38,7 @@ using Eigen::Vector2f;
 using slam_types::SLAMNodeSolution2D;
 
 visualization_msgs::Marker match_line_list;
+visualization_msgs::Marker normals_marker;
 
 template<typename T> Eigen::Transform<T, 2, Eigen::Affine>
 PoseArrayToAffine(const T* rotation, const T* translation) {
@@ -168,6 +169,7 @@ class VisualizationCallback : public ceres::IterationCallback {
     new_point_pub = n.advertise<sensor_msgs::PointCloud2>("/new_points", 10);
     pose_pub = n.advertise<visualization_msgs::Marker>("/poses", 10);
     match_pub = n.advertise<visualization_msgs::Marker>("/matches", 10);
+    normals_pub = n.advertise<visualization_msgs::Marker>("/normals", 10);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_STRIP,
                                   gui_helpers::Color4f::kGreen,
                                   0.05,
@@ -180,7 +182,13 @@ class VisualizationCallback : public ceres::IterationCallback {
                                   0.0,
                                   0.0,
                                   &match_line_list);
-  }
+    gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
+                                  gui_helpers::Color4f::kYellow,
+                                  0.003,
+                                  0.0,
+                                  0.0,
+                                  &normals_marker);
+    }
 
   void PubVisualization() {
     const vector<slam_types::SLAMNodeSolution2D>& solution_c = *solution;
@@ -199,7 +207,21 @@ class VisualizationCallback : public ceres::IterationCallback {
       Eigen::Vector3f pose(solution_c[i].pose[0], solution_c[i].pose[1], 0.0);
       gui_helpers::AddPoint(pose, gui_helpers::Color4f::kGreen, &pose_array);
       for (const Vector2f& point : pointcloud) {
-              new_points.push_back(robot_to_world * point);
+        // Visualize normal
+        KDNodeValue<float, 2> source_point_in_tree;
+        float dist = problem.nodes[i].lidar_factor.pointcloud_tree->FindNearestPoint(point, 0.01, &source_point_in_tree);
+        if (dist != 0.01) {
+          Eigen::Vector3f normal(source_point_in_tree.normal.x(), source_point_in_tree.normal.y(), 0.0);
+          normal = robot_to_world * normal;
+          Vector2f source_point = robot_to_world * point;
+          Eigen::Vector3f source_3f(source_point.x(), source_point.y(), 0.0);
+          Eigen::Vector3f result = source_3f + normal;
+          gui_helpers::AddLine(source_3f,
+                               result,
+                               gui_helpers::Color4f::kGreen,
+                               &normals_marker);
+        }
+        new_points.push_back(robot_to_world * point);
       }
     }
     if (solution_c.size() >= 2) {
@@ -211,6 +233,7 @@ class VisualizationCallback : public ceres::IterationCallback {
                                             new_point_pub);
       pose_pub.publish(pose_array);
       match_pub.publish(match_line_list);
+      normals_pub.publish(normals_marker);
     }
     ros::spinOnce();
     all_points.clear();
@@ -233,6 +256,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   ros::Publisher pose_pub;
   ros::Publisher match_pub;
   ros::Publisher new_point_pub;
+  ros::Publisher normals_pub;
   visualization_msgs::Marker pose_array;
 };
 
@@ -268,7 +292,6 @@ Solver::GetPointCorrespondences(const slam_types::SLAMProblem2D& problem,
                                 size_t source_node_index,
                                 size_t target_node_index) {
   CumulativeFunctionTimer::Invocation invoke(&point_correspondences_timer);
-  gui_helpers::ClearMarker(&match_line_list);
   // Get all the data we might need in an easier to use format.
   double difference = 0.0;
   vector<SLAMNodeSolution2D>& solution = *solution_ptr;
@@ -397,6 +420,8 @@ Solver::SolveSLAM(slam_types::SLAMProblem2D& problem,
   double difference = 0;
   double last_difference = 0;
   do {
+    gui_helpers::ClearMarker(&match_line_list);
+    gui_helpers::ClearMarker(&normals_marker);
     last_difference = difference;
     difference = 0;
     ceres::Problem ceres_problem;
