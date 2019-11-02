@@ -27,19 +27,19 @@ On linux:
 
 Here are three bagfiles that you can run the data on and the command to run them:
 
-[https://drive.google.com/open?id=1thDp4MJF6l2yZ9Z_JFAmdhMQZrld0oQ5](Indoor Bag taken on the "Jackal")
+[Indoor Bag taken on the "Jackal"](https://drive.google.com/open?id=1thDp4MJF6l2yZ9Z_JFAmdhMQZrld0oQ5)
 
 ```
 ./bin/lidar_slam --bag_path 00010_2019-05-16-03-59-04_0.bag --pose_num 1000
 ```
 
-[https://drive.google.com/open?id=1iLCKV4nnVvCzDQS2EHKotdTxiWPOCW-I](Outdoor Bag taken on the "Jackal")
+[Outdoor Bag taken on the "Jackal"](https://drive.google.com/open?id=1iLCKV4nnVvCzDQS2EHKotdTxiWPOCW-I)
 
 ```
 ./bin/lidar_slam --bag_path 00016_2019-05-17-18-23-06_0.bag --pose_num 1000
 ```
 
-[https://drive.google.com/open?id=1i7RlzAbIoVkKpZGa7TcJaO3kzSf7KI3D](Indoor Bag taken on the "COBOT")
+[Indoor Bag taken on the "COBOT"](https://drive.google.com/open?id=1i7RlzAbIoVkKpZGa7TcJaO3kzSf7KI3D)
 
 ```
 ./bin/lidar_slam --bag_path 2014-10-07-12-58-30.bag --odom_topic odom --lidar_topic laser --pose_num 1000
