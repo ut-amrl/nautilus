@@ -3,4 +3,9 @@ cmake-build-debug
 build
 data
 lib
-
+*.kdev4
+.kdev4
+.settings
+.idea
+.project
+.cproject
