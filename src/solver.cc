@@ -60,24 +60,27 @@ struct OdometryResidual {
                      T* residual) const {
       // Predicted pose_j = pose_i * odometry.
       // Hence, error = pose_j.inverse() * pose_i * odometry;
-      // Also A.inverse() = A.transpose() for rotation matrices because they
-      // are orthogonal.
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
       typedef Eigen::Matrix<T, 2, 2> Matrix2T;
-
+      // Extract the rotation matrices.
       const Matrix2T Ri = Rotation2D<T>(pose_i[2])
         .toRotationMatrix();
       const Matrix2T Rj = Rotation2D<T>(pose_j[2])
         .toRotationMatrix();
-
+      // Extract the translation.
       const Vector2T Ti(pose_i[0], pose_i[1]);
       const Vector2T Tj(pose_j[0], pose_j[1]);
-
+      // The Error in the translation is the difference with the odometry
+      // in the direction of the previous pose, then getting rid of the new 
+      // rotation (transpose = inverse for rotation matrices).
       const Vector2T error_translation =
         Rj.transpose() * (Ri * T_odom.cast<T>() - (Tj - Ti));
-
+      // Rotation error is very similar to the translation error, except
+      // we don't care about the difference in the position.
       const Matrix2T error_rotation_mat =
         Rj.transpose() * Ri * R_odom.cast<T>();
+      // The residuals are weighted according to the parameters set
+      // by the user.
       residual[0] = T(translation_weight) * error_translation.x();
       residual[1] = T(translation_weight) * error_translation.y();
       residual[2] = T(rotation_weight) *
@@ -85,18 +88,22 @@ struct OdometryResidual {
       return true;
     }
 
-    explicit OdometryResidual(const OdometryFactor2D& factor, double translation_weight, double rotation_weight) :
+    explicit OdometryResidual(const OdometryFactor2D& factor,
+                              double translation_weight,
+                              double rotation_weight) :
             translation_weight(translation_weight),
             rotation_weight(rotation_weight),
             R_odom(Rotation2D<float>(factor.rotation)
                     .toRotationMatrix()),
             T_odom(factor.translation) {}
 
-    static AutoDiffCostFunction<OdometryResidual, 3, 3, 3>* create(
-            const OdometryFactor2D& factor,
-            double translation_weight,
-            double rotation_weight) {
-      OdometryResidual* residual = new OdometryResidual(factor, translation_weight, rotation_weight);
+    static AutoDiffCostFunction<OdometryResidual, 3, 3, 3>*
+    create(const OdometryFactor2D& factor,
+           double translation_weight,
+           double rotation_weight) {
+      OdometryResidual* residual = new OdometryResidual(factor,
+                                                        translation_weight,
+                                                        rotation_weight);
       return new AutoDiffCostFunction<OdometryResidual, 3, 3, 3>(residual);
     }
 
@@ -114,8 +121,10 @@ struct LIDARPointBlobResidual {
                      T* residuals) const {
       typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
-      Affine2T source_to_world = PoseArrayToAffine(&source_pose[2], &source_pose[0]);
-      Affine2T world_to_target = PoseArrayToAffine(&target_pose[2], &target_pose[0]).inverse();
+      Affine2T source_to_world =
+        PoseArrayToAffine(&source_pose[2], &source_pose[0]);
+      Affine2T world_to_target =
+        PoseArrayToAffine(&target_pose[2], &target_pose[0]).inverse();
       Affine2T source_to_target = world_to_target * source_to_world;
       #pragma omp parallel for
       for (size_t index = 0; index < source_points.size(); index++) {
@@ -123,7 +132,8 @@ struct LIDARPointBlobResidual {
         Vector2T target_pointT = target_points[index].cast<T>();
         // Transform source_point into the frame of target_point
         source_pointT = source_to_target * source_pointT;
-        T result = target_normals[index].cast<T>().dot(source_pointT - target_pointT);
+        T result =
+          target_normals[index].cast<T>().dot(source_pointT - target_pointT);
         residuals[index] = result;
       }
       return true;
@@ -145,8 +155,8 @@ struct LIDARPointBlobResidual {
            vector<Vector2f>& target_normals) {
       LIDARPointBlobResidual *residual =
         new LIDARPointBlobResidual(source_points,
-                                    target_points,
-                                    target_normals);
+                                   target_points,
+                                   target_normals);
       return new AutoDiffCostFunction<LIDARPointBlobResidual,
                                       ceres::DYNAMIC,
                                       3, 3>
@@ -213,9 +223,15 @@ class VisualizationCallback : public ceres::IterationCallback {
         new_points.push_back(robot_to_world * point);
         // Visualize normal
         KDNodeValue<float, 2> source_point_in_tree;
-        float dist = problem.nodes[i].lidar_factor.pointcloud_tree->FindNearestPoint(point, 0.01, &source_point_in_tree);
+        float dist =
+          problem.nodes[i].lidar_factor
+            .pointcloud_tree->FindNearestPoint(point,
+                                               0.01,
+                                               &source_point_in_tree);
         if (dist != 0.01) {
-          Eigen::Vector3f normal(source_point_in_tree.normal.x(), source_point_in_tree.normal.y(), 0.0);
+          Eigen::Vector3f normal(source_point_in_tree.normal.x(),
+                                 source_point_in_tree.normal.y(),
+                                 0.0);
           normal = robot_to_world * normal;
           Vector2f source_point = robot_to_world * point;
           Eigen::Vector3f source_3f(source_point.x(), source_point.y(), 0.0);
@@ -280,22 +296,20 @@ void Solver::AddOdomFactors(const vector<OdometryFactor2D>& odom_factors,
   }
 }
 
-inline bool NormalsSimilar(const Vector2f& n1, const Vector2f& n2, float max_cosine_value) {
+inline bool NormalsSimilar(const Vector2f& n1,
+                           const Vector2f& n2,
+                           float max_cosine_value) {
   return (fabs(n1.dot(n2)) > max_cosine_value);
 }
-
-CumulativeFunctionTimer point_correspondences_timer("GetPointCorrespondences");
 
 // Source moves to target.
 double
 Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
-                                vector<SLAMNodeSolution2D>*
-                                  solution_ptr,
+                                vector<SLAMNodeSolution2D>* solution_ptr,
                                 PointCorrespondences* point_correspondences,
                                 size_t source_node_index,
                                 size_t target_node_index) {
-  CumulativeFunctionTimer::Invocation invoke(&point_correspondences_timer);
-  // Get all the data we might need in an easier to use format.
+  // Summed differences between point correspondences.
   double difference = 0.0;
   vector<SLAMNodeSolution2D>& solution = *solution_ptr;
   SLAMNodeSolution2D& source_solution = solution[source_node_index];
@@ -304,35 +318,37 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
     problem.nodes[source_node_index].lidar_factor;
   LidarFactor target_lidar =
     problem.nodes[target_node_index].lidar_factor;
+  // Affine transformations from the two pose's reference frames.
   Affine2f source_to_world =
     PoseArrayToAffine(&source_solution.pose[2],
                       &source_solution.pose[0]).cast<float>();
   Affine2f target_to_world =
     PoseArrayToAffine(&target_solution.pose[2],
                       &target_solution.pose[0]).cast<float>();
-  // Create a point correspondence to track the closest points.
+  // Loop over all the points in the source pointcloud,
+  // match each point to the closest point in the target pointcloud
+  // who's normal is within a certain threshold.
   for (const Vector2f& source_point : source_lidar.pointcloud) {
     // Transform the source point to the target frame.
     Vector2f source_point_transformed =
       target_to_world.inverse() * source_to_world * source_point;
-    // Get the closest point and the closest surface normal.
+    // Get the closest points within the threshold.
+    // For now we assume that a match is within 1/6 of the threshold.
     KDNodeValue<float, 2> closest_target;
     vector<KDNodeValue<float, 2>> neighbors;
     target_lidar.pointcloud_tree->FindNeighborPoints(source_point_transformed,
                                                      OUTLIER_THRESHOLD / 6.0,
                                                      &neighbors);
+    // Get the current source point's normal.
     KDNodeValue<float, 2> source_point_with_normal;
     float found_dist =
       source_lidar.pointcloud_tree->FindNearestPoint(source_point,
                                                      0.1,
                                                      &source_point_with_normal);
-    if (found_dist != 0.0) {
-      std::cerr << "Something is wrong, this point is not in its KDTree!" << std::endl;
-      exit(1);
-    }
+    CHECK_EQ(found_dist, 0.0) << "Source point is not in KD Tree!\n";
     float dist = OUTLIER_THRESHOLD;
-    // Sort the neighbor points so we will always get the smallest distance, and best
-    // normal.
+    // Sort the target points by distance from the source point in the
+    // target frame.
     std::sort(neighbors.begin(),
               neighbors.end(),
               [&source_point_transformed](KDNodeValue<float, 2> point_1,
@@ -340,6 +356,9 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
       return (source_point_transformed - point_1.point).norm() <
              (source_point_transformed - point_2.point).norm();
     });
+    // For all target points, starting with the closest
+    // see if any of them have a close enough normal to be 
+    // considered a match.
     for (KDNodeValue<float, 2> current_target : neighbors) {
       if (NormalsSimilar(current_target.normal,
                          source_point_with_normal.normal,
@@ -349,13 +368,16 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
         break;
       }
     }
-    // Outlier rejection
+    // If we didn't find any matches in the first 1/6 of the threshold,
+    // try all target points within the full threshold.
     if (dist >= OUTLIER_THRESHOLD) {
-      // No point was found within our given threshold.
+      // Re-find all the closest targets.
       neighbors.clear();
       target_lidar.pointcloud_tree->FindNeighborPoints(source_point_transformed,
                                                        OUTLIER_THRESHOLD,
                                                        &neighbors);
+      // Sort them again, based on distance from the source point in the
+      // target frame.
       std::sort(neighbors.begin(),
                 neighbors.end(),
                 [&source_point_transformed](KDNodeValue<float, 2> point_1,
@@ -363,7 +385,11 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
         return (source_point_transformed - point_1.point).norm() <
                (source_point_transformed - point_2.point).norm();
       });
-      vector<KDNodeValue<float, 2>> unchecked_neighbors(neighbors.begin() + (OUTLIER_THRESHOLD / 6), neighbors.end());
+      // Cut out the first 1/6 threshold that we already checked.
+      vector<KDNodeValue<float, 2>>
+        unchecked_neighbors(neighbors.begin() + (OUTLIER_THRESHOLD / 6),
+                            neighbors.end());
+      // See if any of these points have a normal within our threshold.
       for (KDNodeValue<float, 2> current_target : unchecked_neighbors) {
         if (NormalsSimilar(current_target.normal,
                            source_point_with_normal.normal,
@@ -373,12 +399,16 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
           break;
         }
       }
+      // If no target point was found to correspond to our source point then
+      // don't match this source point to anything.
       if (dist >= OUTLIER_THRESHOLD) {
         continue;
       }
     }
+    // Add the distance between the source point and it's matching target
+    // point.
     difference += dist;
-    // Minimize distance between closest points!
+    // Add to the correspondence for returning.
     Vector2f source_point_modifiable = source_point;
     point_correspondences->source_points.push_back(source_point_modifiable);
     point_correspondences->target_points.push_back(closest_target.point);
@@ -421,13 +451,18 @@ Solver::SolveSLAM(SLAMProblem2D& problem,
   options.callbacks.push_back(&vis_callback);
   double difference = 0;
   double last_difference = 0;
+  // While our solution moves more than the stopping_accuracy,
+  // continue to optimize.
   do {
     gui_helpers::ClearMarker(&match_line_list);
     gui_helpers::ClearMarker(&normals_marker);
     last_difference = difference;
     difference = 0;
     ceres::Problem ceres_problem;
+    // Add all the odometry constraints between our poses.
     AddOdomFactors(problem.odometry_factors, solution, &ceres_problem);
+    // For every SLAM node we want to optimize it against the past
+    // LIDAR_CONSTRAINT_AMOUNT nodes.
     for (size_t node_i_index = 0;
         node_i_index < problem.nodes.size();
         node_i_index++) {
@@ -439,15 +474,15 @@ Solver::SolveSLAM(SLAMProblem2D& problem,
              std::max((int64_t)(node_i_index) - LIDAR_CONSTRAINT_AMOUNT, 0l);
            node_j_index < node_i_index;
            node_j_index++) {
-        // Add all the points to this, make a new problem. Minimize, continue.
         PointCorrespondences correspondence(solution[node_j_index].pose,
                                             solution[node_i_index].pose);
-        //gui_helpers::ClearMarker(&match_line_list);
+        // Get the correspondences between these two poses.
         difference += GetPointCorrespondences(problem,
                                               &solution,
                                               &correspondence,
                                               node_j_index,
                                               node_i_index);
+        // Add the correspondences as constraints in the optimization problem.
         ceres_problem.AddResidualBlock(
           LIDARPointBlobResidual::create(correspondence.source_points,
                                          correspondence.target_points,
@@ -473,4 +508,3 @@ Solver::Solver(double translation_weight,
                translation_weight(translation_weight),
                rotation_weight(rotation_weight),
                stopping_accuracy(stopping_accuracy) {}
-

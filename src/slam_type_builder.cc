@@ -47,7 +47,7 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
   }
   // We only want one odometry between each lidar callback.
   if (odom_initialized_ &&
-      ((last_odom_translation_ - odom_translation_).norm() > 0.15 ||
+      ((last_odom_translation_ - odom_translation_).norm() > 0.20 ||
         (AngleDist(odom_angle_, last_odom_angle_) > M_PI / 18.0))) {
     // Transform this laser scan into a point cloud.s
     std::vector<Vector2f> pointcloud = LaserScanToPointCloud(laser_scan);
