@@ -175,7 +175,7 @@ class VisualizationCallback : public ceres::IterationCallback {
     normals_pub = n.advertise<visualization_msgs::Marker>("/normals", 10);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_STRIP,
                                   gui_helpers::Color4f::kGreen,
-                                  0.05,
+                                  0.002,
                                   0.0,
                                   0.0,
                                   &pose_array);
@@ -212,21 +212,19 @@ class VisualizationCallback : public ceres::IterationCallback {
       
       for (const Vector2f& point : pointcloud) {
         new_points.push_back(robot_to_world * point);
-        if (i == solution_c.size() - 1) {
-          // Visualize normal
-          KDNodeValue<float, 2> source_point_in_tree;
-          float dist = problem.nodes[i].lidar_factor.pointcloud_tree->FindNearestPoint(point, 0.01, &source_point_in_tree);
-          if (dist != 0.01) {
-            Eigen::Vector3f normal(source_point_in_tree.normal.x(), source_point_in_tree.normal.y(), 0.0);
-            normal = robot_to_world * normal;
-            Vector2f source_point = robot_to_world * point;
-            Eigen::Vector3f source_3f(source_point.x(), source_point.y(), 0.0);
-            Eigen::Vector3f result = source_3f + normal;
-            gui_helpers::AddLine(source_3f,
-                                result,
-                                gui_helpers::Color4f::kGreen,
-                                &normals_marker);
-          }
+        // Visualize normal
+        KDNodeValue<float, 2> source_point_in_tree;
+        float dist = problem.nodes[i].lidar_factor.pointcloud_tree->FindNearestPoint(point, 0.01, &source_point_in_tree);
+        if (dist != 0.01) {
+          Eigen::Vector3f normal(source_point_in_tree.normal.x(), source_point_in_tree.normal.y(), 0.0);
+          normal = robot_to_world * normal;
+          Vector2f source_point = robot_to_world * point;
+          Eigen::Vector3f source_3f(source_point.x(), source_point.y(), 0.0);
+          Eigen::Vector3f result = source_3f + (normal * 0.01);
+          gui_helpers::AddLine(source_3f,
+                               result,
+                               gui_helpers::Color4f::kGreen,
+                               &normals_marker);
         }
       }
     }
@@ -346,7 +344,7 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
     for (KDNodeValue<float, 2> current_target : neighbors) {
       if (NormalsWithin(current_target.normal,
                         source_point_with_normal.normal,
-                        M_PI / 9)) {
+                        M_PI / 18)) {
         closest_target = current_target;
         dist = (source_point_transformed - current_target.point).norm();
         break;
@@ -364,13 +362,13 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
                 [&source_point_transformed](KDNodeValue<float, 2> point_1,
                                             KDNodeValue<float, 2> point_2) {
         return (source_point_transformed - point_1.point).norm() <
-              (source_point_transformed - point_2.point).norm();
+               (source_point_transformed - point_2.point).norm();
       });
       vector<KDNodeValue<float, 2>> unchecked_neighbors(neighbors.begin() + (OUTLIER_THRESHOLD / 6), neighbors.end());
       for (KDNodeValue<float, 2> current_target : unchecked_neighbors) {
         if (NormalsWithin(current_target.normal,
                           source_point_with_normal.normal,
-                          M_PI / 9)) {
+                          M_PI / 18)) {
           closest_target = current_target;
           dist = (source_point_transformed - current_target.point).norm();
           break;
@@ -445,6 +443,7 @@ Solver::SolveSLAM(SLAMProblem2D& problem,
         // Add all the points to this, make a new problem. Minimize, continue.
         PointCorrespondences correspondence(solution[node_j_index].pose,
                                             solution[node_i_index].pose);
+        gui_helpers::ClearMarker(&match_line_list);
         difference += GetPointCorrespondences(problem,
                                               &solution,
                                               &correspondence,
