@@ -201,7 +201,7 @@ class VisualizationCallback : public ceres::IterationCallback {
         all_points.insert(all_points.end(),
                           new_points.begin(),
                           new_points.end());
-              new_points.clear();
+        new_points.clear();
       }
       auto pointcloud = problem.nodes[i].lidar_factor.pointcloud;
       Affine2f robot_to_world =
@@ -209,7 +209,6 @@ class VisualizationCallback : public ceres::IterationCallback {
                           &(solution_c[i].pose[0])).cast<float>();
       Eigen::Vector3f pose(solution_c[i].pose[0], solution_c[i].pose[1], 0.0);
       gui_helpers::AddPoint(pose, gui_helpers::Color4f::kGreen, &pose_array);
-      
       for (const Vector2f& point : pointcloud) {
         new_points.push_back(robot_to_world * point);
         // Visualize normal
@@ -281,8 +280,8 @@ void Solver::AddOdomFactors(const vector<OdometryFactor2D>& odom_factors,
   }
 }
 
-inline bool NormalsWithin(Vector2f& normal_1, Vector2f& normal_2, double threshold) {
-  return acos(normal_1.dot(normal_2) / (normal_1.norm() * normal_2.norm())) < threshold;
+inline bool NormalsSimilar(const Vector2f& n1, const Vector2f& n2, float max_cosine_value) {
+  return (fabs(n1.dot(n2)) > max_cosine_value);
 }
 
 CumulativeFunctionTimer point_correspondences_timer("GetPointCorrespondences");
@@ -320,7 +319,7 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
     KDNodeValue<float, 2> closest_target;
     vector<KDNodeValue<float, 2>> neighbors;
     target_lidar.pointcloud_tree->FindNeighborPoints(source_point_transformed,
-                                                     OUTLIER_THRESHOLD / 6,
+                                                     OUTLIER_THRESHOLD / 6.0,
                                                      &neighbors);
     KDNodeValue<float, 2> source_point_with_normal;
     float found_dist =
@@ -342,9 +341,9 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
              (source_point_transformed - point_2.point).norm();
     });
     for (KDNodeValue<float, 2> current_target : neighbors) {
-      if (NormalsWithin(current_target.normal,
-                        source_point_with_normal.normal,
-                        M_PI / 18)) {
+      if (NormalsSimilar(current_target.normal,
+                         source_point_with_normal.normal,
+                         cos(math_util::DegToRad(20.0)))) {
         closest_target = current_target;
         dist = (source_point_transformed - current_target.point).norm();
         break;
@@ -366,9 +365,9 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
       });
       vector<KDNodeValue<float, 2>> unchecked_neighbors(neighbors.begin() + (OUTLIER_THRESHOLD / 6), neighbors.end());
       for (KDNodeValue<float, 2> current_target : unchecked_neighbors) {
-        if (NormalsWithin(current_target.normal,
-                          source_point_with_normal.normal,
-                          M_PI / 18)) {
+        if (NormalsSimilar(current_target.normal,
+                           source_point_with_normal.normal,
+                           cos(math_util::DegToRad(20.0)))) {
           closest_target = current_target;
           dist = (source_point_transformed - current_target.point).norm();
           break;
@@ -443,7 +442,7 @@ Solver::SolveSLAM(SLAMProblem2D& problem,
         // Add all the points to this, make a new problem. Minimize, continue.
         PointCorrespondences correspondence(solution[node_j_index].pose,
                                             solution[node_i_index].pose);
-        gui_helpers::ClearMarker(&match_line_list);
+        //gui_helpers::ClearMarker(&match_line_list);
         difference += GetPointCorrespondences(problem,
                                               &solution,
                                               &correspondence,

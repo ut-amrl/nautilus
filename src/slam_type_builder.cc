@@ -15,6 +15,7 @@ using slam_types::OdometryFactor2D;
 using slam_types::SLAMNode2D;
 using slam_types::SLAMProblem2D;
 using math_util::AngleDist;
+using Eigen::Vector2f;
 
 void SLAMTypeBuilder::AddOdomFactor(
         std::vector<OdometryFactor2D>& odom_factors) {
@@ -22,7 +23,7 @@ void SLAMTypeBuilder::AddOdomFactor(
   Eigen::Matrix2f last_rot_mat =
       Eigen::Rotation2D<float>(last_odom_angle_)
           .toRotationMatrix();
-  Eigen::Vector2f translation =
+  Vector2f translation =
       last_rot_mat.inverse() * (odom_translation_ - last_odom_translation_);
   Eigen::Matrix2f curr_rot_mat =
       Eigen::Rotation2D<float>(odom_angle_)
@@ -46,10 +47,10 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
   }
   // We only want one odometry between each lidar callback.
   if (odom_initialized_ &&
-      ((last_odom_translation_ - odom_translation_).norm() > 0.2 ||
+      ((last_odom_translation_ - odom_translation_).norm() > 0.15 ||
         (AngleDist(odom_angle_, last_odom_angle_) > M_PI / 18.0))) {
     // Transform this laser scan into a point cloud.s
-    std::vector<Eigen::Vector2f> pointcloud = LaserScanToPointCloud(laser_scan);
+    std::vector<Vector2f> pointcloud = LaserScanToPointCloud(laser_scan);
     LidarFactor lidar_factor(pose_id_, pointcloud);
     RobotPose2D pose(odom_translation_ - init_odom_translation_,
                      odom_angle_); //TODO: Maybe not good idea to not subtract initial angle.
@@ -80,16 +81,16 @@ float ZRadiansFromQuaterion(geometry_msgs::Quaternion& q) {
 
 void SLAMTypeBuilder::OdometryCallback(nav_msgs::Odometry& odometry) {
   if (!odom_initialized_) {
-    init_odom_translation_ = Eigen::Vector2f(odometry.pose.pose.position.x,
-                                             odometry.pose.pose.position.y);
+    init_odom_translation_ = Vector2f(odometry.pose.pose.position.x,
+                                      odometry.pose.pose.position.y);
     init_odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
     last_odom_translation_ = init_odom_translation_;
     last_odom_angle_ = init_odom_angle_;
     odom_initialized_ = true;
   }
   odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
-  odom_translation_ = Eigen::Vector2f(odometry.pose.pose.position.x,
-                                      odometry.pose.pose.position.y);
+  odom_translation_ = Vector2f(odometry.pose.pose.position.x,
+                               odometry.pose.pose.position.y);
 }
 
 slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
