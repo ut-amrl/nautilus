@@ -209,22 +209,25 @@ class VisualizationCallback : public ceres::IterationCallback {
                           &(solution_c[i].pose[0])).cast<float>();
       Eigen::Vector3f pose(solution_c[i].pose[0], solution_c[i].pose[1], 0.0);
       gui_helpers::AddPoint(pose, gui_helpers::Color4f::kGreen, &pose_array);
+      
       for (const Vector2f& point : pointcloud) {
-        // Visualize normal
-        KDNodeValue<float, 2> source_point_in_tree;
-        float dist = problem.nodes[i].lidar_factor.pointcloud_tree->FindNearestPoint(point, 0.01, &source_point_in_tree);
-        if (dist != 0.01) {
-          Eigen::Vector3f normal(source_point_in_tree.normal.x(), source_point_in_tree.normal.y(), 0.0);
-          normal = robot_to_world * normal;
-          Vector2f source_point = robot_to_world * point;
-          Eigen::Vector3f source_3f(source_point.x(), source_point.y(), 0.0);
-          Eigen::Vector3f result = source_3f + normal;
-          gui_helpers::AddLine(source_3f,
-                               result,
-                               gui_helpers::Color4f::kGreen,
-                               &normals_marker);
-        }
         new_points.push_back(robot_to_world * point);
+        if (i == solution_c.size() - 1) {
+          // Visualize normal
+          KDNodeValue<float, 2> source_point_in_tree;
+          float dist = problem.nodes[i].lidar_factor.pointcloud_tree->FindNearestPoint(point, 0.01, &source_point_in_tree);
+          if (dist != 0.01) {
+            Eigen::Vector3f normal(source_point_in_tree.normal.x(), source_point_in_tree.normal.y(), 0.0);
+            normal = robot_to_world * normal;
+            Vector2f source_point = robot_to_world * point;
+            Eigen::Vector3f source_3f(source_point.x(), source_point.y(), 0.0);
+            Eigen::Vector3f result = source_3f + normal;
+            gui_helpers::AddLine(source_3f,
+                                result,
+                                gui_helpers::Color4f::kGreen,
+                                &normals_marker);
+          }
+        }
       }
     }
     if (solution_c.size() >= 2) {
@@ -419,50 +422,8 @@ Solver::SolveSLAM(SLAMProblem2D& problem,
   options.num_threads = std::thread::hardware_concurrency();
   VisualizationCallback vis_callback(problem, &solution, n);
   options.callbacks.push_back(&vis_callback);
-  // Sliding window for solving for initial guesses.
   double difference = 0;
   double last_difference = 0;
-  // Sliding Window.
-  gui_helpers::ClearMarker(&match_line_list);
-  gui_helpers::ClearMarker(&normals_marker);
-  for (size_t node_i_index = 0;
-      node_i_index < problem.nodes.size();
-      node_i_index++) {
-    last_difference = difference;
-    difference = 0;
-    do {
-      ceres::Problem ceres_problem;
-      AddOdomFactors(problem.odometry_factors, solution, &ceres_problem);
-      // Set the first pose to be constant.
-      if (node_i_index == 0) {
-        ceres_problem.SetParameterBlockConstant(solution[0].pose);
-      }
-      for (size_t node_j_index =
-            std::max((int64_t)(node_i_index) - 3, 0l);
-          node_j_index < node_i_index;
-          node_j_index++) {
-        // Add all the points to this, make a new problem. Minimize, continue.
-        PointCorrespondences correspondence(solution[node_j_index].pose,
-                                            solution[node_i_index].pose);
-        difference += GetPointCorrespondences(problem,
-                                              &solution,
-                                              &correspondence,
-                                              node_j_index,
-                                              node_i_index);
-        ceres_problem.AddResidualBlock(
-          LIDARPointBlobResidual::create(correspondence.source_points,
-                                        correspondence.target_points,
-                                        correspondence.target_normals),
-          NULL,
-          correspondence.source_pose,
-          correspondence.target_pose);
-      }
-      ceres::Solve(options, &ceres_problem, &summary);
-    } while (abs(difference - last_difference) > stopping_accuracy);
-    vis_callback.PubVisualization();
-  }
-  difference = 0;
-  last_difference = 0;
   do {
     gui_helpers::ClearMarker(&match_line_list);
     gui_helpers::ClearMarker(&normals_marker);
