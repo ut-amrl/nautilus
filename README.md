@@ -45,3 +45,8 @@ Here are three bagfiles that you can run the data on and the command to run them
 ./bin/lidar_slam --bag_path 2014-10-07-12-58-30.bag --odom_topic odom --lidar_topic laser --pose_num 1000
 ```
 
+[Indoor Bag taken on the "COBOT" in the GDC](https://drive.google.com/a/utexas.edu/file/d/1KXN9eDzBZAnd34Nr30useKH3JP7-xVxL/view?usp=drivesdk)
+```
+./bin/lidar_slam --bag_path data/2019-11-08-11-13-09_GDC3.bag --lidar_topic /Cobot/Laser --odom_topic /Cobot/Odometry --diff_odom --pose_num 1000 --translation_weight 20
+```
+
