@@ -29,7 +29,32 @@
 
 #define M_2PI (2.0 * M_PI)
 
+// UnusedVar can suppress gcc warnings about unused variables.
+// MustCheckReturn lets a function emit a warning if its return value
+// isn't used
+#if __GNUC__ >= 3
+# define UnusedVar __attribute__((unused))
+# define MustUseResult __attribute__((warn_unused_result))
+#else
+# define UnusedVar
+# define MustUseResult
+#endif
+
+
 namespace math_util {
+  
+// Returns angle within [-PI,PI]
+template <class real>
+inline real angle_mod(real angle) MustUseResult;
+  
+template <class real>
+real angle_mod(real angle)
+{
+  angle -= M_2PI * rint(angle / M_2PI);
+
+  return(angle);
+}
+
 
 // Convert angle in radians to degrees.
 template <typename T>

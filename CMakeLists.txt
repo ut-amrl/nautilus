@@ -47,11 +47,11 @@ ROSBUILD_ADD_EXECUTABLE(lidar_slam
         src/kdtree.cc)
 
 ADD_LIBRARY(shared_library
-        src/gui_helpers.cc
-        src/timer.cc)
+            src/gui_helpers.cc
+            src/timer.cc)
 
 TARGET_LINK_LIBRARIES(lidar_slam
-        shared_library
-        ${libs}
-        ${CERES_LIBRARIES})
+                      shared_library
+                      ${libs}
+                      ${CERES_LIBRARIES})
 

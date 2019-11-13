@@ -11,9 +11,14 @@
 #include "./slam_type_builder.h"
 #include "./slam_types.h"
 #include "./solver.h"
+#include "lidar_slam/CobotOdometryMsg.h"
 
 using std::string;
 using std::vector;
+using slam_types::SLAMNodeSolution2D;
+using slam_types::SLAMProblem2D;
+using slam_types::SLAMNode2D;
+using lidar_slam::CobotOdometryMsg;
 
 DEFINE_string(
   bag_path,
@@ -43,9 +48,13 @@ DEFINE_int64(
   pose_num,
   30,
   "The number of poses to process.");
+DEFINE_bool(
+  diff_odom,
+  false,
+  "Is the odometry differential (True for CobotOdometryMsgs)?");
 
-slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path,
-                                         const ros::NodeHandle& n) {
+SLAMProblem2D ProcessBagFile(const char* bag_path,
+                             const ros::NodeHandle& n) {
   /*
    * Loads and processes the bag file pulling out the lidar data
    * and the odometry data. Keeps track of the current pose and produces
@@ -65,7 +74,7 @@ slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path,
   topics.emplace_back(FLAGS_odom_topic.c_str());
   topics.emplace_back(FLAGS_lidar_topic.c_str());
   rosbag::View view(bag, rosbag::TopicQuery(topics));
-  SLAMTypeBuilder slam_builder(FLAGS_pose_num);
+  SLAMTypeBuilder slam_builder(FLAGS_pose_num, FLAGS_diff_odom);
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
        ros::ok() && it != view.end() && !slam_builder.Done();
@@ -85,6 +94,12 @@ slam_types::SLAMProblem2D ProcessBagFile(const char* bag_path,
         slam_builder.OdometryCallback(*odom);
       }
     }
+    {
+      lidar_slam::CobotOdometryMsgPtr odom = message.instantiate<CobotOdometryMsg>();
+      if (odom != nullptr) {
+        slam_builder.DifferentialOdometryCallback(*odom);
+      }
+    }
   }
   bag.close();
   printf("Done.\n");
@@ -100,7 +115,7 @@ void SignalHandler(int signum) {
 int main(int argc, char** argv) {
   google::InitGoogleLogging(*argv);
   google::ParseCommandLineFlags(&argc, &argv, false);
-  if (FLAGS_bag_path == "") {
+  if (FLAGS_bag_path.compare("") == 0) {
     printf("Must specify an input bag!");
     exit(0);
   }
@@ -108,7 +123,7 @@ int main(int argc, char** argv) {
   ros::NodeHandle n;
   signal(SIGINT, SignalHandler);
   // Load and pre-process the data.
-  slam_types::SLAMProblem2D slam_problem =
+  SLAMProblem2D slam_problem =
           ProcessBagFile(FLAGS_bag_path.c_str(), n);
   CHECK_GT(slam_problem.nodes.size(), 1)
     << "Not enough nodes were processed"

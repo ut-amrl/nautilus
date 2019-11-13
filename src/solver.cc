@@ -288,8 +288,8 @@ void Solver::AddOdomFactors(const vector<OdometryFactor2D>& odom_factors,
     CHECK_GT(solution.size(), odom_factor.pose_j);
     ceres_problem->AddResidualBlock(
       OdometryResidual::create(odom_factor,
-                               translation_weight,
-                               rotation_weight),
+                                     translation_weight_,
+                                     rotation_weight_),
       NULL,
       solution[odom_factor.pose_i].pose,
       solution[odom_factor.pose_j].pose);
@@ -493,7 +493,7 @@ Solver::SolveSLAM(SLAMProblem2D& problem,
       }
     }
     ceres::Solve(options, &ceres_problem, &summary);
-  } while (abs(difference - last_difference) > stopping_accuracy);
+  } while (abs(difference - last_difference) > stopping_accuracy_);
   // Call the visualization once more to see the finished optimization.
   for (int i = 0; i <  5; i++) {
     vis_callback.PubVisualization();
@@ -505,6 +505,6 @@ Solver::SolveSLAM(SLAMProblem2D& problem,
 Solver::Solver(double translation_weight,
                double rotation_weight,
                double stopping_accuracy) :
-               translation_weight(translation_weight),
-               rotation_weight(rotation_weight),
-               stopping_accuracy(stopping_accuracy) {}
+               translation_weight_(translation_weight),
+               rotation_weight_(rotation_weight),
+               stopping_accuracy_(stopping_accuracy) {}

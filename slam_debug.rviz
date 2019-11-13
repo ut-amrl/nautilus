@@ -7,11 +7,8 @@ Panels:
         - /Global Options1
         - /Status1
         - /PointCloud21
-        - /Marker1/Status1
-        - /Marker2/Status1
         - /PointCloud22
         - /Marker3
-        - /Marker3/Status1
       Splitter Ratio: 0.5
     Tree Height: 728
   - Class: rviz/Selection
@@ -32,7 +29,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: PointCloud2
+    SyncSource: ""
 Preferences:
   PromptSaveOnExit: true
 Toolbars:
@@ -93,7 +90,7 @@ Visualization Manager:
       Marker Topic: /poses
       Name: Marker
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: true
     - Class: rviz/Marker
@@ -170,7 +167,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/ThirdPersonFollower
-      Distance: 3.2965950965881348
+      Distance: 30.45347785949707
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
