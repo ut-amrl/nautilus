@@ -23,40 +23,9 @@ using lidar_slam::CobotOdometryMsg;
 
 void SLAMTypeBuilder::AddOdomFactor(
         std::vector<OdometryFactor2D>& odom_factors) {
-  CHECK_EQ(odom_initialized_, true);
-  if (!differential_odom_) {
-    Eigen::Matrix2f last_rot_mat =
-        Eigen::Rotation2D<float>(last_odom_angle_)
-            .toRotationMatrix();
-    Vector2f translation =
-        last_rot_mat.inverse() * (odom_translation_ - last_odom_translation_);
-    Eigen::Matrix2f curr_rot_mat =
-        Eigen::Rotation2D<float>(odom_angle_)
-            .toRotationMatrix();
-    Eigen::Matrix2f rotation =
-        curr_rot_mat * last_rot_mat.transpose();
-    // Recover angle from rotation matrix.
-    double angle = atan2(rotation(0, 1), rotation(0, 0));
-    odom_factors.emplace_back(pose_id_ - 1, pose_id_, translation, angle);
-    last_odom_angle_ = odom_angle_;
-    last_odom_translation_ = odom_translation_;
-  } else {
-    Vector2f translation = odom_translation_;
-    float angle = math_util::angle_mod(odom_angle_);
-    if (pose_id_ == 1) {
-      // Because this is differential, every odometry message after
-      // the first will be an accurate change amount,
-      // but the first is garbage.
-      translation = Vector2f(0, 0);
-      angle = 0;
-    }
-    odom_factors.emplace_back(pose_id_ - 1,
-                              pose_id_,
-                              translation,
-                              angle);
-    odom_angle_ = 0;
-    odom_translation_ = Vector2f(0,0);
-  }
+  odom_factors.emplace_back((differential_odom_)?
+                              diff_tracking.GetOdomFactor(pose_id_) :
+                              odom_tracking.GetOdomFactor(pose_id_));
 }
 
 bool SLAMTypeBuilder::Done() {
@@ -68,20 +37,16 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
     return;
   }
   // We only want one odometry between each lidar callback.
-  if (odom_initialized_ &&
-     ((last_odom_translation_ - odom_translation_).norm() > 0.20 ||
-     (AngleDist(odom_angle_, last_odom_angle_) > M_PI / 18.0))) {
+  if ((differential_odom_ && diff_tracking.ReadyForLidar()) ||
+       odom_tracking.ReadyForLidar()) {
     // Transform this laser scan into a point cloud.s
     std::vector<Vector2f> pointcloud = LaserScanToPointCloud(laser_scan);
     LidarFactor lidar_factor(pose_id_, pointcloud);
     RobotPose2D pose;
-    if (!differential_odom_) {
-      pose = RobotPose2D(odom_translation_ - init_odom_translation_,
-                         odom_angle_); //TODO: Maybe not good idea to not subtract initial angle.
+    if (differential_odom_) {
+      pose = diff_tracking.GetPose();
     } else {
-      total_translation += Rotation2Df(total_rotation) * odom_translation_;
-      total_rotation = math_util::angle_mod(total_rotation + odom_angle_);
-      pose = RobotPose2D(total_translation, total_rotation);
+      pose = odom_tracking.GetPose();
     }
     SLAMNode2D slam_node(pose_id_, laser_scan.header.stamp.toSec(), pose,
                          lidar_factor);
@@ -109,6 +74,68 @@ float ZRadiansFromQuaterion(geometry_msgs::Quaternion& q) {
 }
 
 void SLAMTypeBuilder::OdometryCallback(nav_msgs::Odometry& odometry) {
+  odom_tracking.OdometryCallback(odometry);
+}
+
+void
+SLAMTypeBuilder::OdometryCallback(CobotOdometryMsg& odometry) {
+  diff_tracking.OdometryCallback(odometry);
+}
+
+slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
+    SLAMProblem2D slam_problem(nodes_, odom_factors_);
+  return slam_problem;
+}
+
+SLAMTypeBuilder::SLAMTypeBuilder(uint64_t pose_num, bool differential_odom) :
+  pose_num_max_(pose_num),
+  differential_odom_(differential_odom) {}
+
+void DifferentialOdometryTracking::OdometryCallback(
+        lidar_slam::CobotOdometryMsg &odometry) {
+  if (!odom_initialized_) {
+    odom_initialized_ = true;
+    pending_rotation_ = 0;
+    pending_translation_ = Vector2f(0, 0);
+  } else {
+    pending_rotation_ = math_util::angle_mod(odometry.dr + pending_rotation_);
+    pending_translation_ += Vector2f(odometry.dx, odometry.dy);
+  }
+}
+
+OdometryFactor2D DifferentialOdometryTracking::GetOdomFactor(uint64_t pose_id) {
+  if (!odom_initialized_) {
+    Vector2f trans_temp(0,0);
+    OdometryFactor2D odom_temp(pose_id - 1, pose_id, trans_temp, 0);
+    return odom_temp;
+  }
+  Vector2f translation = pending_translation_;
+  float angle = math_util::angle_mod(pending_rotation_);
+  if (pose_id == 1) {
+    // Because this is differential, every odometry message after
+    // the first will be an accurate change amount,
+    // but the first is garbage.
+    translation = Vector2f(0, 0);
+    angle = 0;
+  }
+  OdometryFactor2D odom_factor(pose_id - 1,
+                               pose_id,
+                               translation,
+                               angle);
+  pending_rotation_ = 0;
+  pending_translation_ = Vector2f(0,0);
+  return odom_factor;
+}
+
+RobotPose2D DifferentialOdometryTracking::GetPose() {
+  // We multiply by the total rotation because this translation
+  // is in the context of the last robots position's frame.
+  total_translation += Rotation2Df(total_rotation) * pending_translation_;
+  total_rotation = math_util::angle_mod(total_rotation + pending_rotation_);
+  return RobotPose2D(total_translation, total_rotation);
+}
+
+void AbsoluteOdometryTracking::OdometryCallback(nav_msgs::Odometry &odometry) {
   if (!odom_initialized_) {
     init_odom_translation_ = Vector2f(odometry.pose.pose.position.x,
                                       odometry.pose.pose.position.y);
@@ -122,25 +149,31 @@ void SLAMTypeBuilder::OdometryCallback(nav_msgs::Odometry& odometry) {
                                odometry.pose.pose.position.y);
 }
 
-void
-SLAMTypeBuilder::DifferentialOdometryCallback(CobotOdometryMsg& odometry) {
+
+OdometryFactor2D AbsoluteOdometryTracking::GetOdomFactor(uint64_t pose_id) {
   if (!odom_initialized_) {
-    odom_initialized_ = true;
-    last_odom_angle_ = 0;
-    last_odom_translation_ = Vector2f(0, 0);
-    odom_angle_ = 0;
-    odom_translation_ = Vector2f(0, 0);
-  } else {
-    odom_angle_ = math_util::angle_mod(odometry.dr + odom_angle_);
-    odom_translation_ += Vector2f(odometry.dx, odometry.dy);
+    Vector2f trans_temp(0,0);
+    OdometryFactor2D odom_temp(pose_id - 1, pose_id, trans_temp, 0);
+    return odom_temp;
   }
+  Eigen::Matrix2f last_rot_mat =
+          Eigen::Rotation2D<float>(last_odom_angle_)
+                  .toRotationMatrix();
+  Vector2f translation =
+          last_rot_mat.inverse() * (odom_translation_ - last_odom_translation_);
+  Eigen::Matrix2f curr_rot_mat =
+          Eigen::Rotation2D<float>(odom_angle_)
+                  .toRotationMatrix();
+  Eigen::Matrix2f rotation =
+          curr_rot_mat * last_rot_mat.transpose();
+  // Recover angle from rotation matrix.
+  double angle = atan2(rotation(0, 1), rotation(0, 0));
+  OdometryFactor2D odom_factor(pose_id - 1, pose_id, translation, angle);
+  last_odom_angle_ = odom_angle_;
+  last_odom_translation_ = odom_translation_;
+  return odom_factor;
 }
 
-slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
-    SLAMProblem2D slam_problem(nodes_, odom_factors_);
-  return slam_problem;
+RobotPose2D AbsoluteOdometryTracking::GetPose() {
+  return RobotPose2D(odom_translation_ - init_odom_translation_, odom_angle_);
 }
-
-SLAMTypeBuilder::SLAMTypeBuilder(uint64_t pose_num, bool differential_odom) :
-  pose_num_max_(pose_num),
-  differential_odom_(differential_odom) {}

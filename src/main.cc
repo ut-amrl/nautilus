@@ -97,7 +97,7 @@ SLAMProblem2D ProcessBagFile(const char* bag_path,
     {
       lidar_slam::CobotOdometryMsgPtr odom = message.instantiate<CobotOdometryMsg>();
       if (odom != nullptr) {
-        slam_builder.DifferentialOdometryCallback(*odom);
+        slam_builder.OdometryCallback(*odom);
       }
     }
   }
