@@ -17,6 +17,7 @@
 
 using slam_types::OdometryFactor2D;
 using slam_types::RobotPose2D;
+using Eigen::Vector2f;
 
 class DifferentialOdometryTracking {
  public:
@@ -29,11 +30,11 @@ class DifferentialOdometryTracking {
   }
  private:
   bool odom_initialized_ = false;
-  Eigen::Vector2f pending_translation_;
-  float pending_rotation_;
+  Eigen::Vector2f pending_translation_ = Vector2f(0, 0);
+  float pending_rotation_ = 0;
   // This is for calculating the pose in the world frame when
   // using differential odometry.
-  Eigen::Vector2f total_translation = Eigen::Vector2f(0, 0);
+  Eigen::Vector2f total_translation = Vector2f(0, 0);
   float total_rotation = 0.0f;
 };
 
@@ -50,12 +51,12 @@ class AbsoluteOdometryTracking {
   }
  private:
   bool odom_initialized_ = false;
-  Eigen::Vector2f init_odom_translation_;
-  float init_odom_angle_;
-  Eigen::Vector2f odom_translation_;
-  float odom_angle_;
-  Eigen::Vector2f last_odom_translation_;
-  float last_odom_angle_;
+  Eigen::Vector2f init_odom_translation_ = Vector2f(0,0);
+  float init_odom_angle_ = 0;
+  Eigen::Vector2f odom_translation_ = Vector2f(0, 0);
+  float odom_angle_ = 0;
+  Eigen::Vector2f last_odom_translation_ = Vector2f(0,0);
+  float last_odom_angle_ = 0;
 };
 
 class SLAMTypeBuilder {

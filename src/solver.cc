@@ -495,7 +495,7 @@ Solver::SolveSLAM(SLAMProblem2D& problem,
     ceres::Solve(options, &ceres_problem, &summary);
   } while (abs(difference - last_difference) > stopping_accuracy_);
   // Call the visualization once more to see the finished optimization.
-  for (int i = 0; i <  5; i++) {
+  for (int i = 0; i < 5; i++) {
     vis_callback.PubVisualization();
     sleep(1);
   }
