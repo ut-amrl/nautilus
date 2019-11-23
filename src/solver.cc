@@ -467,48 +467,54 @@ Solver::SolveSLAM(SLAMProblem2D& problem,
   double last_difference = 0;
   // While our solution moves more than the stopping_accuracy,
   // continue to optimize.
-  do {
-    gui_helpers::ClearMarker(&match_line_list);
-    gui_helpers::ClearMarker(&normals_marker);
-    last_difference = difference;
-    difference = 0;
-    ceres::Problem ceres_problem;
-    // Add all the odometry constraints between our poses.
-    AddOdomFactors(problem.odometry_factors, solution, &ceres_problem);
-    // For every SLAM node we want to optimize it against the past
-    // LIDAR_CONSTRAINT_AMOUNT nodes.
-    for (size_t node_i_index = 0;
-        node_i_index < problem.nodes.size();
-        node_i_index++) {
-      // Set the first pose to be constant.
-      if (node_i_index == 0) {
-        ceres_problem.SetParameterBlockConstant(solution[0].pose);
+  for (int64_t window_size = 1; window_size <= LIDAR_CONSTRAINT_AMOUNT; window_size++) {
+    std::cout << "Using window size: " << window_size << std::endl;
+    do {
+      gui_helpers::ClearMarker(&match_line_list);
+      gui_helpers::ClearMarker(&normals_marker);
+      last_difference = difference;
+      difference = 0;
+      ceres::Problem ceres_problem;
+      // Add all the odometry constraints between our poses.
+      AddOdomFactors(problem.odometry_factors, solution, &ceres_problem);
+      // For every SLAM node we want to optimize it against the past
+      // LIDAR_CONSTRAINT_AMOUNT nodes.
+      for (size_t node_i_index = 0;
+           node_i_index < problem.nodes.size();
+           node_i_index++) {
+        // Set the first pose to be constant.
+        if (node_i_index == 0) {
+          ceres_problem.SetParameterBlockConstant(solution[0].pose);
+        }
+        for (size_t node_j_index =
+                std::max((int64_t) (node_i_index) - window_size,
+                         0l);
+             node_j_index < node_i_index;
+             node_j_index++) {
+          PointCorrespondences correspondence(solution[node_j_index].pose,
+                                              solution[node_i_index].pose);
+          // Get the correspondences between these two poses.
+          difference += GetPointCorrespondences(problem,
+                                                &solution,
+                                                &correspondence,
+                                                node_j_index,
+                                                node_i_index);
+          difference /=
+            problem.nodes[node_j_index].lidar_factor.pointcloud.size();
+          // Add the correspondences as constraints in the optimization problem.
+          ceres_problem.AddResidualBlock(
+                  LIDARPointBlobResidual::create(correspondence.source_points,
+                                                 correspondence.target_points,
+                                                 correspondence.source_normals,
+                                                 correspondence.target_normals),
+                  NULL,
+                  correspondence.source_pose,
+                  correspondence.target_pose);
+        }
       }
-      for (size_t node_j_index =
-             std::max((int64_t)(node_i_index) - LIDAR_CONSTRAINT_AMOUNT, 0l);
-           node_j_index < node_i_index;
-           node_j_index++) {
-        PointCorrespondences correspondence(solution[node_j_index].pose,
-                                            solution[node_i_index].pose);
-        // Get the correspondences between these two poses.
-        difference += GetPointCorrespondences(problem,
-                                              &solution,
-                                              &correspondence,
-                                              node_j_index,
-                                              node_i_index);
-        // Add the correspondences as constraints in the optimization problem.
-        ceres_problem.AddResidualBlock(
-          LIDARPointBlobResidual::create(correspondence.source_points,
-                                         correspondence.target_points,
-                                         correspondence.source_normals,
-                                         correspondence.target_normals),
-          NULL,
-          correspondence.source_pose,
-          correspondence.target_pose);
-      }
-    }
-    ceres::Solve(options, &ceres_problem, &summary);
-  } while (abs(difference - last_difference) > stopping_accuracy_);
+      ceres::Solve(options, &ceres_problem, &summary);
+    } while (abs(difference - last_difference) > stopping_accuracy_);
+  }
   // Call the visualization once more to see the finished optimization.
   for (int i = 0; i < 5; i++) {
     vis_callback.PubVisualization();
