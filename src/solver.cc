@@ -25,9 +25,12 @@
 #include "./pointcloud_helpers.h"
 #include "./gui_helpers.h"
 #include "timer.h"
+#include "lidar_slam/HitlSlamInputMsg.h"
 
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
+#define HITL_LINE_WIDTH 0.05
+#define HITL_POSE_POINT_THRESHOLD 5
 
 using std::vector;
 using slam_types::OdometryFactor2D;
@@ -39,6 +42,9 @@ using Eigen::Rotation2D;
 using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
 using Eigen::Affine2f;
+using lidar_slam::HitlSlamInputMsgConstPtr;
+using lidar_slam::HitlSlamInputMsg;
+using slam_types::SLAMNode2D;
 
 visualization_msgs::Marker match_line_list;
 visualization_msgs::Marker normals_marker;
@@ -323,27 +329,27 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
                                 size_t target_node_index) {
   // Summed differences between point correspondences.
   double difference = 0.0;
-  vector<SLAMNodeSolution2D>& solution = *solution_ptr;
-  SLAMNodeSolution2D& source_solution = solution[source_node_index];
-  SLAMNodeSolution2D& target_solution = solution[target_node_index];
+  vector<SLAMNodeSolution2D> &solution = *solution_ptr;
+  SLAMNodeSolution2D &source_solution = solution[source_node_index];
+  SLAMNodeSolution2D &target_solution = solution[target_node_index];
   LidarFactor source_lidar =
-    problem.nodes[source_node_index].lidar_factor;
+          problem.nodes[source_node_index].lidar_factor;
   LidarFactor target_lidar =
-    problem.nodes[target_node_index].lidar_factor;
+          problem.nodes[target_node_index].lidar_factor;
   // Affine transformations from the two pose's reference frames.
   Affine2f source_to_world =
-    PoseArrayToAffine(&source_solution.pose[2],
-                      &source_solution.pose[0]).cast<float>();
+          PoseArrayToAffine(&source_solution.pose[2],
+                            &source_solution.pose[0]).cast<float>();
   Affine2f target_to_world =
-    PoseArrayToAffine(&target_solution.pose[2],
-                      &target_solution.pose[0]).cast<float>();
+          PoseArrayToAffine(&target_solution.pose[2],
+                            &target_solution.pose[0]).cast<float>();
   // Loop over all the points in the source pointcloud,
   // match each point to the closest point in the target pointcloud
   // who's normal is within a certain threshold.
-  for (const Vector2f& source_point : source_lidar.pointcloud) {
+  for (const Vector2f &source_point : source_lidar.pointcloud) {
     // Transform the source point to the target frame.
     Vector2f source_point_transformed =
-      target_to_world.inverse() * source_to_world * source_point;
+            target_to_world.inverse() * source_to_world * source_point;
     // Get the closest points within the threshold.
     // For now we assume that a match is within 1/6 of the threshold.
     KDNodeValue<float, 2> closest_target;
@@ -354,9 +360,9 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
     // Get the current source point's normal.
     KDNodeValue<float, 2> source_point_with_normal;
     float found_dist =
-      source_lidar.pointcloud_tree->FindNearestPoint(source_point,
-                                                     0.1,
-                                                     &source_point_with_normal);
+            source_lidar.pointcloud_tree->FindNearestPoint(source_point,
+                                                           0.1,
+                                                           &source_point_with_normal);
     CHECK_EQ(found_dist, 0.0) << "Source point is not in KD Tree!\n";
     float dist = OUTLIER_THRESHOLD;
     // Sort the target points by distance from the source point in the
@@ -365,9 +371,9 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
               neighbors.end(),
               [&source_point_transformed](KDNodeValue<float, 2> point_1,
                                           KDNodeValue<float, 2> point_2) {
-      return (source_point_transformed - point_1.point).norm() <
-             (source_point_transformed - point_2.point).norm();
-    });
+                  return (source_point_transformed - point_1.point).norm() <
+                         (source_point_transformed - point_2.point).norm();
+              });
     // For all target points, starting with the closest
     // see if any of them have a close enough normal to be 
     // considered a match.
@@ -394,13 +400,13 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
                 neighbors.end(),
                 [&source_point_transformed](KDNodeValue<float, 2> point_1,
                                             KDNodeValue<float, 2> point_2) {
-        return (source_point_transformed - point_1.point).norm() <
-               (source_point_transformed - point_2.point).norm();
-      });
+                    return (source_point_transformed - point_1.point).norm() <
+                           (source_point_transformed - point_2.point).norm();
+                });
       // Cut out the first 1/6 threshold that we already checked.
       vector<KDNodeValue<float, 2>>
-        unchecked_neighbors(neighbors.begin() + (OUTLIER_THRESHOLD / 6),
-                            neighbors.end());
+              unchecked_neighbors(neighbors.begin() + (OUTLIER_THRESHOLD / 6),
+                                  neighbors.end());
       // See if any of these points have a normal within our threshold.
       for (KDNodeValue<float, 2> current_target : unchecked_neighbors) {
         if (NormalsSimilar(current_target.normal,
@@ -425,7 +431,7 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
     point_correspondences->source_points.push_back(source_point_modifiable);
     point_correspondences->target_points.push_back(closest_target.point);
     point_correspondences->
-      source_normals.push_back(source_point_with_normal.normal);
+            source_normals.push_back(source_point_with_normal.normal);
     point_correspondences->target_normals.push_back(closest_target.normal);
     // Add a line from the matches that we are using.
     // Transform everything to the world frame.
@@ -445,29 +451,22 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
 }
 
 vector<SLAMNodeSolution2D>
-Solver::SolveSLAM(SLAMProblem2D& problem,
-                  ros::NodeHandle& n) {
-  // Copy all the data to a list that we are going to modify as we optimize.
-  vector<SLAMNodeSolution2D> solution(problem.nodes.size());
-  for (size_t i = 0; i < problem.nodes.size(); i++) {
-    // Make sure that we marked all the data correctly earlier.
-    CHECK_EQ(i, problem.nodes[i].node_idx);
-    SLAMNodeSolution2D sol_node(problem.nodes[i]);
-    solution[i] = sol_node;
-  }
+Solver::SolveSLAM(ros::NodeHandle& n) {
   // Setup ceres for evaluation of the problem.
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::SPARSE_SCHUR;
   options.minimizer_progress_to_stdout = false;
   options.num_threads = std::thread::hardware_concurrency();
-  VisualizationCallback vis_callback(problem, &solution, n);
+  VisualizationCallback vis_callback(problem_, &solution_, n);
   options.callbacks.push_back(&vis_callback);
   double difference = 0;
   double last_difference = 0;
   // While our solution moves more than the stopping_accuracy,
   // continue to optimize.
-  for (int64_t window_size = 1; window_size <= LIDAR_CONSTRAINT_AMOUNT; window_size++) {
+  for (int64_t window_size = 1;
+       window_size <= LIDAR_CONSTRAINT_AMOUNT;
+       window_size++) {
     std::cout << "Using window size: " << window_size << std::endl;
     do {
       gui_helpers::ClearMarker(&match_line_list);
@@ -476,31 +475,31 @@ Solver::SolveSLAM(SLAMProblem2D& problem,
       difference = 0;
       ceres::Problem ceres_problem;
       // Add all the odometry constraints between our poses.
-      AddOdomFactors(problem.odometry_factors, solution, &ceres_problem);
+      AddOdomFactors(problem_.odometry_factors, solution_, &ceres_problem);
       // For every SLAM node we want to optimize it against the past
       // LIDAR_CONSTRAINT_AMOUNT nodes.
       for (size_t node_i_index = 0;
-           node_i_index < problem.nodes.size();
+           node_i_index < problem_.nodes.size();
            node_i_index++) {
         // Set the first pose to be constant.
         if (node_i_index == 0) {
-          ceres_problem.SetParameterBlockConstant(solution[0].pose);
+          ceres_problem.SetParameterBlockConstant(solution_[0].pose);
         }
         for (size_t node_j_index =
                 std::max((int64_t) (node_i_index) - window_size,
                          0l);
              node_j_index < node_i_index;
              node_j_index++) {
-          PointCorrespondences correspondence(solution[node_j_index].pose,
-                                              solution[node_i_index].pose);
+          PointCorrespondences correspondence(solution_[node_j_index].pose,
+                                              solution_[node_i_index].pose);
           // Get the correspondences between these two poses.
-          difference += GetPointCorrespondences(problem,
-                                                &solution,
+          difference += GetPointCorrespondences(problem_,
+                                                &solution_,
                                                 &correspondence,
                                                 node_j_index,
                                                 node_i_index);
           difference /=
-            problem.nodes[node_j_index].lidar_factor.pointcloud.size();
+            problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
           // Add the correspondences as constraints in the optimization problem.
           ceres_problem.AddResidualBlock(
                   LIDARPointBlobResidual::create(correspondence.source_points,
@@ -520,12 +519,83 @@ Solver::SolveSLAM(SLAMProblem2D& problem,
     vis_callback.PubVisualization();
     sleep(1);
   }
-  return solution;
+  return solution_;
 }
 
 Solver::Solver(double translation_weight,
                double rotation_weight,
-               double stopping_accuracy) :
+               double stopping_accuracy,
+               SLAMProblem2D& problem) :
                translation_weight_(translation_weight),
                rotation_weight_(rotation_weight),
-               stopping_accuracy_(stopping_accuracy) {}
+               stopping_accuracy_(stopping_accuracy),
+               problem_(problem) {
+  // Copy all the data to a list that we are going to modify as we optimize.
+  for (size_t i = 0; i < problem.nodes.size(); i++) {
+    // Make sure that we marked all the data correctly earlier.
+    CHECK_EQ(i, problem.nodes[i].node_idx);
+    SLAMNodeSolution2D sol_node(problem.nodes[i]);
+    solution_.push_back(sol_node);
+  }
+  CHECK_EQ(solution_.size(), problem.nodes.size());
+}
+
+vector<Eigen::Hyperplane<float, 2>>
+HitlMsgToEigenLines(const HitlSlamInputMsg& hitl_msg) {
+  Vector2f line_a_start(hitl_msg.line_a_start.x, hitl_msg.line_a_start.y);
+  Vector2f line_a_end(hitl_msg.line_a_end.x, hitl_msg.line_a_end.y);
+  Vector2f line_b_start(hitl_msg.line_b_start.x, hitl_msg.line_b_start.y);
+  Vector2f line_b_end(hitl_msg.line_b_end.x, hitl_msg.line_b_end.y);
+  vector<Eigen::Hyperplane<float, 2>> lines;
+  lines.push_back(Eigen::Hyperplane<float, 2>::Through(line_a_start,
+                                                       line_a_end));
+  lines.push_back(Eigen::Hyperplane<float, 2>::Through(line_b_start,
+                                                       line_b_end));
+  return lines;
+}
+
+vector<vector<SLAMNode2D>>
+GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg,
+                        SLAMProblem2D& problem) {
+  // Linearly go through all poses
+  // Go through all points and see if they lie on either of the two lines.
+  typedef Eigen::Hyperplane<float, 2> Line2d;
+  vector<Line2d> lines = HitlMsgToEigenLines(hitl_msg);
+  vector<vector<SLAMNode2D>> poses(2);
+  for (const SLAMNode2D node : problem.nodes) {
+    uint64_t point_count_a = 0;
+    uint64_t point_count_b = 0;
+    for (Vector2f point : node.lidar_factor.pointcloud) {
+      if (lines[0].absDistance(point) < HITL_LINE_WIDTH) {
+        point_count_a++;
+      } else if (lines[1].absDistance(point) < HITL_LINE_WIDTH) {
+        point_count_b++;
+      }
+    }
+    if (point_count_a >= HITL_POSE_POINT_THRESHOLD) {
+      poses[0].push_back(node);
+    } else if (point_count_b >= HITL_POSE_POINT_THRESHOLD) {
+      poses[1].push_back(node);
+    }
+  }
+  return poses;
+}
+
+void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
+  const HitlSlamInputMsg hitl_msg = *hitl_ptr;
+  // Get the poses that belong to this input.
+  vector<vector<SLAMNode2D>> poses =
+    GetRelevantPosesForHITL(hitl_msg, problem_);
+  std::cout << poses[0].size() << std::endl;
+  // Create a new problem with colinear residuals between these nodes and a
+  // small weighted odometry residuals between all poses and between these ones.
+  // Resolve the initial problem with extra pointcloud residuals between these
+  // loop closed points.
+}
+
+
+//TODO: Take lines from user and find the poses that contain more than a threshold of the selected points.
+// Make a HITL residual for colinear poses between each of the pairs.
+// Make the odometry correspondences between these poses.
+// Solve
+// Resolve using lidar_point correspondences and odometry factors between these poses.

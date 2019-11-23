@@ -4,9 +4,11 @@ Debug
 build
 data
 lib
+msg_gen
 *.kdev4
 .kdev4
 .settings
 .idea
 .project
 .cproject
+.codelite/*

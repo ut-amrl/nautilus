@@ -12,6 +12,7 @@
 #include "./slam_types.h"
 #include "./solver.h"
 #include "lidar_slam/CobotOdometryMsg.h"
+#include "lidar_slam/HitlSlamInputMsg.h"
 
 using std::string;
 using std::vector;
@@ -19,6 +20,7 @@ using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
 using slam_types::SLAMNode2D;
 using lidar_slam::CobotOdometryMsg;
+using lidar_slam::HitlSlamInputMsg;
 
 DEFINE_string(
   bag_path,
@@ -52,6 +54,18 @@ DEFINE_bool(
   diff_odom,
   false,
   "Is the odometry differential (True for CobotOdometryMsgs)?");
+DEFINE_double(
+  lc_translation_weight,
+  0.1,
+  "The translation weight for loop closure.");
+DEFINE_double(
+  lc_rotation_weight,
+  0.1,
+  "The rotational weight for loop closure.");
+DEFINE_string(
+  hitl_lc_topic,
+  "/hitl_slam_input",
+  "The topic which the HITL line messages are published over.");
 
 SLAMProblem2D ProcessBagFile(const char* bag_path,
                              const ros::NodeHandle& n) {
@@ -109,6 +123,7 @@ SLAMProblem2D ProcessBagFile(const char* bag_path,
 
 void SignalHandler(int signum) {
   printf("Exiting with %d\n", signum);
+  ros::shutdown();
   exit(0);
 }
 
@@ -128,10 +143,17 @@ int main(int argc, char** argv) {
   CHECK_GT(slam_problem.nodes.size(), 1)
     << "Not enough nodes were processed"
     << "you probably didn't specify the correct topics!\n";
-  // Load all the residuals into the problem and run!
+  // Load all the residuals into the problem and run to get initial solution.
   Solver solver(FLAGS_translation_weight,
                 FLAGS_rotation_weight,
-                FLAGS_stopping_accuracy);
-  solver.SolveSLAM(slam_problem, n);
+                FLAGS_stopping_accuracy,
+                slam_problem);
+  solver.SolveSLAM(n);
+  std::cout << "Waiting for Loop Closure input" << std::endl;
+  ros::Subscriber hitl_sub = n.subscribe(FLAGS_hitl_lc_topic,
+                                         10,
+                                         &Solver::HitlCallback,
+                                         &solver);
+  ros::spin();
   return 0;
 }
