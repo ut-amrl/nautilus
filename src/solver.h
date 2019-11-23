@@ -26,6 +26,7 @@ class Solver {
   struct PointCorrespondences {
     vector<Vector2f> source_points;
     vector<Vector2f> target_points;
+    vector<Vector2f> source_normals;
     vector<Vector2f> target_normals;
     double *source_pose;
     double *target_pose;

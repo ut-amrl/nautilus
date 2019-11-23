@@ -115,56 +115,68 @@ struct OdometryResidual {
   };
 
 struct LIDARPointBlobResidual {
+
+    // TODO: Add the source normals penalization as well.
+    // Would cause there to be two normals.
     template <typename T>
     bool operator() (const T* source_pose,
                      const T* target_pose,
                      T* residuals) const {
       typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
-      Affine2T source_to_world =
+      const Affine2T source_to_world =
         PoseArrayToAffine(&source_pose[2], &source_pose[0]);
-      Affine2T world_to_target =
+      const Affine2T world_to_target =
         PoseArrayToAffine(&target_pose[2], &target_pose[0]).inverse();
-      Affine2T source_to_target = world_to_target * source_to_world;
-      #pragma omp parallel for
+      const Affine2T source_to_target = world_to_target * source_to_world;
+      #pragma omp parallel for default(none) shared(residuals)
       for (size_t index = 0; index < source_points.size(); index++) {
         Vector2T source_pointT = source_points[index].cast<T>();
         Vector2T target_pointT = target_points[index].cast<T>();
         // Transform source_point into the frame of target_point
         source_pointT = source_to_target * source_pointT;
-        T result =
+        T target_normal_result =
           target_normals[index].cast<T>().dot(source_pointT - target_pointT);
-        residuals[index] = result;
+        T source_normal_result =
+          source_normals[index].cast<T>().dot(target_pointT - source_pointT);
+        residuals[index * 2] = target_normal_result;
+        residuals[index * 2 + 1] = source_normal_result;
       }
       return true;
     }
 
     LIDARPointBlobResidual(vector<Vector2f>& source_points,
                            vector<Vector2f>& target_points,
+                           vector<Vector2f>& source_normals,
                            vector<Vector2f>& target_normals) :
                            source_points(source_points),
                            target_points(target_points),
+                           source_normals(source_normals),
                            target_normals(target_normals) {
       CHECK_EQ(source_points.size(), target_points.size());
       CHECK_EQ(target_points.size(), target_normals.size());
+      CHECK_EQ(source_normals.size(), target_normals.size());
     }
 
     static AutoDiffCostFunction<LIDARPointBlobResidual, ceres::DYNAMIC, 3, 3>*
     create(vector<Vector2f>& source_points,
            vector<Vector2f>& target_points,
+           vector<Vector2f>& source_normals,
            vector<Vector2f>& target_normals) {
       LIDARPointBlobResidual *residual =
         new LIDARPointBlobResidual(source_points,
                                    target_points,
+                                   source_normals,
                                    target_normals);
       return new AutoDiffCostFunction<LIDARPointBlobResidual,
                                       ceres::DYNAMIC,
                                       3, 3>
-                                      (residual, source_points.size());
+                                      (residual, source_points.size() * 2);
     }
 
     const vector<Vector2f> source_points;
     const vector<Vector2f> target_points;
+    const vector<Vector2f> source_normals;
     const vector<Vector2f> target_normals;
 };
 
@@ -412,6 +424,8 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
     Vector2f source_point_modifiable = source_point;
     point_correspondences->source_points.push_back(source_point_modifiable);
     point_correspondences->target_points.push_back(closest_target.point);
+    point_correspondences->
+      source_normals.push_back(source_point_with_normal.normal);
     point_correspondences->target_normals.push_back(closest_target.normal);
     // Add a line from the matches that we are using.
     // Transform everything to the world frame.
@@ -486,6 +500,7 @@ Solver::SolveSLAM(SLAMProblem2D& problem,
         ceres_problem.AddResidualBlock(
           LIDARPointBlobResidual::create(correspondence.source_points,
                                          correspondence.target_points,
+                                         correspondence.source_normals,
                                          correspondence.target_normals),
           NULL,
           correspondence.source_pose,
