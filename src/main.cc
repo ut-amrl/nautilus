@@ -56,11 +56,11 @@ DEFINE_bool(
   "Is the odometry differential (True for CobotOdometryMsgs)?");
 DEFINE_double(
   lc_translation_weight,
-  0.1,
+  0.75,
   "The translation weight for loop closure.");
 DEFINE_double(
   lc_rotation_weight,
-  0.1,
+  0.75,
   "The rotational weight for loop closure.");
 DEFINE_string(
   hitl_lc_topic,
@@ -146,9 +146,12 @@ int main(int argc, char** argv) {
   // Load all the residuals into the problem and run to get initial solution.
   Solver solver(FLAGS_translation_weight,
                 FLAGS_rotation_weight,
+                FLAGS_lc_translation_weight,
+                FLAGS_lc_rotation_weight,
                 FLAGS_stopping_accuracy,
-                slam_problem);
-  solver.SolveSLAM(n);
+                slam_problem,
+                n);
+  solver.SolveSLAM();
   std::cout << "Waiting for Loop Closure input" << std::endl;
   ros::Subscriber hitl_sub = n.subscribe(FLAGS_hitl_lc_topic,
                                          10,

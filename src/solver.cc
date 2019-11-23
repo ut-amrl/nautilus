@@ -27,7 +27,7 @@
 #include "timer.h"
 #include "lidar_slam/HitlSlamInputMsg.h"
 
-#define LIDAR_CONSTRAINT_AMOUNT 10
+#define LIDAR_CONSTRAINT_AMOUNT 5 //TODO: Change this back to 10 after testing.
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
 #define HITL_POSE_POINT_THRESHOLD 5
@@ -94,9 +94,9 @@ struct OdometryResidual {
       return true;
     }
 
-    explicit OdometryResidual(const OdometryFactor2D& factor,
-                              double translation_weight,
-                              double rotation_weight) :
+    OdometryResidual(const OdometryFactor2D& factor,
+                     double translation_weight,
+                     double rotation_weight) :
             translation_weight(translation_weight),
             rotation_weight(rotation_weight),
             R_odom(Rotation2D<float>(factor.rotation)
@@ -299,15 +299,15 @@ class VisualizationCallback : public ceres::IterationCallback {
 
 void Solver::AddOdomFactors(const vector<OdometryFactor2D>& odom_factors,
                             vector<SLAMNodeSolution2D>& solution,
-                            ceres::Problem* ceres_problem) {
+                            ceres::Problem* ceres_problem,
+                            double trans_weight,
+                            double rot_weight) {
   for (const OdometryFactor2D& odom_factor : odom_factors) {
     CHECK_LT(odom_factor.pose_i, odom_factor.pose_j);
     CHECK_GT(solution.size(), odom_factor.pose_i);
     CHECK_GT(solution.size(), odom_factor.pose_j);
     ceres_problem->AddResidualBlock(
-      OdometryResidual::create(odom_factor,
-                                     translation_weight_,
-                                     rotation_weight_),
+      OdometryResidual::create(odom_factor, trans_weight, rot_weight),
       NULL,
       solution[odom_factor.pose_i].pose,
       solution[odom_factor.pose_j].pose);
@@ -450,15 +450,48 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
   return difference;
 }
 
+double Solver::AddLidarResidualsForLC(ceres::Problem& problem) {
+  double difference = 0.0;
+  for (const LCPoses poses : loop_closure_constraints_) {
+    for (const int a_pose_id : poses.a_poses_) {
+      for (const int b_pose_id : poses.b_poses_) {
+        CHECK_LT(a_pose_id, solution_.size());
+        CHECK_LT(b_pose_id, solution_.size());
+        CHECK_LT(a_pose_id, problem_.nodes.size());
+        CHECK_LT(b_pose_id, problem_.nodes.size());
+        PointCorrespondences correspondence(solution_[a_pose_id].pose,
+                                            solution_[b_pose_id].pose);
+        difference += GetPointCorrespondences(problem_,
+                                              &solution_,
+                                              &correspondence,
+                                              a_pose_id,
+                                              b_pose_id);
+        difference /=
+                problem_.nodes[a_pose_id].lidar_factor.pointcloud.size();
+        // Add the correspondences as constraints in the optimization problem.
+        problem.AddResidualBlock(
+                LIDARPointBlobResidual::create(correspondence.source_points,
+                                               correspondence.target_points,
+                                               correspondence.source_normals,
+                                               correspondence.target_normals),
+                NULL,
+                correspondence.source_pose,
+                correspondence.target_pose);
+      }
+    }
+  }
+  return difference;
+}
+
 vector<SLAMNodeSolution2D>
-Solver::SolveSLAM(ros::NodeHandle& n) {
+Solver::SolveSLAM() {
   // Setup ceres for evaluation of the problem.
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::SPARSE_SCHUR;
   options.minimizer_progress_to_stdout = false;
   options.num_threads = std::thread::hardware_concurrency();
-  VisualizationCallback vis_callback(problem_, &solution_, n);
+  VisualizationCallback vis_callback(problem_, &solution_, n_);
   options.callbacks.push_back(&vis_callback);
   double difference = 0;
   double last_difference = 0;
@@ -475,7 +508,11 @@ Solver::SolveSLAM(ros::NodeHandle& n) {
       difference = 0;
       ceres::Problem ceres_problem;
       // Add all the odometry constraints between our poses.
-      AddOdomFactors(problem_.odometry_factors, solution_, &ceres_problem);
+      AddOdomFactors(problem_.odometry_factors,
+                     solution_,
+                     &ceres_problem,
+                     translation_weight_,
+                     rotation_weight_);
       // For every SLAM node we want to optimize it against the past
       // LIDAR_CONSTRAINT_AMOUNT nodes.
       for (size_t node_i_index = 0;
@@ -511,6 +548,7 @@ Solver::SolveSLAM(ros::NodeHandle& n) {
                   correspondence.target_pose);
         }
       }
+      difference += AddLidarResidualsForLC(ceres_problem);
       ceres::Solve(options, &ceres_problem, &summary);
     } while (abs(difference - last_difference) > stopping_accuracy_);
   }
@@ -524,12 +562,18 @@ Solver::SolveSLAM(ros::NodeHandle& n) {
 
 Solver::Solver(double translation_weight,
                double rotation_weight,
+               double lc_translation_weight,
+               double lc_rotation_weight,
                double stopping_accuracy,
-               SLAMProblem2D& problem) :
+               SLAMProblem2D& problem,
+               ros::NodeHandle& n) :
                translation_weight_(translation_weight),
                rotation_weight_(rotation_weight),
+               lc_translation_weight_(lc_translation_weight),
+               lc_rotation_weight_(lc_rotation_weight),
                stopping_accuracy_(stopping_accuracy),
-               problem_(problem) {
+               problem_(problem),
+               n_(n) {
   // Copy all the data to a list that we are going to modify as we optimize.
   for (size_t i = 0; i < problem.nodes.size(); i++) {
     // Make sure that we marked all the data correctly earlier.
@@ -539,6 +583,107 @@ Solver::Solver(double translation_weight,
   }
   CHECK_EQ(solution_.size(), problem.nodes.size());
 }
+
+/*
+ * Methods relevant to HITL loop closure.
+ */
+
+struct ColinearResidual {
+    template <typename T>
+    bool operator() (const T* pose_a,
+                     const T* pose_b,
+                     T* residual) const {
+      // From Human-In-The-Loop SLAM (Nashed et al, 2017)
+      // K_1 * norm((cm_b - cm_a) * n_a) + K_2 * (1 - (n_a * n_b))
+      // K_1 is the translation weight
+      // K_2 is the rotation weight
+      // cm_a and cm_b are the centers of mass for the pointclouds a and b
+      // respectively.
+      // n_a and n_b are the unit normals for the colinear lines.
+      // Start by calculating the center of mass of both pointclouds.
+      typedef Eigen::Transform<T, 2, 2, Eigen::Affine> Affine2T;
+      typedef Eigen::Matrix<T, 2, 1> Vector2T;
+      Affine2T a_to_world = PoseArrayToAffine(&pose_a[0], &pose_a[2]);
+      Affine2T b_to_world = PoseArrayToAffine(&pose_b[0], &pose_b[2]);
+      T a_x_total = T(0.0);
+      T a_y_total = T(0.0);
+      for (Vector2f point : a_pose_pointcloud) {
+        Vector2T pointT = point.cast<T>();
+        pointT = a_to_world * pointT;
+        CHECK(ceres::IsFinite(pointT.x()));
+        CHECK(ceres::IsFinite(pointT.y()));
+        a_x_total += pointT.x();
+        a_y_total += pointT.y();
+      }
+      T b_x_total = T(0.0);
+      T b_y_total = T(0.0);
+      for (Vector2f point : b_pose_pointcloud) {
+        Vector2T pointT = point.cast<T>();
+        pointT = b_to_world * pointT;
+        b_x_total += pointT.x();
+        b_y_total += pointT.y();
+      }
+      T a_size = T(a_pose_pointcloud.size());
+      Vector2T a_center_of_mass(a_x_total / a_size,
+                                a_y_total / a_size);
+      CHECK(ceres::IsFinite(a_center_of_mass.x()));
+      CHECK(ceres::IsFinite(a_center_of_mass.y()));
+      T b_size = T(b_pose_pointcloud.size());
+      Vector2T b_center_of_mass(b_x_total / b_size,
+                                b_y_total / b_size);
+      CHECK(ceres::IsFinite(b_center_of_mass.x()));
+      CHECK(ceres::IsFinite(b_center_of_mass.y()));
+      Vector2T mass_diff = b_center_of_mass - a_center_of_mass;
+      CHECK(ceres::IsFinite(mass_diff.x()));
+      CHECK(ceres::IsFinite(mass_diff.y()));
+      T translation_error = abs(mass_diff.dot(line_a_normal.cast<T>()));
+      CHECK(ceres::IsFinite(translation_error));
+      T trans_part = T(translation_weight) * translation_error;
+      T normal_diff = line_a_normal.cast<T>().dot(line_b_normal.cast<T>());
+      CHECK(ceres::IsFinite(normal_diff));
+      T rot_part = T(rotation_weight) * (T(1.0) - normal_diff);
+      CHECK(ceres::IsFinite(trans_part));
+      CHECK(ceres::IsFinite(rot_part));
+      residual[0] = trans_part + rot_part;
+      return true;
+    }
+
+    ColinearResidual(const Vector2f& line_a_normal,
+                     const Vector2f& line_b_normal,
+                     const vector<Vector2f>& a_pose_pointcloud,
+                     const vector<Vector2f>& b_pose_pointcloud,
+                     double translation_weight,
+                     double rotation_weight) :
+                     line_a_normal(line_a_normal),
+                     line_b_normal(line_b_normal),
+                     a_pose_pointcloud(a_pose_pointcloud),
+                     b_pose_pointcloud(b_pose_pointcloud),
+                     translation_weight(translation_weight),
+                     rotation_weight(rotation_weight) {}
+
+    static AutoDiffCostFunction<ColinearResidual, 1, 3, 3>*
+    create(const Vector2f& line_a_normal,
+           const Vector2f& line_b_normal,
+           const vector<Vector2f>& a_pose_pointcloud,
+           const vector<Vector2f>& b_pose_pointcloud,
+           double translation_weight,
+           double rotation_weight) {
+      ColinearResidual* residual = new ColinearResidual(line_a_normal,
+                                                        line_b_normal,
+                                                        a_pose_pointcloud,
+                                                        b_pose_pointcloud,
+                                                        translation_weight,
+                                                        rotation_weight);
+      return new AutoDiffCostFunction<ColinearResidual, 1, 3, 3>(residual);
+    }
+
+    Vector2f line_a_normal;
+    Vector2f line_b_normal;
+    vector<Vector2f> a_pose_pointcloud;
+    vector<Vector2f> b_pose_pointcloud;
+    double translation_weight;
+    double rotation_weight;
+};
 
 vector<Eigen::Hyperplane<float, 2>>
 HitlMsgToEigenLines(const HitlSlamInputMsg& hitl_msg) {
@@ -581,16 +726,84 @@ GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg,
   return poses;
 }
 
+vector<int> GetPoseIndicesFromNodes(vector<SLAMNode2D> poses) {
+  vector<int> pose_indices;
+  for (SLAMNode2D node : poses) {
+    pose_indices.push_back(node.node_idx);
+  }
+  return pose_indices;
+}
+
+void Solver::AddColinearConstraints(Eigen::Hyperplane<float, 2> line_a,
+                                    Eigen::Hyperplane<float, 2> line_b,
+                                    vector<vector<SLAMNode2D>> poses) {
+  CHECK_EQ(poses.size(), 2);
+  vector<int> a_poses = GetPoseIndicesFromNodes(poses[0]);
+  vector<int> b_poses = GetPoseIndicesFromNodes(poses[1]);
+  loop_closure_constraints_.emplace_back(a_poses, b_poses, line_a, line_b);
+}
+
+void Solver::AddColinearResiduals(ceres::Problem* problem) {
+  for (const LCPoses poses : loop_closure_constraints_) {
+    Vector2f normal_a = poses.line_a_.normal();
+    Vector2f normal_b = poses.line_b_.normal();
+    for (const int a_pose_id : poses.a_poses_) {
+      for (const int b_pose_id : poses.b_poses_) {
+        CHECK_LT(a_pose_id, solution_.size());
+        CHECK_LT(b_pose_id, solution_.size());
+        CHECK_LT(a_pose_id, problem_.nodes.size());
+        CHECK_LT(b_pose_id, problem_.nodes.size());
+        vector<Vector2f>& pointcloud_a =
+          problem_.nodes[a_pose_id].lidar_factor.pointcloud;
+        vector<Vector2f>& pointcloud_b =
+          problem_.nodes[b_pose_id].lidar_factor.pointcloud;
+        problem->
+          AddResidualBlock(ColinearResidual::create(normal_a,
+                                                    normal_b,
+                                                    pointcloud_a,
+                                                    pointcloud_b,
+                                                    lc_translation_weight_,
+                                                    lc_rotation_weight_),
+                           NULL,
+                           solution_[a_pose_id].pose,
+                           solution_[b_pose_id].pose);
+      }
+    }
+  }
+}
+
+void Solver::SolveForLC() {
+  // Create a new problem with colinear residuals between these nodes and a
+  // small weighted odometry residuals between all poses and between these ones.
+  ceres::Problem problem;
+  ceres::Solver::Options options;
+  ceres::Solver::Summary summary;
+  options.linear_solver_type = ceres::SPARSE_SCHUR;
+  options.minimizer_progress_to_stdout = true;
+  options.num_threads = std::thread::hardware_concurrency();
+  VisualizationCallback vis_callback(problem_, &solution_, n_);
+  options.callbacks.push_back(&vis_callback);
+  AddOdomFactors(problem_.odometry_factors,
+                 solution_,
+                 &problem,
+                 lc_translation_weight_,
+                 lc_rotation_weight_);
+  AddColinearResiduals(&problem);
+  ceres::Solve(options, &problem, &summary);
+}
+
 void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   const HitlSlamInputMsg hitl_msg = *hitl_ptr;
   // Get the poses that belong to this input.
   vector<vector<SLAMNode2D>> poses =
     GetRelevantPosesForHITL(hitl_msg, problem_);
-  std::cout << poses[0].size() << std::endl;
-  // Create a new problem with colinear residuals between these nodes and a
-  // small weighted odometry residuals between all poses and between these ones.
+  vector<Eigen::Hyperplane<float, 2>> lines = HitlMsgToEigenLines(hitl_msg);
+  CHECK_EQ(lines.size(), 2);
+  AddColinearConstraints(lines[0], lines[1], poses);
+  SolveForLC();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
+  SolveSLAM();
 }
 
 
