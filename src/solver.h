@@ -23,6 +23,7 @@ using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
 using slam_types::SLAMNode2D;
 using lidar_slam::HitlSlamInputMsgConstPtr;
+using lidar_slam::HitlSlamInputMsg;
 
 template <typename T>
 struct LineSegment {
@@ -115,6 +116,7 @@ class Solver {
   vector<SLAMNodeSolution2D> GetSolution() {
     return solution_;
   }
+  LCConstraint GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg);
   void AddColinearConstraints(LCConstraint& constraint);
   void SolveForLC();
   void AddColinearResiduals(ceres::Problem* problem);

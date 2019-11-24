@@ -720,28 +720,35 @@ vector<LineSegment<float>> LineSegmentsFromHitlMsg(const HitlSlamInputMsg& msg) 
 }
 
 LCConstraint
-GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg,
-                        SLAMProblem2D& problem) {
+Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
   // Linearly go through all poses
   // Go through all points and see if they lie on either of the two lines.
   const vector<LineSegment<float>> lines = LineSegmentsFromHitlMsg(hitl_msg);
   LCConstraint hitl_constraint(lines[0], lines[1]);
-  for (const SLAMNode2D node : problem.nodes) {
+  for (size_t node_idx = 0; node_idx < problem_.nodes.size(); node_idx++) {
     vector<Vector2f> points_on_a;
     vector<Vector2f> points_on_b;
-    for (Vector2f point : node.lidar_factor.pointcloud) {
-      if (DistanceToLineSegment(point, lines[0]) < HITL_LINE_WIDTH) {
-        points_on_a.push_back(point);
-      } else if (DistanceToLineSegment(point, lines[0]) < HITL_LINE_WIDTH) {
-        points_on_b.push_back(point);
+    double *pose_ptr = solution_[node_idx].pose;
+    Affine2f node_to_world =
+            PoseArrayToAffine(&pose_ptr[0], &pose_ptr[2]).cast<float>();
+    for (Vector2f point : problem_.nodes[node_idx].lidar_factor.pointcloud) {
+      Vector2f point_transformed = node_to_world * point;
+      if (DistanceToLineSegment(point_transformed, lines[0]) <
+          HITL_LINE_WIDTH) {
+        points_on_a.push_back(point_transformed);
+      } else if (DistanceToLineSegment(point_transformed, lines[1]) <
+                 HITL_LINE_WIDTH) {
+        points_on_b.push_back(point_transformed);
       }
     }
     if (points_on_a.size() >= HITL_POSE_POINT_THRESHOLD) {
-      hitl_constraint.line_a_poses.emplace_back(node.node_idx, points_on_a);
+      hitl_constraint.line_a_poses.emplace_back(node_idx, points_on_a);
     } else if (points_on_b.size() >= HITL_POSE_POINT_THRESHOLD) {
-      hitl_constraint.line_b_poses.emplace_back(node.node_idx, points_on_b);
+      hitl_constraint.line_b_poses.emplace_back(node_idx, points_on_b);
     }
   }
+  std::cout << hitl_constraint.line_a_poses.size() << std::endl;
+  std::cout << hitl_constraint.line_b_poses.size() << std::endl;
   return hitl_constraint;
 }
 
@@ -803,8 +810,7 @@ void Solver::SolveForLC() {
 void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   const HitlSlamInputMsg hitl_msg = *hitl_ptr;
   // Get the poses that belong to this input.
-  LCConstraint colinear_constraint =
-    GetRelevantPosesForHITL(hitl_msg, problem_);
+  LCConstraint colinear_constraint = GetRelevantPosesForHITL(hitl_msg);
   LOG(INFO) << "Found " << colinear_constraint.line_a_poses.size()
     << " poses for the first line." << std::endl;
   LOG(INFO) << "Found " << colinear_constraint.line_b_poses.size()
