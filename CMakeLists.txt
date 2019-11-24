@@ -37,7 +37,7 @@ SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
 
 rosbuild_genmsg()
 
-SET(libs roslib roscpp rosbag console_bridge cv_bridge glog gflags boost_system m OpenMP::OpenMP_CXX)
+SET(libs roslib roscpp rosbag console_bridge cv_bridge gflags glog boost_system m OpenMP::OpenMP_CXX)
 
 ROSBUILD_ADD_EXECUTABLE(lidar_slam
         src/main.cc

@@ -297,20 +297,18 @@ class VisualizationCallback : public ceres::IterationCallback {
   visualization_msgs::Marker pose_array;
 };
 
-void Solver::AddOdomFactors(const vector<OdometryFactor2D>& odom_factors,
-                            vector<SLAMNodeSolution2D>& solution,
-                            ceres::Problem* ceres_problem,
+void Solver::AddOdomFactors(ceres::Problem* ceres_problem,
                             double trans_weight,
                             double rot_weight) {
-  for (const OdometryFactor2D& odom_factor : odom_factors) {
+  for (const OdometryFactor2D& odom_factor : problem_.odometry_factors) {
     CHECK_LT(odom_factor.pose_i, odom_factor.pose_j);
-    CHECK_GT(solution.size(), odom_factor.pose_i);
-    CHECK_GT(solution.size(), odom_factor.pose_j);
+    CHECK_GT(solution_.size(), odom_factor.pose_i);
+    CHECK_GT(solution_.size(), odom_factor.pose_j);
     ceres_problem->AddResidualBlock(
       OdometryResidual::create(odom_factor, trans_weight, rot_weight),
       NULL,
-      solution[odom_factor.pose_i].pose,
-      solution[odom_factor.pose_j].pose);
+      solution_[odom_factor.pose_i].pose,
+      solution_[odom_factor.pose_j].pose);
   }
 }
 
@@ -452,22 +450,22 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
 
 double Solver::AddLidarResidualsForLC(ceres::Problem& problem) {
   double difference = 0.0;
-  for (const LCPoses poses : loop_closure_constraints_) {
-    for (const int a_pose_id : poses.a_poses_) {
-      for (const int b_pose_id : poses.b_poses_) {
-        CHECK_LT(a_pose_id, solution_.size());
-        CHECK_LT(b_pose_id, solution_.size());
-        CHECK_LT(a_pose_id, problem_.nodes.size());
-        CHECK_LT(b_pose_id, problem_.nodes.size());
-        PointCorrespondences correspondence(solution_[a_pose_id].pose,
-                                            solution_[b_pose_id].pose);
+  for (const LCConstraint constraint : loop_closure_constraints_) {
+    for (const LCPose& a_pose : constraint.line_a_poses) {
+      for (const LCPose& b_pose : constraint.line_b_poses) {
+        CHECK_LT(a_pose.node_idx, solution_.size());
+        CHECK_LT(b_pose.node_idx, solution_.size());
+        CHECK_LT(a_pose.node_idx, problem_.nodes.size());
+        CHECK_LT(b_pose.node_idx, problem_.nodes.size());
+        PointCorrespondences correspondence(solution_[a_pose.node_idx].pose,
+                                            solution_[b_pose.node_idx].pose);
         difference += GetPointCorrespondences(problem_,
                                               &solution_,
                                               &correspondence,
-                                              a_pose_id,
-                                              b_pose_id);
+                                              a_pose.node_idx,
+                                              b_pose.node_idx);
         difference /=
-                problem_.nodes[a_pose_id].lidar_factor.pointcloud.size();
+                problem_.nodes[a_pose.node_idx].lidar_factor.pointcloud.size();
         // Add the correspondences as constraints in the optimization problem.
         problem.AddResidualBlock(
                 LIDARPointBlobResidual::create(correspondence.source_points,
@@ -500,7 +498,7 @@ Solver::SolveSLAM() {
   for (int64_t window_size = 1;
        window_size <= LIDAR_CONSTRAINT_AMOUNT;
        window_size++) {
-    std::cout << "Using window size: " << window_size << std::endl;
+    LOG(INFO) << "Using window size: " << window_size << std::endl;
     do {
       gui_helpers::ClearMarker(&match_line_list);
       gui_helpers::ClearMarker(&normals_marker);
@@ -508,9 +506,7 @@ Solver::SolveSLAM() {
       difference = 0;
       ceres::Problem ceres_problem;
       // Add all the odometry constraints between our poses.
-      AddOdomFactors(problem_.odometry_factors,
-                     solution_,
-                     &ceres_problem,
+      AddOdomFactors(&ceres_problem,
                      translation_weight_,
                      rotation_weight_);
       // For every SLAM node we want to optimize it against the past
@@ -588,12 +584,53 @@ Solver::Solver(double translation_weight,
  * Methods relevant to HITL loop closure.
  */
 
+Vector2f GetCenterOfMass(vector<Vector2f> pointcloud) {
+  Vector2f total;
+  for (Vector2f point : pointcloud) {
+    total += point;
+  }
+  return total / pointcloud.size();
+}
+
+template <typename T>
+T ObservationSumCost(const LCPose& pose,
+                     Eigen::Hyperplane<T, 2> feature,
+                     Eigen::Transform<T, 2, 2, Eigen::Affine>& pose_to_world) {
+  typedef Eigen::Matrix<T, 2, 1> Vector2T;
+  T sum = T(0.0);
+  for (const Vector2f point : pose.points_on_feature) {
+    Vector2T pointT = point.cast<T>();
+    pointT = pose_to_world * pointT;
+    sum += feature.absDistance(pointT);
+  }
+  sum /= T(pose.points_on_feature.size());
+  sum = pow(sum, 0.5);
+  return sum;
+}
+
 struct ColinearResidual {
     template <typename T>
     bool operator() (const T* pose_a,
                      const T* pose_b,
-                     T* residual) const {
+                     T* residuals) const {
+      typedef Eigen::Transform<T, 2, 2, Eigen::Affine> Affine2T;
+      typedef Eigen::Matrix<T, 2, 1> Vector2T;
+      typedef Eigen::Hyperplane<T, 2> Hyperplane2T;
       // From Human-In-The-Loop SLAM (Nashed et al, 2017)
+      // --- R_a & R_b Residual ---
+      // Sum of observations distance to the feature (the line) divided by the
+      // size of the observations, raised to the one half.
+      Affine2T a_to_world = PoseArrayToAffine(&pose_a[0], &pose_a[2]);
+      Affine2T b_to_world = PoseArrayToAffine(&pose_b[0], &pose_b[2]);
+      Hyperplane2T line_aT = line_a.cast<T>();
+      Hyperplane2T line_bT = line_b.cast<T>();
+      residuals[0] = ObservationSumCost<T>(pose_a_constraint,
+                                           line_aT,
+                                           a_to_world);
+      residuals[1] = ObservationSumCost<T>(pose_b_constraint,
+                                           line_bT,
+                                           b_to_world);
+      // --- R_p Residual ---
       // K_1 * norm((cm_b - cm_a) * n_a) + K_2 * (1 - (n_a * n_b))
       // K_1 is the translation weight
       // K_2 is the rotation weight
@@ -601,88 +638,70 @@ struct ColinearResidual {
       // respectively.
       // n_a and n_b are the unit normals for the colinear lines.
       // Start by calculating the center of mass of both pointclouds.
-      typedef Eigen::Transform<T, 2, 2, Eigen::Affine> Affine2T;
-      typedef Eigen::Matrix<T, 2, 1> Vector2T;
-      Affine2T a_to_world = PoseArrayToAffine(&pose_a[0], &pose_a[2]);
-      Affine2T b_to_world = PoseArrayToAffine(&pose_b[0], &pose_b[2]);
-      T a_x_total = T(0.0);
-      T a_y_total = T(0.0);
-      for (Vector2f point : a_pose_pointcloud) {
-        Vector2T pointT = point.cast<T>();
-        pointT = a_to_world * pointT;
-        CHECK(ceres::IsFinite(pointT.x()));
-        CHECK(ceres::IsFinite(pointT.y()));
-        a_x_total += pointT.x();
-        a_y_total += pointT.y();
-      }
-      T b_x_total = T(0.0);
-      T b_y_total = T(0.0);
-      for (Vector2f point : b_pose_pointcloud) {
-        Vector2T pointT = point.cast<T>();
-        pointT = b_to_world * pointT;
-        b_x_total += pointT.x();
-        b_y_total += pointT.y();
-      }
-      T a_size = T(a_pose_pointcloud.size());
-      Vector2T a_center_of_mass(a_x_total / a_size,
-                                a_y_total / a_size);
-      CHECK(ceres::IsFinite(a_center_of_mass.x()));
-      CHECK(ceres::IsFinite(a_center_of_mass.y()));
-      T b_size = T(b_pose_pointcloud.size());
-      Vector2T b_center_of_mass(b_x_total / b_size,
-                                b_y_total / b_size);
-      CHECK(ceres::IsFinite(b_center_of_mass.x()));
-      CHECK(ceres::IsFinite(b_center_of_mass.y()));
+      Vector2T line_a_normal = line_a.cast<T>().normal();
+      Vector2T line_b_normal = line_b.cast<T>().normal();
+      Vector2T a_center_of_mass = a_to_world * center_of_a.cast<T>();
+      Vector2T b_center_of_mass = b_to_world * center_of_b.cast<T>();
       Vector2T mass_diff = b_center_of_mass - a_center_of_mass;
       CHECK(ceres::IsFinite(mass_diff.x()));
       CHECK(ceres::IsFinite(mass_diff.y()));
-      T translation_error = abs(mass_diff.dot(line_a_normal.cast<T>()));
+      T translation_error = abs(mass_diff.dot(line_a_normal));
       CHECK(ceres::IsFinite(translation_error));
       T trans_part = T(translation_weight) * translation_error;
-      T normal_diff = line_a_normal.cast<T>().dot(line_b_normal.cast<T>());
+      T normal_diff = line_a_normal.dot(line_b_normal);
       CHECK(ceres::IsFinite(normal_diff));
       T rot_part = T(rotation_weight) * (T(1.0) - normal_diff);
       CHECK(ceres::IsFinite(trans_part));
       CHECK(ceres::IsFinite(rot_part));
-      residual[0] = trans_part + rot_part;
+      residuals[2] = trans_part + rot_part;
       return true;
     }
 
-    ColinearResidual(const Vector2f& line_a_normal,
-                     const Vector2f& line_b_normal,
+    ColinearResidual(const Eigen::Hyperplane<float, 2> line_a,
+                     const Eigen::Hyperplane<float, 2> line_b,
                      const vector<Vector2f>& a_pose_pointcloud,
                      const vector<Vector2f>& b_pose_pointcloud,
                      double translation_weight,
-                     double rotation_weight) :
-                     line_a_normal(line_a_normal),
-                     line_b_normal(line_b_normal),
-                     a_pose_pointcloud(a_pose_pointcloud),
-                     b_pose_pointcloud(b_pose_pointcloud),
-                     translation_weight(translation_weight),
-                     rotation_weight(rotation_weight) {}
+                     double rotation_weight,
+                     const LCPose& a_pose,
+                     const LCPose& b_pose) :
+            line_a(line_a),
+            line_b(line_b),
+            center_of_a(GetCenterOfMass(a_pose_pointcloud)),
+            center_of_b(GetCenterOfMass(b_pose_pointcloud)),
+            translation_weight(translation_weight),
+            rotation_weight(rotation_weight),
+            pose_a_constraint(a_pose),
+            pose_b_constraint(b_pose) {}
 
-    static AutoDiffCostFunction<ColinearResidual, 1, 3, 3>*
-    create(const Vector2f& line_a_normal,
-           const Vector2f& line_b_normal,
+    static AutoDiffCostFunction<ColinearResidual, 3, 3, 3>*
+    create(Eigen::Hyperplane<float, 2> line_a,
+           Eigen::Hyperplane<float, 2> line_b,
            const vector<Vector2f>& a_pose_pointcloud,
            const vector<Vector2f>& b_pose_pointcloud,
            double translation_weight,
-           double rotation_weight) {
-      ColinearResidual* residual = new ColinearResidual(line_a_normal,
-                                                        line_b_normal,
+           double rotation_weight,
+           const LCPose& a_pose,
+           const LCPose& b_pose) {
+      ColinearResidual* residual = new ColinearResidual(line_a,
+                                                        line_b,
                                                         a_pose_pointcloud,
                                                         b_pose_pointcloud,
                                                         translation_weight,
-                                                        rotation_weight);
-      return new AutoDiffCostFunction<ColinearResidual, 1, 3, 3>(residual);
+                                                        rotation_weight,
+                                                        a_pose,
+                                                        b_pose);
+      return new AutoDiffCostFunction<ColinearResidual, 3, 3, 3>(residual);
     }
 
-    Vector2f line_a_normal;
-    Vector2f line_b_normal;
-    vector<Vector2f> a_pose_pointcloud;
-    vector<Vector2f> b_pose_pointcloud;
+    Eigen::Hyperplane<float, 2> line_a;
+    Eigen::Hyperplane<float, 2> line_b;
+    Vector2f center_of_a;
+    Vector2f center_of_b;
     double translation_weight;
     double rotation_weight;
+    const LCPose pose_a_constraint;
+    const LCPose pose_b_constraint;
 };
 
 vector<Eigen::Hyperplane<float, 2>>
@@ -699,74 +718,65 @@ HitlMsgToEigenLines(const HitlSlamInputMsg& hitl_msg) {
   return lines;
 }
 
-vector<vector<SLAMNode2D>>
+LCConstraint
 GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg,
                         SLAMProblem2D& problem) {
   // Linearly go through all poses
   // Go through all points and see if they lie on either of the two lines.
   typedef Eigen::Hyperplane<float, 2> Line2d;
   vector<Line2d> lines = HitlMsgToEigenLines(hitl_msg);
-  vector<vector<SLAMNode2D>> poses(2);
+  LCConstraint hitl_constraint(lines[0], lines[1]);
   for (const SLAMNode2D node : problem.nodes) {
-    uint64_t point_count_a = 0;
-    uint64_t point_count_b = 0;
+    vector<Vector2f> points_on_a;
+    vector<Vector2f> points_on_b;
     for (Vector2f point : node.lidar_factor.pointcloud) {
       if (lines[0].absDistance(point) < HITL_LINE_WIDTH) {
-        point_count_a++;
+        points_on_a.push_back(point);
       } else if (lines[1].absDistance(point) < HITL_LINE_WIDTH) {
-        point_count_b++;
+        points_on_b.push_back(point);
       }
     }
-    if (point_count_a >= HITL_POSE_POINT_THRESHOLD) {
-      poses[0].push_back(node);
-    } else if (point_count_b >= HITL_POSE_POINT_THRESHOLD) {
-      poses[1].push_back(node);
+    if (points_on_a.size() >= HITL_POSE_POINT_THRESHOLD) {
+      hitl_constraint.line_a_poses.emplace_back(node.node_idx, points_on_a);
+    } else if (points_on_b.size() >= HITL_POSE_POINT_THRESHOLD) {
+      hitl_constraint.line_b_poses.emplace_back(node.node_idx, points_on_b);
     }
   }
-  return poses;
+  return hitl_constraint;
 }
 
-vector<int> GetPoseIndicesFromNodes(vector<SLAMNode2D> poses) {
-  vector<int> pose_indices;
-  for (SLAMNode2D node : poses) {
-    pose_indices.push_back(node.node_idx);
+void Solver::AddColinearConstraints(LCConstraint& constraint) {
+  if (constraint.line_a_poses.size() == 0 ||
+      constraint.line_b_poses.size() == 0) {
+    return;
   }
-  return pose_indices;
-}
-
-void Solver::AddColinearConstraints(Eigen::Hyperplane<float, 2> line_a,
-                                    Eigen::Hyperplane<float, 2> line_b,
-                                    vector<vector<SLAMNode2D>> poses) {
-  CHECK_EQ(poses.size(), 2);
-  vector<int> a_poses = GetPoseIndicesFromNodes(poses[0]);
-  vector<int> b_poses = GetPoseIndicesFromNodes(poses[1]);
-  loop_closure_constraints_.emplace_back(a_poses, b_poses, line_a, line_b);
+  loop_closure_constraints_.push_back(constraint);
 }
 
 void Solver::AddColinearResiduals(ceres::Problem* problem) {
-  for (const LCPoses poses : loop_closure_constraints_) {
-    Vector2f normal_a = poses.line_a_.normal();
-    Vector2f normal_b = poses.line_b_.normal();
-    for (const int a_pose_id : poses.a_poses_) {
-      for (const int b_pose_id : poses.b_poses_) {
-        CHECK_LT(a_pose_id, solution_.size());
-        CHECK_LT(b_pose_id, solution_.size());
-        CHECK_LT(a_pose_id, problem_.nodes.size());
-        CHECK_LT(b_pose_id, problem_.nodes.size());
+  for (const LCConstraint constraint : loop_closure_constraints_) {
+    for (const LCPose a_pose : constraint.line_a_poses) {
+      for (const LCPose b_pose : constraint.line_b_poses) {
+        CHECK_LT(a_pose.node_idx, solution_.size());
+        CHECK_LT(b_pose.node_idx, solution_.size());
+        CHECK_LT(a_pose.node_idx, problem_.nodes.size());
+        CHECK_LT(b_pose.node_idx, problem_.nodes.size());
         vector<Vector2f>& pointcloud_a =
-          problem_.nodes[a_pose_id].lidar_factor.pointcloud;
+          problem_.nodes[a_pose.node_idx].lidar_factor.pointcloud;
         vector<Vector2f>& pointcloud_b =
-          problem_.nodes[b_pose_id].lidar_factor.pointcloud;
+          problem_.nodes[b_pose.node_idx].lidar_factor.pointcloud;
         problem->
-          AddResidualBlock(ColinearResidual::create(normal_a,
-                                                    normal_b,
+          AddResidualBlock(ColinearResidual::create(constraint.line_a,
+                                                    constraint.line_b,
                                                     pointcloud_a,
                                                     pointcloud_b,
                                                     lc_translation_weight_,
-                                                    lc_rotation_weight_),
+                                                    lc_rotation_weight_,
+                                                    a_pose,
+                                                    b_pose),
                            NULL,
-                           solution_[a_pose_id].pose,
-                           solution_[b_pose_id].pose);
+                           solution_[a_pose.node_idx].pose,
+                           solution_[b_pose.node_idx].pose);
       }
     }
   }
@@ -783,9 +793,7 @@ void Solver::SolveForLC() {
   options.num_threads = std::thread::hardware_concurrency();
   VisualizationCallback vis_callback(problem_, &solution_, n_);
   options.callbacks.push_back(&vis_callback);
-  AddOdomFactors(problem_.odometry_factors,
-                 solution_,
-                 &problem,
+  AddOdomFactors(&problem,
                  lc_translation_weight_,
                  lc_rotation_weight_);
   AddColinearResiduals(&problem);
@@ -795,11 +803,9 @@ void Solver::SolveForLC() {
 void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   const HitlSlamInputMsg hitl_msg = *hitl_ptr;
   // Get the poses that belong to this input.
-  vector<vector<SLAMNode2D>> poses =
+  LCConstraint colinear_constraint =
     GetRelevantPosesForHITL(hitl_msg, problem_);
-  vector<Eigen::Hyperplane<float, 2>> lines = HitlMsgToEigenLines(hitl_msg);
-  CHECK_EQ(lines.size(), 2);
-  AddColinearConstraints(lines[0], lines[1], poses);
+  AddColinearConstraints(colinear_constraint);
   SolveForLC();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
