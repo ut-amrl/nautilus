@@ -585,30 +585,6 @@ Solver::Solver(double translation_weight,
  * Methods relevant to HITL loop closure.
  */
 
-template <typename T>
-T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
-                             const LineSegment<T>& line_seg) {
-  typedef Eigen::Matrix<T, 2, 1> Vector2T;
-  // Line segment is parametric, with a start point and endpoint.
-  // Parameterized by t between 0 and 1.
-  // We can get the point on the line by projecting the start -> point onto
-  // this line.
-  Eigen::Hyperplane<T, 2> line =
-    Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.endpoint);
-  Eigen::Hyperplane<T, 2> start_to_point =
-    Eigen::Hyperplane<T, 2>::Through(line_seg.start, point);
-  Vector2T point_on_line = line.projection(point);
-  T line_length = (line_seg.endpoint - line_seg.start).norm();
-  T t = (point_on_line - line_seg.start).norm() / line_length;
-  if (t >= T(0.0) && t <= T(1.0)) {
-    // Point is between start and end, should return perpendicular dist.
-    return line.absDistance(point);
-  }
-  // Point is closer to an endpoint.
-  return std::min<T>((line_seg.start - point).norm(),
-                  (line_seg.endpoint - point).norm());
-}
-
 Vector2f GetCenterOfMass(vector<Vector2f> pointcloud) {
   Vector2f total;
   for (Vector2f point : pointcloud) {

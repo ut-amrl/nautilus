@@ -48,10 +48,13 @@ ROSBUILD_ADD_EXECUTABLE(lidar_slam
 
 ADD_LIBRARY(shared_library
             src/gui_helpers.cc
-            src/timer.cc)
+            src/timer.cc src/solver_unittest.cc test/solver_test.cc)
 
 TARGET_LINK_LIBRARIES(lidar_slam
                       shared_library
                       ${libs}
                       ${CERES_LIBRARIES})
+
+enable_testing()
+add_subdirectory(test)
 
