@@ -2,13 +2,26 @@
 
 This project aims to be a professional point-to-point slam implementation.
 
-### How to clone:
-
-When cloning the project don't forget to use the ```--recurse-submodules``` flag.
-
 ### Compiling:
 
-Just run:
+You will need to install GTest for testing. This can be done by first installing gtest through apt.
+
+On Ubuntu:
+
+```sudo apt-get install libgtest-dev```
+
+And then navigate to the installed directory and make the project using the following code:
+
+```
+cd /usr/src/gtest
+sudo cmake CMakeLists.txt
+sudo make
+sudo make install
+```
+(Here is the tutorial this is from: https://www.eriksmistad.no/getting-started-with-google-test-on-ubuntu/)
+
+Then Just run:
+
 ```make```
 
 Do not run cmake directly.
