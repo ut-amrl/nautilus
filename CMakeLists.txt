@@ -9,9 +9,11 @@ MESSAGE(STATUS "Arch: ${CMAKE_SYSTEM_PROCESSOR}")
 SET(CMAKE_CXX_FLAGS "-std=c++11 -Wall -Werror")
 
 IF(${CMAKE_BUILD_TYPE} MATCHES "Release")
+    option(TESTING "Build tests" OFF)
     MESSAGE(STATUS "Additional Flags for Release mode")
     SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -fopenmp -O3 -DNDEBUG")
 ELSEIF(${CMAKE_BUILD_TYPE} MATCHES "Debug")
+    option(TESTING "Build tests" ON)
     MESSAGE(STATUS "Additional Flags for Debug mode")
     SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -g")
 ENDIF()
@@ -48,13 +50,13 @@ ROSBUILD_ADD_EXECUTABLE(lidar_slam
 
 ADD_LIBRARY(shared_library
             src/gui_helpers.cc
-            src/timer.cc src/solver_unittest.cc test/solver_test.cc)
+            src/timer.cc src/solver_unittest.cc test/solver_test.cc test/main.cc)
 
 TARGET_LINK_LIBRARIES(lidar_slam
                       shared_library
                       ${libs}
                       ${CERES_LIBRARIES})
-
-enable_testing()
-add_subdirectory(test)
-
+if (TESTING)
+    enable_testing()
+    add_subdirectory(test)
+endif()

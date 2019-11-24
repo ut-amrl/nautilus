@@ -2,6 +2,10 @@
 
 This project aims to be a professional point-to-point slam implementation.
 
+### How to clone:
+
+When cloning the project don't forget to use the ```--recurse-submodules``` flag.
+
 ### Compiling:
 
 Just run:
