@@ -24,6 +24,22 @@ using slam_types::SLAMProblem2D;
 using slam_types::SLAMNode2D;
 using lidar_slam::HitlSlamInputMsgConstPtr;
 
+template <typename T>
+struct LineSegment {
+    Eigen::Matrix<T, 2, 1> start;
+    Eigen::Matrix<T, 2, 1> endpoint;
+    LineSegment(Eigen::Matrix<T, 2, 1>& start,
+                Eigen::Matrix<T, 2, 1>& endpoint) :
+      start(start), endpoint(endpoint) {};
+    template <typename F>
+    LineSegment<F> cast() const {
+      typedef Eigen::Matrix<F, 2, 1> Vector2F;
+      Vector2F startF = start.template cast<F>();
+      Vector2F endF = endpoint.template cast<F>();
+      return LineSegment<F>(startF, endF);
+    }
+};
+
 struct LCPose {
     uint64_t node_idx;
     vector<Vector2f> points_on_feature;
@@ -34,10 +50,10 @@ struct LCPose {
 struct LCConstraint {
     vector<LCPose> line_a_poses;
     vector<LCPose> line_b_poses;
-    Eigen::Hyperplane<float, 2> line_a;
-    Eigen::Hyperplane<float, 2> line_b;
-    LCConstraint(Eigen::Hyperplane<float, 2> line_a,
-                 Eigen::Hyperplane<float, 2> line_b) :
+    const LineSegment<float>& line_a;
+    const LineSegment<float>& line_b;
+    LCConstraint(const LineSegment<float>& line_a,
+                 const LineSegment<float>& line_b) :
                  line_a(line_a),
                  line_b(line_b) {}
 };

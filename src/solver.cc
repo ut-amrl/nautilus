@@ -545,6 +545,7 @@ Solver::SolveSLAM() {
         }
       }
       difference += AddLidarResidualsForLC(ceres_problem);
+      AddColinearResiduals(&ceres_problem);
       ceres::Solve(options, &ceres_problem, &summary);
     } while (abs(difference - last_difference) > stopping_accuracy_);
   }
@@ -584,6 +585,30 @@ Solver::Solver(double translation_weight,
  * Methods relevant to HITL loop closure.
  */
 
+template <typename T>
+T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
+                             const LineSegment<T>& line_seg) {
+  typedef Eigen::Matrix<T, 2, 1> Vector2T;
+  // Line segment is parametric, with a start point and endpoint.
+  // Parameterized by t between 0 and 1.
+  // We can get the point on the line by projecting the start -> point onto
+  // this line.
+  Eigen::Hyperplane<T, 2> line =
+    Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.endpoint);
+  Eigen::Hyperplane<T, 2> start_to_point =
+    Eigen::Hyperplane<T, 2>::Through(line_seg.start, point);
+  Vector2T point_on_line = line.projection(point);
+  T line_length = (line_seg.endpoint - line_seg.start).norm();
+  T t = (point_on_line - line_seg.start).norm() / line_length;
+  if (t >= T(0.0) && t <= T(1.0)) {
+    // Point is between start and end, should return perpendicular dist.
+    return line.absDistance(point);
+  }
+  // Point is closer to an endpoint.
+  return std::min<T>((line_seg.start - point).norm(),
+                  (line_seg.endpoint - point).norm());
+}
+
 Vector2f GetCenterOfMass(vector<Vector2f> pointcloud) {
   Vector2f total;
   for (Vector2f point : pointcloud) {
@@ -594,14 +619,14 @@ Vector2f GetCenterOfMass(vector<Vector2f> pointcloud) {
 
 template <typename T>
 T ObservationSumCost(const LCPose& pose,
-                     Eigen::Hyperplane<T, 2> feature,
+                     LineSegment<T> line_seg,
                      Eigen::Transform<T, 2, 2, Eigen::Affine>& pose_to_world) {
   typedef Eigen::Matrix<T, 2, 1> Vector2T;
   T sum = T(0.0);
   for (const Vector2f point : pose.points_on_feature) {
     Vector2T pointT = point.cast<T>();
     pointT = pose_to_world * pointT;
-    sum += feature.absDistance(pointT);
+    sum += DistanceToLineSegment<T>(pointT, line_seg);
   }
   sum /= T(pose.points_on_feature.size());
   sum = pow(sum, 0.5);
@@ -615,20 +640,17 @@ struct ColinearResidual {
                      T* residuals) const {
       typedef Eigen::Transform<T, 2, 2, Eigen::Affine> Affine2T;
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
-      typedef Eigen::Hyperplane<T, 2> Hyperplane2T;
       // From Human-In-The-Loop SLAM (Nashed et al, 2017)
       // --- R_a & R_b Residual ---
       // Sum of observations distance to the feature (the line) divided by the
       // size of the observations, raised to the one half.
       Affine2T a_to_world = PoseArrayToAffine(&pose_a[0], &pose_a[2]);
       Affine2T b_to_world = PoseArrayToAffine(&pose_b[0], &pose_b[2]);
-      Hyperplane2T line_aT = line_a.cast<T>();
-      Hyperplane2T line_bT = line_b.cast<T>();
       residuals[0] = ObservationSumCost<T>(pose_a_constraint,
-                                           line_aT,
+                                           line_a.cast<T>(),
                                            a_to_world);
       residuals[1] = ObservationSumCost<T>(pose_b_constraint,
-                                           line_bT,
+                                           line_b.cast<T>(),
                                            b_to_world);
       // --- R_p Residual ---
       // K_1 * norm((cm_b - cm_a) * n_a) + K_2 * (1 - (n_a * n_b))
@@ -638,8 +660,14 @@ struct ColinearResidual {
       // respectively.
       // n_a and n_b are the unit normals for the colinear lines.
       // Start by calculating the center of mass of both pointclouds.
-      Vector2T line_a_normal = line_a.cast<T>().normal();
-      Vector2T line_b_normal = line_b.cast<T>().normal();
+      Vector2T line_a_normal =
+        Eigen::Hyperplane<float, 2>::Through(line_a.start,
+                                             line_a.endpoint).cast<T>()
+                                               .normal();
+      Vector2T line_b_normal =
+        Eigen::Hyperplane<float, 2>::Through(line_b.start,
+                                             line_b.endpoint).cast<T>()
+                                               .normal();
       Vector2T a_center_of_mass = a_to_world * center_of_a.cast<T>();
       Vector2T b_center_of_mass = b_to_world * center_of_b.cast<T>();
       Vector2T mass_diff = b_center_of_mass - a_center_of_mass;
@@ -657,8 +685,8 @@ struct ColinearResidual {
       return true;
     }
 
-    ColinearResidual(const Eigen::Hyperplane<float, 2> line_a,
-                     const Eigen::Hyperplane<float, 2> line_b,
+    ColinearResidual(const LineSegment<float>& line_a,
+                     const LineSegment<float>& line_b,
                      const vector<Vector2f>& a_pose_pointcloud,
                      const vector<Vector2f>& b_pose_pointcloud,
                      double translation_weight,
@@ -675,8 +703,8 @@ struct ColinearResidual {
             pose_b_constraint(b_pose) {}
 
     static AutoDiffCostFunction<ColinearResidual, 3, 3, 3>*
-    create(Eigen::Hyperplane<float, 2> line_a,
-           Eigen::Hyperplane<float, 2> line_b,
+    create(const LineSegment<float>& line_a,
+           const LineSegment<float>& line_b,
            const vector<Vector2f>& a_pose_pointcloud,
            const vector<Vector2f>& b_pose_pointcloud,
            double translation_weight,
@@ -694,8 +722,8 @@ struct ColinearResidual {
       return new AutoDiffCostFunction<ColinearResidual, 3, 3, 3>(residual);
     }
 
-    Eigen::Hyperplane<float, 2> line_a;
-    Eigen::Hyperplane<float, 2> line_b;
+    const LineSegment<float>& line_a;
+    const LineSegment<float>& line_b;
     Vector2f center_of_a;
     Vector2f center_of_b;
     double translation_weight;
@@ -704,17 +732,14 @@ struct ColinearResidual {
     const LCPose pose_b_constraint;
 };
 
-vector<Eigen::Hyperplane<float, 2>>
-HitlMsgToEigenLines(const HitlSlamInputMsg& hitl_msg) {
-  Vector2f line_a_start(hitl_msg.line_a_start.x, hitl_msg.line_a_start.y);
-  Vector2f line_a_end(hitl_msg.line_a_end.x, hitl_msg.line_a_end.y);
-  Vector2f line_b_start(hitl_msg.line_b_start.x, hitl_msg.line_b_start.y);
-  Vector2f line_b_end(hitl_msg.line_b_end.x, hitl_msg.line_b_end.y);
-  vector<Eigen::Hyperplane<float, 2>> lines;
-  lines.push_back(Eigen::Hyperplane<float, 2>::Through(line_a_start,
-                                                       line_a_end));
-  lines.push_back(Eigen::Hyperplane<float, 2>::Through(line_b_start,
-                                                       line_b_end));
+vector<LineSegment<float>> LineSegmentsFromHitlMsg(const HitlSlamInputMsg& msg) {
+  Vector2f start_a(msg.line_a_start.x, msg.line_a_start.y);
+  Vector2f end_a(msg.line_a_end.x, msg.line_a_end.y);
+  Vector2f start_b(msg.line_b_start.x, msg.line_b_start.y);
+  Vector2f end_b(msg.line_b_end.x, msg.line_b_end.y);
+  vector<LineSegment<float>> lines;
+  lines.emplace_back(start_a, end_a);
+  lines.emplace_back(start_b, end_b);
   return lines;
 }
 
@@ -723,16 +748,15 @@ GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg,
                         SLAMProblem2D& problem) {
   // Linearly go through all poses
   // Go through all points and see if they lie on either of the two lines.
-  typedef Eigen::Hyperplane<float, 2> Line2d;
-  vector<Line2d> lines = HitlMsgToEigenLines(hitl_msg);
+  const vector<LineSegment<float>> lines = LineSegmentsFromHitlMsg(hitl_msg);
   LCConstraint hitl_constraint(lines[0], lines[1]);
   for (const SLAMNode2D node : problem.nodes) {
     vector<Vector2f> points_on_a;
     vector<Vector2f> points_on_b;
     for (Vector2f point : node.lidar_factor.pointcloud) {
-      if (lines[0].absDistance(point) < HITL_LINE_WIDTH) {
+      if (DistanceToLineSegment(point, lines[0]) < HITL_LINE_WIDTH) {
         points_on_a.push_back(point);
-      } else if (lines[1].absDistance(point) < HITL_LINE_WIDTH) {
+      } else if (DistanceToLineSegment(point, lines[0]) < HITL_LINE_WIDTH) {
         points_on_b.push_back(point);
       }
     }
@@ -805,8 +829,12 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   // Get the poses that belong to this input.
   LCConstraint colinear_constraint =
     GetRelevantPosesForHITL(hitl_msg, problem_);
+  LOG(INFO) << "Found " << colinear_constraint.line_a_poses.size()
+    << " poses for the first line." << std::endl;
+  LOG(INFO) << "Found " << colinear_constraint.line_b_poses.size()
+            << " poses for the second line." << std::endl;
   AddColinearConstraints(colinear_constraint);
-  SolveForLC();
+//  SolveForLC();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
   SolveSLAM();
