@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "glog/logging.h"
 #include <ros/node_handle.h>
 #include "ros/package.h"
 #include "eigen3/Eigen/Dense"
@@ -37,13 +38,19 @@ struct LineSegment {
       typedef Eigen::Matrix<F, 2, 1> Vector2F;
       Vector2F startF = start.template cast<F>();
       Vector2F endF = endpoint.template cast<F>();
+      CHECK(ceres::IsFinite(startF.x()));
+      CHECK(ceres::IsFinite(startF.y()));
+      CHECK(ceres::IsFinite(endF.x()));
+      CHECK(ceres::IsFinite(endF.y()));
       return LineSegment<F>(startF, endF);
     }
 };
 
+#define EPSILON_LINE_ERROR 0.01
+
 template <typename T>
-T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
-                        const LineSegment<T>& line_seg) {
+T DistanceToLineSegmentSquared(const Eigen::Matrix<T, 2, 1>& point,
+                               const LineSegment<T>& line_seg) {
   typedef Eigen::Matrix<T, 2, 1> Vector2T;
   // Line segment is parametric, with a start point and endpoint.
   // Parameterized by t between 0 and 1.
@@ -54,15 +61,34 @@ T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
   Eigen::Hyperplane<T, 2> start_to_point =
           Eigen::Hyperplane<T, 2>::Through(line_seg.start, point);
   Vector2T point_on_line = line.projection(point);
-  T line_length = (line_seg.endpoint - line_seg.start).norm();
-  T t = (point_on_line - line_seg.start).norm() / line_length;
-  if (t >= T(0.0) && t <= T(1.0)) {
+  CHECK(ceres::IsFinite(point_on_line.x()));
+  CHECK(ceres::IsFinite(point_on_line.y()));
+  Vector2T line_length = (line_seg.endpoint - line_seg.start);
+  CHECK(ceres::IsFinite(line_length.x()));
+  CHECK(ceres::IsFinite(line_length.y()));
+  // To not allow the differentiation to fail when the point gets close to the
+  // beginning of the line as sqrt(x)'s derivative would go to inf as x
+  // approaches 0.
+  Vector2T distance_on_line = (point_on_line - line_seg.start);
+  CHECK(ceres::IsFinite(distance_on_line.x()));
+  CHECK(ceres::IsFinite(distance_on_line.y()));
+  if (distance_on_line.x() >= T(0.0) && distance_on_line.x() <= line_length.x() &&
+      distance_on_line.y() >= T(0.0) && distance_on_line.y() <= line_length.y()) {
     // Point is between start and end, should return perpendicular dist.
-    return line.absDistance(point);
+    Vector2T point_to_line = point_on_line - point;
+    CHECK(ceres::IsFinite(point_to_line.x()));
+    CHECK(ceres::IsFinite(point_to_line.y()));
+    return pow(point_to_line.x(), 2) + pow(point_to_line.y(), 2);
   }
   // Point is closer to an endpoint.
-  return std::min<T>((line_seg.start - point).norm(),
-                     (line_seg.endpoint - point).norm());
+  Vector2T point_to_start = line_seg.start - point;
+  Vector2T point_to_endpoint = line_seg.endpoint - point;
+  T dist_to_start = pow(point_to_start.x(), 2) + pow(point_to_endpoint.y(), 2);
+  T dist_to_endpoint = pow(point_to_endpoint.x(), 2) +
+     pow(point_to_endpoint.y(), 2);
+  CHECK(ceres::IsFinite(dist_to_start));
+  CHECK(ceres::IsFinite(dist_to_endpoint));
+  return std::min<T>(dist_to_start, dist_to_endpoint);
 }
 
 struct LCPose {

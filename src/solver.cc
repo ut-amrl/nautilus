@@ -29,8 +29,8 @@
 
 #define LIDAR_CONSTRAINT_AMOUNT 5 //TODO: Change this back to 10 after testing.
 #define OUTLIER_THRESHOLD 0.25
-#define HITL_LINE_WIDTH 0.05
-#define HITL_POSE_POINT_THRESHOLD 5
+#define HITL_LINE_WIDTH 0.40
+#define HITL_POSE_POINT_THRESHOLD 3
 
 using std::vector;
 using slam_types::OdometryFactor2D;
@@ -358,9 +358,9 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
     // Get the current source point's normal.
     KDNodeValue<float, 2> source_point_with_normal;
     float found_dist =
-            source_lidar.pointcloud_tree->FindNearestPoint(source_point,
-                                                           0.1,
-                                                           &source_point_with_normal);
+      source_lidar.pointcloud_tree->FindNearestPoint(source_point,
+                                                     0.1,
+                                                     &source_point_with_normal);
     CHECK_EQ(found_dist, 0.0) << "Source point is not in KD Tree!\n";
     float dist = OUTLIER_THRESHOLD;
     // Sort the target points by distance from the source point in the
@@ -593,19 +593,35 @@ Vector2f GetCenterOfMass(vector<Vector2f> pointcloud) {
   return total / pointcloud.size();
 }
 
+// TODO: This is not finite. Look into what is causing it, possibly overflow?
+// Ideas: Some other term is not finite.
+//        The distance to Line segment function is returning a dist larger than the threshold.
+//        pose points on feature 0?
 template <typename T>
 T ObservationSumCost(const LCPose& pose,
                      LineSegment<T> line_seg,
                      Eigen::Transform<T, 2, 2, Eigen::Affine>& pose_to_world) {
   typedef Eigen::Matrix<T, 2, 1> Vector2T;
   T sum = T(0.0);
-  for (const Vector2f point : pose.points_on_feature) {
+  for (const Vector2f& point : pose.points_on_feature) {
     Vector2T pointT = point.cast<T>();
     pointT = pose_to_world * pointT;
-    sum += DistanceToLineSegment<T>(pointT, line_seg);
+    CHECK(ceres::IsFinite(pointT.x()));
+    CHECK(ceres::IsFinite(pointT.y()));
+    if (!ceres::IsFinite(DistanceToLineSegmentSquared<T>(pointT, line_seg))) {
+      std::cout << "Failed with: \n";
+      std::cout << pointT << "\n";
+      std::cout << line_seg.start << "\n";
+      std::cout << line_seg.endpoint << std::endl;
+      exit(1);
+    }
+    sum += DistanceToLineSegmentSquared<T>(pointT, line_seg);
   }
+  CHECK_GT(pose.points_on_feature.size(), 0);
+  CHECK_GT(sum, T(0.0)); // Sum should not have rolled over.
   sum /= T(pose.points_on_feature.size());
   sum = pow(sum, 0.5);
+  CHECK(ceres::IsFinite(sum));
   return sum;
 }
 
@@ -622,6 +638,8 @@ struct ColinearResidual {
       // size of the observations, raised to the one half.
       Affine2T a_to_world = PoseArrayToAffine(&pose_a[0], &pose_a[2]);
       Affine2T b_to_world = PoseArrayToAffine(&pose_b[0], &pose_b[2]);
+      CHECK(a_to_world.matrix().allFinite());
+      CHECK(b_to_world.matrix().allFinite());
       residuals[0] = ObservationSumCost<T>(pose_a_constraint,
                                            line_a.cast<T>(),
                                            a_to_world);
@@ -636,6 +654,9 @@ struct ColinearResidual {
       // respectively.
       // n_a and n_b are the unit normals for the colinear lines.
       // Start by calculating the center of mass of both pointclouds.
+
+      //TODO: This calculation is causing infinite cost for some reason.
+      // Find out why that is happening.
       Vector2T line_a_normal =
         Eigen::Hyperplane<float, 2>::Through(line_a.start,
                                              line_a.endpoint).cast<T>()
@@ -658,6 +679,7 @@ struct ColinearResidual {
       CHECK(ceres::IsFinite(trans_part));
       CHECK(ceres::IsFinite(rot_part));
       residuals[2] = trans_part + rot_part;
+      CHECK(ceres::IsFinite(trans_part + rot_part));
       return true;
     }
 
@@ -708,7 +730,8 @@ struct ColinearResidual {
     const LCPose pose_b_constraint;
 };
 
-vector<LineSegment<float>> LineSegmentsFromHitlMsg(const HitlSlamInputMsg& msg) {
+vector<LineSegment<float>>
+LineSegmentsFromHitlMsg(const HitlSlamInputMsg& msg) {
   Vector2f start_a(msg.line_a_start.x, msg.line_a_start.y);
   Vector2f end_a(msg.line_a_end.x, msg.line_a_end.y);
   Vector2f start_b(msg.line_b_start.x, msg.line_b_start.y);
@@ -733,10 +756,10 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
             PoseArrayToAffine(&pose_ptr[0], &pose_ptr[2]).cast<float>();
     for (Vector2f point : problem_.nodes[node_idx].lidar_factor.pointcloud) {
       Vector2f point_transformed = node_to_world * point;
-      if (DistanceToLineSegment(point_transformed, lines[0]) <
+      if (DistanceToLineSegmentSquared(point_transformed, lines[0]) <
           HITL_LINE_WIDTH) {
         points_on_a.push_back(point_transformed);
-      } else if (DistanceToLineSegment(point_transformed, lines[1]) <
+      } else if (DistanceToLineSegmentSquared(point_transformed, lines[1]) <
                  HITL_LINE_WIDTH) {
         points_on_b.push_back(point_transformed);
       }
@@ -747,8 +770,6 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
       hitl_constraint.line_b_poses.emplace_back(node_idx, points_on_b);
     }
   }
-  std::cout << hitl_constraint.line_a_poses.size() << std::endl;
-  std::cout << hitl_constraint.line_b_poses.size() << std::endl;
   return hitl_constraint;
 }
 
@@ -803,28 +824,24 @@ void Solver::SolveForLC() {
   AddOdomFactors(&problem,
                  lc_translation_weight_,
                  lc_rotation_weight_);
+  std::cout << "Odometry size: " << problem_.odometry_factors.size() << std::endl;
   AddColinearResiduals(&problem);
   ceres::Solve(options, &problem, &summary);
+  vis_callback.PubVisualization();
+  std::cout << summary.FullReport() << std::endl;
 }
 
 void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   const HitlSlamInputMsg hitl_msg = *hitl_ptr;
   // Get the poses that belong to this input.
   LCConstraint colinear_constraint = GetRelevantPosesForHITL(hitl_msg);
-  LOG(INFO) << "Found " << colinear_constraint.line_a_poses.size()
+  std::cout << "Found " << colinear_constraint.line_a_poses.size()
     << " poses for the first line." << std::endl;
-  LOG(INFO) << "Found " << colinear_constraint.line_b_poses.size()
+  std::cout << "Found " << colinear_constraint.line_b_poses.size()
             << " poses for the second line." << std::endl;
   AddColinearConstraints(colinear_constraint);
-//  SolveForLC();
+  SolveForLC();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
-  SolveSLAM();
+//  SolveSLAM();
 }
-
-
-//TODO: Take lines from user and find the poses that contain more than a threshold of the selected points.
-// Make a HITL residual for colinear poses between each of the pairs.
-// Make the odometry correspondences between these poses.
-// Solve
-// Resolve using lidar_point correspondences and odometry factors between these poses.
