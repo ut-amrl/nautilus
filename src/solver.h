@@ -78,14 +78,18 @@ T DistanceToLineSegmentSquared(const Eigen::Matrix<T, 2, 1>& point,
     Vector2T point_to_line = point_on_line - point;
     CHECK(ceres::IsFinite(point_to_line.x()));
     CHECK(ceres::IsFinite(point_to_line.y()));
-    return pow(point_to_line.x(), 2) + pow(point_to_line.y(), 2);
+    return point_to_line.x() * point_to_line.x() +
+      point_to_line.y() * point_to_line.y();
   }
   // Point is closer to an endpoint.
   Vector2T point_to_start = line_seg.start - point;
+  CHECK(ceres::IsFinite(point_to_start.x()));
+  CHECK(ceres::IsFinite(point_to_start.y()));
   Vector2T point_to_endpoint = line_seg.endpoint - point;
-  T dist_to_start = pow(point_to_start.x(), 2) + pow(point_to_endpoint.y(), 2);
-  T dist_to_endpoint = pow(point_to_endpoint.x(), 2) +
-     pow(point_to_endpoint.y(), 2);
+  T dist_to_start = point_to_start.x() * point_to_start.x() +
+    point_to_start.y() * point_to_start.y();
+  T dist_to_endpoint = point_to_endpoint.x() * point_to_endpoint.x() +
+    point_to_endpoint.y() * point_to_endpoint.y();
   CHECK(ceres::IsFinite(dist_to_start));
   CHECK(ceres::IsFinite(dist_to_endpoint));
   return std::min<T>(dist_to_start, dist_to_endpoint);
