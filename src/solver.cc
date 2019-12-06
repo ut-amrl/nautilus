@@ -625,109 +625,39 @@ T ObservationSumCost(const LCPose& pose,
   return sum;
 }
 
-struct ColinearResidual {
+struct PointToLineResidual {
     template <typename T>
-    bool operator() (const T* pose_a,
-                     const T* pose_b,
-                     T* residuals) const {
-      typedef Eigen::Transform<T, 2, 2, Eigen::Affine> Affine2T;
+    bool operator() (const T* pose, T* residuals) const {
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
-      // From Human-In-The-Loop SLAM (Nashed et al, 2017)
-      // --- R_a & R_b Residual ---
-      // Sum of observations distance to the feature (the line) divided by the
-      // size of the observations, raised to the one half.
-      Affine2T a_to_world = PoseArrayToAffine(&pose_a[0], &pose_a[2]);
-      Affine2T b_to_world = PoseArrayToAffine(&pose_b[0], &pose_b[2]);
-      CHECK(a_to_world.matrix().allFinite());
-      CHECK(b_to_world.matrix().allFinite());
-      residuals[0] = ObservationSumCost<T>(pose_a_constraint,
-                                           line_a.cast<T>(),
-                                           a_to_world);
-      residuals[1] = ObservationSumCost<T>(pose_b_constraint,
-                                           line_b.cast<T>(),
-                                           b_to_world);
-      // --- R_p Residual ---
-      // K_1 * norm((cm_b - cm_a) * n_a) + K_2 * (1 - (n_a * n_b))
-      // K_1 is the translation weight
-      // K_2 is the rotation weight
-      // cm_a and cm_b are the centers of mass for the pointclouds a and b
-      // respectively.
-      // n_a and n_b are the unit normals for the colinear lines.
-      // Start by calculating the center of mass of both pointclouds.
-
-      //TODO: This calculation is causing infinite cost for some reason.
-      // Find out why that is happening.
-      Vector2T line_a_normal =
-        Eigen::Hyperplane<float, 2>::Through(line_a.start,
-                                             line_a.endpoint).cast<T>()
-                                               .normal();
-      Vector2T line_b_normal =
-        Eigen::Hyperplane<float, 2>::Through(line_b.start,
-                                             line_b.endpoint).cast<T>()
-                                               .normal();
-      Vector2T a_center_of_mass = a_to_world * center_of_a.cast<T>();
-      Vector2T b_center_of_mass = b_to_world * center_of_b.cast<T>();
-      Vector2T mass_diff = b_center_of_mass - a_center_of_mass;
-      CHECK(ceres::IsFinite(mass_diff.x()));
-      CHECK(ceres::IsFinite(mass_diff.y()));
-      T translation_error = abs(mass_diff.dot(line_a_normal));
-      CHECK(ceres::IsFinite(translation_error));
-      T trans_part = T(translation_weight) * translation_error;
-      T normal_diff = line_a_normal.dot(line_b_normal);
-      CHECK(ceres::IsFinite(normal_diff));
-      T rot_part = T(rotation_weight) * (T(1.0) - normal_diff);
-      CHECK(ceres::IsFinite(trans_part));
-      CHECK(ceres::IsFinite(rot_part));
-      residuals[2] = trans_part + rot_part;
-      CHECK(ceres::IsFinite(trans_part + rot_part));
+      typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
+      typedef Eigen::Hyperplane<T, 2> Line2T;
+      const Affine2T pose_to_world =
+              PoseArrayToAffine(&pose[2], &pose[0]);
+      const Line2T line = Line2T::Through(line_segment_.start.cast<T>(), line_segment_.endpoint.cast<T>());
+      #pragma omp parallel for default(none) shared(residuals)
+      for (size_t index = 0; index < points_.size(); index++) {
+        Vector2T pointT = points_[index].cast<T>();
+        // Transform source_point into the frame of target_point
+        pointT = pose_to_world * pointT;
+        T dist_along_normal = line.normal().dot(pointT - line.projection(pointT));
+        residuals[index] = dist_along_normal;
+      }
       return true;
     }
 
-    ColinearResidual(const LineSegment<float>& line_a,
-                     const LineSegment<float>& line_b,
-                     const vector<Vector2f>& a_pose_pointcloud,
-                     const vector<Vector2f>& b_pose_pointcloud,
-                     double translation_weight,
-                     double rotation_weight,
-                     const LCPose& a_pose,
-                     const LCPose& b_pose) :
-            line_a(line_a),
-            line_b(line_b),
-            center_of_a(GetCenterOfMass(a_pose_pointcloud)),
-            center_of_b(GetCenterOfMass(b_pose_pointcloud)),
-            translation_weight(translation_weight),
-            rotation_weight(rotation_weight),
-            pose_a_constraint(a_pose),
-            pose_b_constraint(b_pose) {}
+    PointToLineResidual(const LineSegment<float>& line_segment,
+                        const vector<Vector2f> points) :
+                        line_segment_(line_segment),
+                        points_(points) {}
 
-    static AutoDiffCostFunction<ColinearResidual, 3, 3, 3>*
-    create(const LineSegment<float>& line_a,
-           const LineSegment<float>& line_b,
-           const vector<Vector2f>& a_pose_pointcloud,
-           const vector<Vector2f>& b_pose_pointcloud,
-           double translation_weight,
-           double rotation_weight,
-           const LCPose& a_pose,
-           const LCPose& b_pose) {
-      ColinearResidual* residual = new ColinearResidual(line_a,
-                                                        line_b,
-                                                        a_pose_pointcloud,
-                                                        b_pose_pointcloud,
-                                                        translation_weight,
-                                                        rotation_weight,
-                                                        a_pose,
-                                                        b_pose);
-      return new AutoDiffCostFunction<ColinearResidual, 3, 3, 3>(residual);
+    static AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC, 3>*
+    create(const LineSegment<float>& line_segment, const vector<Vector2f> points) {
+      PointToLineResidual* res = new PointToLineResidual(line_segment, points);
+      return new AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC, 3>(res, points.size());
     }
 
-    const LineSegment<float>& line_a;
-    const LineSegment<float>& line_b;
-    Vector2f center_of_a;
-    Vector2f center_of_b;
-    double translation_weight;
-    double rotation_weight;
-    const LCPose pose_a_constraint;
-    const LCPose pose_b_constraint;
+    const LineSegment<float> line_segment_;
+    const vector<Vector2f> points_;
 };
 
 vector<LineSegment<float>>
@@ -757,7 +687,7 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
     for (Vector2f point : problem_.nodes[node_idx].lidar_factor.pointcloud) {
       Vector2f point_transformed = node_to_world * point;
       if (DistanceToLineSegmentSquared(point_transformed, lines[0]) <
-          HITL_LINE_WIDTH) {
+          HITL_LINE_WIDTH * HITL_LINE_WIDTH) {
         points_on_a.push_back(point_transformed);
       } else if (DistanceToLineSegmentSquared(point_transformed, lines[1]) <
                  HITL_LINE_WIDTH) {
@@ -789,22 +719,14 @@ void Solver::AddColinearResiduals(ceres::Problem* problem) {
         CHECK_LT(b_pose.node_idx, solution_.size());
         CHECK_LT(a_pose.node_idx, problem_.nodes.size());
         CHECK_LT(b_pose.node_idx, problem_.nodes.size());
-        vector<Vector2f>& pointcloud_a =
-          problem_.nodes[a_pose.node_idx].lidar_factor.pointcloud;
-        vector<Vector2f>& pointcloud_b =
-          problem_.nodes[b_pose.node_idx].lidar_factor.pointcloud;
-        problem->
-          AddResidualBlock(ColinearResidual::create(constraint.line_a,
-                                                    constraint.line_b,
-                                                    pointcloud_a,
-                                                    pointcloud_b,
-                                                    lc_translation_weight_,
-                                                    lc_rotation_weight_,
-                                                    a_pose,
-                                                    b_pose),
-                           NULL,
-                           solution_[a_pose.node_idx].pose,
-                           solution_[b_pose.node_idx].pose);
+        const vector<Vector2f>& pointcloud_a = a_pose.points_on_feature;
+        const vector<Vector2f>& pointcloud_b = b_pose.points_on_feature;
+        problem->AddResidualBlock(PointToLineResidual::create(constraint.line_a, pointcloud_a),
+                                  NULL,
+                                  solution_[a_pose.node_idx].pose);
+        problem->AddResidualBlock(PointToLineResidual::create(constraint.line_b, pointcloud_b),
+                                  NULL,
+                                  solution_[b_pose.node_idx].pose);
       }
     }
   }
@@ -838,10 +760,11 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   std::cout << "Found " << colinear_constraint.line_a_poses.size()
     << " poses for the first line." << std::endl;
   std::cout << "Found " << colinear_constraint.line_b_poses.size()
-            << " poses for the second line." << std::endl;
+            << " poses for the asecond line." << std::endl;
   AddColinearConstraints(colinear_constraint);
   SolveForLC();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
-//  SolveSLAM();
+  SolveSLAM();
+  std::cout << "Waiting for Loop Closure input." << std::endl;
 }
