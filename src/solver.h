@@ -48,8 +48,10 @@ struct LineSegment {
 
 #define EPSILON_LINE_ERROR 0.01
 
+// TODO: Turn this back into the normal to distance to line and make sure that
+// the tests are also changed with it.
 template <typename T>
-T DistanceToLineSegmentSquared(const Eigen::Matrix<T, 2, 1>& point,
+T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
                                const LineSegment<T>& line_seg) {
   typedef Eigen::Matrix<T, 2, 1> Vector2T;
   // Line segment is parametric, with a start point and endpoint.
@@ -58,40 +60,16 @@ T DistanceToLineSegmentSquared(const Eigen::Matrix<T, 2, 1>& point,
   // this line.
   Eigen::Hyperplane<T, 2> line =
           Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.endpoint);
-  Eigen::Hyperplane<T, 2> start_to_point =
-          Eigen::Hyperplane<T, 2>::Through(line_seg.start, point);
   Vector2T point_on_line = line.projection(point);
-  CHECK(ceres::IsFinite(point_on_line.x()));
-  CHECK(ceres::IsFinite(point_on_line.y()));
-  Vector2T line_length = (line_seg.endpoint - line_seg.start);
-  CHECK(ceres::IsFinite(line_length.x()));
-  CHECK(ceres::IsFinite(line_length.y()));
-  // To not allow the differentiation to fail when the point gets close to the
-  // beginning of the line as sqrt(x)'s derivative would go to inf as x
-  // approaches 0.
-  Vector2T distance_on_line = (point_on_line - line_seg.start);
-  CHECK(ceres::IsFinite(distance_on_line.x()));
-  CHECK(ceres::IsFinite(distance_on_line.y()));
-  if (distance_on_line.x() >= T(0.0) && distance_on_line.x() <= line_length.x() &&
-      distance_on_line.y() >= T(0.0) && distance_on_line.y() <= line_length.y()) {
-    // Point is between start and end, should return perpendicular dist.
-    Vector2T point_to_line = point_on_line - point;
-    CHECK(ceres::IsFinite(point_to_line.x()));
-    CHECK(ceres::IsFinite(point_to_line.y()));
-    return point_to_line.x() * point_to_line.x() +
-      point_to_line.y() * point_to_line.y();
+  if (point_on_line.x() >= line_seg.start.x() &&
+      point_on_line.x() <= line_seg.endpoint.x() &&
+      point_on_line.y() >= line_seg.start.y() &&
+      point_on_line.y() <= line_seg.endpoint.y()) {
+    return line.absDistance(point);
   }
-  // Point is closer to an endpoint.
-  Vector2T point_to_start = line_seg.start - point;
-  CHECK(ceres::IsFinite(point_to_start.x()));
-  CHECK(ceres::IsFinite(point_to_start.y()));
-  Vector2T point_to_endpoint = line_seg.endpoint - point;
-  T dist_to_start = point_to_start.x() * point_to_start.x() +
-    point_to_start.y() * point_to_start.y();
-  T dist_to_endpoint = point_to_endpoint.x() * point_to_endpoint.x() +
-    point_to_endpoint.y() * point_to_endpoint.y();
-  CHECK(ceres::IsFinite(dist_to_start));
-  CHECK(ceres::IsFinite(dist_to_endpoint));
+
+  T dist_to_start = (point_on_line - line_seg.start).norm();
+  T dist_to_endpoint = (point_on_line - line_seg.endpoint).norm();
   return std::min<T>(dist_to_start, dist_to_endpoint);
 }
 

@@ -29,7 +29,7 @@
 
 #define LIDAR_CONSTRAINT_AMOUNT 5 //TODO: Change this back to 10 after testing.
 #define OUTLIER_THRESHOLD 0.25
-#define HITL_LINE_WIDTH 0.40
+#define HITL_LINE_WIDTH 0.05
 #define HITL_POSE_POINT_THRESHOLD 3
 
 using std::vector;
@@ -310,6 +310,9 @@ void Solver::AddOdomFactors(ceres::Problem* ceres_problem,
       solution_[odom_factor.pose_i].pose,
       solution_[odom_factor.pose_j].pose);
   }
+  if (solution_.size() > 0) {
+    ceres_problem->SetParameterBlockConstant(solution_[0].pose);
+  }
 }
 
 inline bool NormalsSimilar(const Vector2f& n1,
@@ -514,10 +517,6 @@ Solver::SolveSLAM() {
       for (size_t node_i_index = 0;
            node_i_index < problem_.nodes.size();
            node_i_index++) {
-        // Set the first pose to be constant.
-        if (node_i_index == 0) {
-          ceres_problem.SetParameterBlockConstant(solution_[0].pose);
-        }
         for (size_t node_j_index =
                 std::max((int64_t) (node_i_index) - window_size,
                          0l);
@@ -585,46 +584,6 @@ Solver::Solver(double translation_weight,
  * Methods relevant to HITL loop closure.
  */
 
-Vector2f GetCenterOfMass(vector<Vector2f> pointcloud) {
-  Vector2f total;
-  for (Vector2f point : pointcloud) {
-    total += point;
-  }
-  return total / pointcloud.size();
-}
-
-// TODO: This is not finite. Look into what is causing it, possibly overflow?
-// Ideas: Some other term is not finite.
-//        The distance to Line segment function is returning a dist larger than the threshold.
-//        pose points on feature 0?
-template <typename T>
-T ObservationSumCost(const LCPose& pose,
-                     LineSegment<T> line_seg,
-                     Eigen::Transform<T, 2, 2, Eigen::Affine>& pose_to_world) {
-  typedef Eigen::Matrix<T, 2, 1> Vector2T;
-  T sum = T(0.0);
-  for (const Vector2f& point : pose.points_on_feature) {
-    Vector2T pointT = point.cast<T>();
-    pointT = pose_to_world * pointT;
-    CHECK(ceres::IsFinite(pointT.x()));
-    CHECK(ceres::IsFinite(pointT.y()));
-    if (!ceres::IsFinite(DistanceToLineSegmentSquared<T>(pointT, line_seg))) {
-      std::cout << "Failed with: \n";
-      std::cout << pointT << "\n";
-      std::cout << line_seg.start << "\n";
-      std::cout << line_seg.endpoint << std::endl;
-      exit(1);
-    }
-    sum += DistanceToLineSegmentSquared<T>(pointT, line_seg);
-  }
-  CHECK_GT(pose.points_on_feature.size(), 0);
-  CHECK_GT(sum, T(0.0)); // Sum should not have rolled over.
-  sum /= T(pose.points_on_feature.size());
-  sum = pow(sum, 0.5);
-  CHECK(ceres::IsFinite(sum));
-  return sum;
-}
-
 struct PointToLineResidual {
     template <typename T>
     bool operator() (const T* pose, T* residuals) const {
@@ -639,7 +598,7 @@ struct PointToLineResidual {
         Vector2T pointT = points_[index].cast<T>();
         // Transform source_point into the frame of target_point
         pointT = pose_to_world * pointT;
-        T dist_along_normal = line.normal().dot(pointT - line.projection(pointT));
+        T dist_along_normal = line.normal().dot(pointT - line_segment_.start.cast<T>());
         residuals[index] = dist_along_normal;
       }
       return true;
@@ -683,15 +642,15 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
     vector<Vector2f> points_on_b;
     double *pose_ptr = solution_[node_idx].pose;
     Affine2f node_to_world =
-            PoseArrayToAffine(&pose_ptr[0], &pose_ptr[2]).cast<float>();
-    for (Vector2f point : problem_.nodes[node_idx].lidar_factor.pointcloud) {
+            PoseArrayToAffine(&pose_ptr[2], &pose_ptr[0]).cast<float>();
+    for (const Vector2f& point : problem_.nodes[node_idx].lidar_factor.pointcloud) {
       Vector2f point_transformed = node_to_world * point;
-      if (DistanceToLineSegmentSquared(point_transformed, lines[0]) <
-          HITL_LINE_WIDTH * HITL_LINE_WIDTH) {
-        points_on_a.push_back(point_transformed);
-      } else if (DistanceToLineSegmentSquared(point_transformed, lines[1]) <
+      if (DistanceToLineSegment(point_transformed, lines[0]) <=
+          HITL_LINE_WIDTH) {
+        points_on_a.push_back(point);
+      } else if (DistanceToLineSegment(point_transformed, lines[1]) <=
                  HITL_LINE_WIDTH) {
-        points_on_b.push_back(point_transformed);
+        points_on_b.push_back(point);
       }
     }
     if (points_on_a.size() >= HITL_POSE_POINT_THRESHOLD) {
@@ -700,6 +659,50 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
       hitl_constraint.line_b_poses.emplace_back(node_idx, points_on_b);
     }
   }
+  // Visualize these poses for debugging.
+  // TODO: Remove in future versions.
+  ros::Publisher pose_pub = n_.advertise<PointCloud2>("/hitl_poses", 10);
+  ros::Publisher point_pub = n_.advertise<PointCloud2>("/hitl_pose_points", 100);
+  ros::Publisher line_seg_pub = n_.advertise<visualization_msgs::Marker>("/hitl_lines", 10);
+  PointCloud2 pose_point_marker;
+  PointCloud2 pose_points_marker;
+  visualization_msgs::Marker line_marker;
+  pointcloud_helpers::InitPointcloud(&pose_point_marker);
+  pointcloud_helpers::InitPointcloud(&pose_points_marker);
+  gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST, gui_helpers::Color4f::kBlue, 1.0, 0.0, 0.0, &line_marker);
+  vector<Vector2f> pose_points;
+  vector<Vector2f> per_pose_points;
+  for (const LCPose& pose : hitl_constraint.line_a_poses) {
+    double *pose_arr = solution_[pose.node_idx].pose;
+    Vector2f pose_pos(pose_arr[0], pose_arr[1]);
+    pose_points.push_back(pose_pos);
+    Affine2f point_to_world = PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
+    for (const Vector2f& point : pose.points_on_feature) {
+      Vector2f point_transformed = point_to_world * point;
+      per_pose_points.push_back(point_transformed);
+    }
+  }
+  for (const LCPose& pose : hitl_constraint.line_b_poses) {
+    double *pose_arr = solution_[pose.node_idx].pose;
+    Vector2f pose_pos(pose_arr[0], pose_arr[1]);
+    pose_points.push_back(pose_pos);
+    Affine2f point_to_world = PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
+    for (const Vector2f& point : pose.points_on_feature) {
+      Vector2f point_transformed = point_to_world * point;
+      per_pose_points.push_back(point_transformed);
+    }
+  }
+  gui_helpers::AddLine(Eigen::Vector3f(lines[0].start.x(), lines[0].start.y(), 0.0f), Eigen::Vector3f(lines[0].endpoint.x(), lines[0].endpoint.y(), 0.0f), gui_helpers::Color4f::kBlue, &line_marker);
+  gui_helpers::AddLine(Eigen::Vector3f(lines[1].start.x(), lines[1].start.y(), 0.0f), Eigen::Vector3f(lines[1].endpoint.x(), lines[1].endpoint.y(), 0.0f), gui_helpers::Color4f::kBlue, &line_marker);
+  std::cout << "Publishing Poses as points" << std::endl;
+  for (int i = 0; i < 5; i++) {
+    pointcloud_helpers::PublishPointcloud(pose_points, pose_point_marker, pose_pub);
+    pointcloud_helpers::PublishPointcloud(per_pose_points, pose_points_marker, point_pub);
+    line_seg_pub.publish(line_marker);
+    ros::spinOnce();
+    sleep(1);
+  }
+  sleep(5);
   return hitl_constraint;
 }
 
