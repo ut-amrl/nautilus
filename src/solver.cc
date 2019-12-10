@@ -662,42 +662,63 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
   // Visualize these poses for debugging.
   // TODO: Remove in future versions.
   ros::Publisher pose_pub = n_.advertise<PointCloud2>("/hitl_poses", 10);
-  ros::Publisher point_pub = n_.advertise<PointCloud2>("/hitl_pose_points", 100);
-  ros::Publisher line_seg_pub = n_.advertise<visualization_msgs::Marker>("/hitl_lines", 10);
+  ros::Publisher point_a_pub = n_.advertise<PointCloud2>("/hitl_a_points",
+                                                         100);
+  ros::Publisher point_b_pub = n_.advertise<PointCloud2>("/hitl_b_points",
+                                                         100);
+  ros::Publisher line_seg_pub = n_.advertise<visualization_msgs::Marker>(
+          "/hitl_lines", 10);
   PointCloud2 pose_point_marker;
-  PointCloud2 pose_points_marker;
+  PointCloud2 a_points_marker;
+  PointCloud2 b_points_marker;
   visualization_msgs::Marker line_marker;
   pointcloud_helpers::InitPointcloud(&pose_point_marker);
-  pointcloud_helpers::InitPointcloud(&pose_points_marker);
-  gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST, gui_helpers::Color4f::kBlue, 1.0, 0.0, 0.0, &line_marker);
+  pointcloud_helpers::InitPointcloud(&a_points_marker);
+  pointcloud_helpers::InitPointcloud(&b_points_marker);
+  gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
+                                gui_helpers::Color4f::kBlue, 1.0, 0.0, 0.0,
+                                &line_marker);
   vector<Vector2f> pose_points;
-  vector<Vector2f> per_pose_points;
-  for (const LCPose& pose : hitl_constraint.line_a_poses) {
+  vector<Vector2f> a_points;
+  vector<Vector2f> b_points;
+  for (const LCPose &pose : hitl_constraint.line_a_poses) {
     double *pose_arr = solution_[pose.node_idx].pose;
     Vector2f pose_pos(pose_arr[0], pose_arr[1]);
     pose_points.push_back(pose_pos);
-    Affine2f point_to_world = PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
-    for (const Vector2f& point : pose.points_on_feature) {
+    Affine2f point_to_world = PoseArrayToAffine(&pose_arr[2],
+                                                &pose_arr[0]).cast<float>();
+    for (const Vector2f &point : pose.points_on_feature) {
       Vector2f point_transformed = point_to_world * point;
-      per_pose_points.push_back(point_transformed);
+      a_points.push_back(point_transformed);
     }
   }
-  for (const LCPose& pose : hitl_constraint.line_b_poses) {
+  for (const LCPose &pose : hitl_constraint.line_b_poses) {
     double *pose_arr = solution_[pose.node_idx].pose;
     Vector2f pose_pos(pose_arr[0], pose_arr[1]);
     pose_points.push_back(pose_pos);
-    Affine2f point_to_world = PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
-    for (const Vector2f& point : pose.points_on_feature) {
+    Affine2f point_to_world = PoseArrayToAffine(&pose_arr[2],
+                                                &pose_arr[0]).cast<float>();
+    for (const Vector2f &point : pose.points_on_feature) {
       Vector2f point_transformed = point_to_world * point;
-      per_pose_points.push_back(point_transformed);
+      b_points.push_back(point_transformed);
     }
   }
-  gui_helpers::AddLine(Eigen::Vector3f(lines[0].start.x(), lines[0].start.y(), 0.0f), Eigen::Vector3f(lines[0].endpoint.x(), lines[0].endpoint.y(), 0.0f), gui_helpers::Color4f::kBlue, &line_marker);
-  gui_helpers::AddLine(Eigen::Vector3f(lines[1].start.x(), lines[1].start.y(), 0.0f), Eigen::Vector3f(lines[1].endpoint.x(), lines[1].endpoint.y(), 0.0f), gui_helpers::Color4f::kBlue, &line_marker);
+  gui_helpers::AddLine(
+          Eigen::Vector3f(lines[0].start.x(), lines[0].start.y(), 0.0f),
+          Eigen::Vector3f(lines[0].endpoint.x(), lines[0].endpoint.y(), 0.0f),
+          gui_helpers::Color4f::kBlue, &line_marker);
+  gui_helpers::AddLine(
+          Eigen::Vector3f(lines[1].start.x(), lines[1].start.y(), 0.0f),
+          Eigen::Vector3f(lines[1].endpoint.x(), lines[1].endpoint.y(), 0.0f),
+          gui_helpers::Color4f::kBlue, &line_marker);
   std::cout << "Publishing Poses as points" << std::endl;
   for (int i = 0; i < 5; i++) {
-    pointcloud_helpers::PublishPointcloud(pose_points, pose_point_marker, pose_pub);
-    pointcloud_helpers::PublishPointcloud(per_pose_points, pose_points_marker, point_pub);
+    pointcloud_helpers::PublishPointcloud(pose_points, pose_point_marker,
+                                          pose_pub);
+    pointcloud_helpers::PublishPointcloud(a_points, a_points_marker,
+                                          point_a_pub);
+    pointcloud_helpers::PublishPointcloud(b_points, b_points_marker,
+                                          point_b_pub);
     line_seg_pub.publish(line_marker);
     ros::spinOnce();
     sleep(1);

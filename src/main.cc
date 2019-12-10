@@ -56,11 +56,11 @@ DEFINE_bool(
   "Is the odometry differential (True for CobotOdometryMsgs)?");
 DEFINE_double(
   lc_translation_weight,
-  5,
+  1,
   "The translation weight for loop closure.");
 DEFINE_double(
   lc_rotation_weight,
-  5,
+  1,
   "The rotational weight for loop closure.");
 DEFINE_string(
   hitl_lc_topic,

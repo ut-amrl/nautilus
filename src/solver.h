@@ -46,7 +46,11 @@ struct LineSegment {
     }
 };
 
-#define EPSILON_LINE_ERROR 0.01
+// Returns if val is between a and b.
+template <typename T>
+T IsBetween(const T& val, const T& a, const T& b) {
+  return (val >= a && val <= b) || (val >= b && val <= a);
+}
 
 // TODO: Turn this back into the normal to distance to line and make sure that
 // the tests are also changed with it.
@@ -59,17 +63,15 @@ T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
   // We can get the point on the line by projecting the start -> point onto
   // this line.
   Eigen::Hyperplane<T, 2> line =
-          Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.endpoint);
+    Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.endpoint);
   Vector2T point_on_line = line.projection(point);
-  if (point_on_line.x() >= line_seg.start.x() &&
-      point_on_line.x() <= line_seg.endpoint.x() &&
-      point_on_line.y() >= line_seg.start.y() &&
-      point_on_line.y() <= line_seg.endpoint.y()) {
+  if (IsBetween(point_on_line.x(), line_seg.start.x(), line_seg.endpoint.x()) &&
+      IsBetween(point_on_line.y(), line_seg.start.y(), line_seg.endpoint.y())) {
     return line.absDistance(point);
   }
 
-  T dist_to_start = (point_on_line - line_seg.start).norm();
-  T dist_to_endpoint = (point_on_line - line_seg.endpoint).norm();
+  T dist_to_start = (point - line_seg.start).norm();
+  T dist_to_endpoint = (point - line_seg.endpoint).norm();
   return std::min<T>(dist_to_start, dist_to_endpoint);
 }
 
