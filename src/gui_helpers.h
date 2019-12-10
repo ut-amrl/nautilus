@@ -23,7 +23,7 @@
 #ifndef SRC_GUI_HELPERS_H_
 #define SRC_GUI_HELPERS_H_
 
-#include <stdio.h>
+#include <cstdio>
 #include <vector>
 #include "eigen3/Eigen/Dense"
 
@@ -31,7 +31,6 @@
 #include "ros/ros.h"
 #include "visualization_msgs/Marker.h"
 #include "visualization_msgs/MarkerArray.h"
-
 
 namespace gui_helpers {
 
@@ -102,10 +101,7 @@ void AddPoint(const Vector3& v,
   msg->colors.push_back(StdColor(color));
 }
 
-void ClearMarker(visualization_msgs::Marker* msg) {
-  msg->points.clear();
-  msg->colors.clear();
-}
+void ClearMarker(visualization_msgs::Marker* msg);
 
 }  // namespace gui_helpers
 

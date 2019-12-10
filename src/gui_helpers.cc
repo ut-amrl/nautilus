@@ -22,10 +22,7 @@
 
 #include "./gui_helpers.h"
 
-#include "glog/logging.h"
-#include "ros/ros.h"
 #include "visualization_msgs/Marker.h"
-#include "visualization_msgs/MarkerArray.h"
 
 namespace {
   int marker_id_ = 0;
@@ -63,6 +60,11 @@ void InitializeMarker(
   msg->scale.y = scale_y;
   msg->scale.z = scale_z;
   msg->header.frame_id = "map";
+}
+
+void ClearMarker(visualization_msgs::Marker* msg) {
+  msg->points.clear();
+  msg->colors.clear();
 }
 
 }  // namespace gui_helpers

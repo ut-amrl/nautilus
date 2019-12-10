@@ -1,4 +1,5 @@
 #include <csignal>
+#include <vector>
 
 #include "ros/node_handle.h"
 #include "gflags/gflags.h"
@@ -12,7 +13,6 @@
 #include "./slam_types.h"
 #include "./solver.h"
 #include "lidar_slam/CobotOdometryMsg.h"
-#include "lidar_slam/HitlSlamInputMsg.h"
 
 using std::string;
 using std::vector;
