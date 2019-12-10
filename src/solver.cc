@@ -671,22 +671,22 @@ void Solver::AddColinearConstraints(LCConstraint& constraint) {
 }
 
 void Solver::AddColinearResiduals(ceres::Problem* problem) {
-  for (const LCConstraint constraint : loop_closure_constraints_) {
-    for (const LCPose a_pose : constraint.line_a_poses) {
-      for (const LCPose b_pose : constraint.line_b_poses) {
-        CHECK_LT(a_pose.node_idx, solution_.size());
-        CHECK_LT(b_pose.node_idx, solution_.size());
-        CHECK_LT(a_pose.node_idx, problem_.nodes.size());
-        CHECK_LT(b_pose.node_idx, problem_.nodes.size());
-        const vector<Vector2f>& pointcloud_a = a_pose.points_on_feature;
-        const vector<Vector2f>& pointcloud_b = b_pose.points_on_feature;
-        problem->AddResidualBlock(PointToLineResidual::create(constraint.line_a, pointcloud_a),
-                                  NULL,
-                                  solution_[a_pose.node_idx].pose);
-        problem->AddResidualBlock(PointToLineResidual::create(constraint.line_b, pointcloud_b),
-                                  NULL,
-                                  solution_[b_pose.node_idx].pose);
-      }
+  for (const LCConstraint& constraint : loop_closure_constraints_) {
+    for (const LCPose &a_pose : constraint.line_a_poses) {
+      const vector<Vector2f> &pointcloud_a = a_pose.points_on_feature;
+      CHECK_LT(a_pose.node_idx, solution_.size());
+      problem->AddResidualBlock(
+              PointToLineResidual::create(constraint.line_a, pointcloud_a),
+              NULL,
+              solution_[a_pose.node_idx].pose);
+    }
+    for (const LCPose &b_pose : constraint.line_b_poses) {
+      const vector<Vector2f> &pointcloud_b = b_pose.points_on_feature;
+      CHECK_LT(b_pose.node_idx, solution_.size());
+      problem->AddResidualBlock(
+              PointToLineResidual::create(constraint.line_a, pointcloud_b),
+              NULL,
+              solution_[b_pose.node_idx].pose);
     }
   }
 }
@@ -699,13 +699,13 @@ void Solver::SolveForLC() {
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::SPARSE_SCHUR;
   options.minimizer_progress_to_stdout = true;
-  options.num_threads = std::thread::hardware_concurrency();
+  options.num_threads =
+    static_cast<int>(std::thread::hardware_concurrency());
   VisualizationCallback vis_callback(problem_, &solution_, n_);
   options.callbacks.push_back(&vis_callback);
   AddOdomFactors(&problem,
                  lc_translation_weight_,
                  lc_rotation_weight_);
-  std::cout << "Odometry size: " << problem_.odometry_factors.size() << std::endl;
   AddColinearResiduals(&problem);
   ceres::Solve(options, &problem, &summary);
   vis_callback.PubVisualization();
