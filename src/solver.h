@@ -152,6 +152,19 @@ class VisualizationCallback : public ceres::IterationCallback {
                                   0.0,
                                   0.0,
                                   &normals_marker);
+    pose_pub = n.advertise<PointCloud2>("/hitl_poses", 10);
+    point_a_pub = n.advertise<PointCloud2>("/hitl_a_points",100);
+    point_b_pub = n.advertise<PointCloud2>("/hitl_b_points",100);
+    line_pub = n.advertise<visualization_msgs::Marker>("/line_a", 10);
+    pointcloud_helpers::InitPointcloud(&pose_point_marker);
+    pointcloud_helpers::InitPointcloud(&a_points_marker);
+    pointcloud_helpers::InitPointcloud(&b_points_marker);
+    gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
+                                  gui_helpers::Color4f::kMagenta,
+                                  0.10,
+                                  0.0,
+                                  0.0,
+                                  &line_marker);
   }
 
   void PubVisualization() {
@@ -209,6 +222,56 @@ class VisualizationCallback : public ceres::IterationCallback {
       normals_pub.publish(normals_marker);
     }
     all_points.clear();
+    PubConstraintVisualization();
+  }
+
+  void PubConstraintVisualization() {
+    const vector<SLAMNodeSolution2D>& solution_c = *solution;
+    for (const LCConstraint& hitl_constraint : constraints) {
+      vector<Vector2f> pose_points;
+      vector<Vector2f> a_points;
+      vector<Vector2f> b_points;
+      for (const LCPose &pose : hitl_constraint.line_a_poses) {
+        const double *pose_arr = solution_c[pose.node_idx].pose;
+        Vector2f pose_pos(pose_arr[0], pose_arr[1]);
+        pose_points.push_back(pose_pos);
+        Affine2f point_to_world = PoseArrayToAffine(&pose_arr[2],
+                                                    &pose_arr[0]).cast<float>();
+        for (const Vector2f &point : pose.points_on_feature) {
+          Vector2f point_transformed = point_to_world * point;
+          a_points.push_back(point_transformed);
+        }
+      }
+      for (const LCPose &pose : hitl_constraint.line_b_poses) {
+        const double *pose_arr = solution_c[pose.node_idx].pose;
+        Vector2f pose_pos(pose_arr[0], pose_arr[1]);
+        pose_points.push_back(pose_pos);
+        Affine2f point_to_world = PoseArrayToAffine(&pose_arr[2],
+                                                    &pose_arr[0]).cast<float>();
+        for (const Vector2f &point : pose.points_on_feature) {
+          Vector2f point_transformed = point_to_world * point;
+          b_points.push_back(point_transformed);
+        }
+      }
+      gui_helpers::AddLine(Vector3f(hitl_constraint.line_a.start.x(),
+                                    hitl_constraint.line_a.start.y(),
+                                    0.0),
+                           Vector3f(hitl_constraint.line_a.endpoint.x(),
+                                    hitl_constraint.line_a.endpoint.y(),
+                                    0.0),
+                           gui_helpers::Color4f::kMagenta,
+                           &line_marker);
+      for (int i = 0; i < 5; i++) {
+        pointcloud_helpers::PublishPointcloud(pose_points, pose_point_marker,
+                                              constraint_pose_pub);
+        pointcloud_helpers::PublishPointcloud(a_points, a_points_marker,
+                                              point_a_pub);
+        pointcloud_helpers::PublishPointcloud(b_points, b_points_marker,
+                                              point_b_pub);
+        line_pub.publish(line_marker);
+        sleep(1);
+      }
+    }
   }
 
   void ClearNormals() {
@@ -255,10 +318,19 @@ class VisualizationCallback : public ceres::IterationCallback {
   ros::Publisher match_pub;
   ros::Publisher new_point_pub;
   ros::Publisher normals_pub;
+  ros::Publisher constraint_pose_pub;
+  ros::Publisher point_a_pub;
+  ros::Publisher point_b_pub;
+  ros::Publisher line_pub;
   visualization_msgs::Marker pose_array;
   visualization_msgs::Marker match_line_list;
   visualization_msgs::Marker normals_marker;
+  PointCloud2 pose_point_marker;
+  PointCloud2 a_points_marker;
+  PointCloud2 b_points_marker;
+  visualization_msgs::Marker line_marker;
   PointCorrespondences last_correspondence;
+  vector<LCConstraint> constraints;
 };
 
 class Solver {
