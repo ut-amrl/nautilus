@@ -99,8 +99,8 @@ struct LCPose {
 struct LCConstraint {
     vector<LCPose> line_a_poses;
     vector<LCPose> line_b_poses;
-    const LineSegment<float>& line_a;
-    const LineSegment<float>& line_b;
+    const LineSegment<float> line_a;
+    const LineSegment<float> line_b;
     LCConstraint(const LineSegment<float>& line_a,
                  const LineSegment<float>& line_b) :
                  line_a(line_a),
@@ -299,6 +299,10 @@ class VisualizationCallback : public ceres::IterationCallback {
 
   void UpdateLastCorrespondence(PointCorrespondences& point_correspondence) {
     last_correspondence = point_correspondence;
+  }
+
+  void AddConstraint(const LCConstraint& constraint) {
+    constraints.push_back(constraint);
   }
 
   ceres::CallbackReturnType operator()(const ceres::IterationSummary& summary)

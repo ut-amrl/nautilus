@@ -460,7 +460,7 @@ struct PointToLineResidual {
       #pragma omp parallel for default(none) shared(residuals)
       for (size_t index = 0; index < points_.size(); index++) {
         Vector2T pointT = points_[index].cast<T>();
-        // Transform source_point into the frame of target_point
+        // Transform source_point into the frame of the line
         pointT = pose_to_world * pointT;
         T dist_along_normal = line.normal().dot(pointT - line_segment_.start.cast<T>());
         residuals[index] = dist_along_normal;
@@ -523,9 +523,6 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
       hitl_constraint.line_b_poses.emplace_back(node_idx, points_on_b);
     }
   }
-  std::cout << "Inside Get Relevant Poses For HITL" << std::endl;
-  std::cout << "Line A, Start: " << hitl_constraint.line_a.start << std::endl;
-  std::cout << "Line A, End: " << hitl_constraint.line_a.endpoint << std::endl;
   return hitl_constraint;
 }
 
@@ -535,6 +532,7 @@ void Solver::AddColinearConstraints(const LCConstraint& constraint) {
     return;
   }
   loop_closure_constraints_.push_back(constraint);
+  vis_callback_->AddConstraint(constraint);
 }
 
 void Solver::AddCollinearResiduals(ceres::Problem* problem) {
@@ -568,8 +566,8 @@ void Solver::SolveForLC() {
   options.minimizer_progress_to_stdout = true;
   options.num_threads =
     static_cast<int>(std::thread::hardware_concurrency());
-  options.update_state_every_iteration = true;
   options.callbacks.push_back(vis_callback_.get());
+  options.update_state_every_iteration = true;
   AddOdomFactors(&problem,
                  lc_translation_weight_,
                  lc_rotation_weight_);
@@ -582,12 +580,12 @@ void Solver::SolveForLC() {
 void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   const HitlSlamInputMsg hitl_msg = *hitl_ptr;
   // Get the poses that belong to this input.
-  LCConstraint colinear_constraint = GetRelevantPosesForHITL(hitl_msg);
-  std::cout << "Found " << colinear_constraint.line_a_poses.size()
+  const LCConstraint collinear_constraint = GetRelevantPosesForHITL(hitl_msg);
+  std::cout << "Found " << collinear_constraint.line_a_poses.size()
     << " poses for the first line." << std::endl;
-  std::cout << "Found " << colinear_constraint.line_b_poses.size()
+  std::cout << "Found " << collinear_constraint.line_b_poses.size()
             << " poses for the second line." << std::endl;
-  AddColinearConstraints(colinear_constraint);
+  AddColinearConstraints(collinear_constraint);
   SolveForLC();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
