@@ -36,6 +36,10 @@ using lidar_slam::HitlSlamInputMsg;
 using slam_types::SLAMNode2D;
 using Eigen::Vector3f;
 
+// Line needs an affine.
+// Penalize Radial distance as well.
+// Be able to override bag file max distance.
+
 struct OdometryResidual {
   template <typename T>
   bool operator() (const T* pose_i,
@@ -44,30 +48,27 @@ struct OdometryResidual {
     // Predicted pose_j = pose_i * odometry.
     // Hence, error = pose_j.inverse() * pose_i * odometry;
     typedef Eigen::Matrix<T, 2, 1> Vector2T;
-    typedef Eigen::Matrix<T, 2, 2> Matrix2T;
+//    typedef Eigen::Matrix<T, 2, 2> Matrix2T;
     // Extract the rotation matrices.
-    const Matrix2T Ri = Rotation2D<T>(pose_i[2])
-      .toRotationMatrix();
-    const Matrix2T Rj = Rotation2D<T>(pose_j[2])
-      .toRotationMatrix();
+//    const Matrix2T Ri = Rotation2D<T>(pose_i[2])
+//      .toRotationMatrix();
+//    const Matrix2T Rj = Rotation2D<T>(pose_j[2])
+//      .toRotationMatrix();
     // Extract the translation.
     const Vector2T Ti(pose_i[0], pose_i[1]);
     const Vector2T Tj(pose_j[0], pose_j[1]);
     // The Error in the translation is the difference with the odometry
     // in the direction of the previous pose, then getting rid of the new
     // rotation (transpose = inverse for rotation matrices).
-    const Vector2T error_translation =
-      Rj.transpose() * (Ri * T_odom.cast<T>() - (Tj - Ti));
+    const Vector2T error_translation = Ti + T_odom.cast<T>() - Tj;
     // Rotation error is very similar to the translation error, except
     // we don't care about the difference in the position.
-    const Matrix2T error_rotation_mat =
-      Rj.transpose() * Ri * R_odom.cast<T>();
+    const T error_rotation = pose_i[2] + T(R_odom) - pose_j[2];
     // The residuals are weighted according to the parameters set
     // by the user.
     residual[0] = T(translation_weight) * error_translation.x();
     residual[1] = T(translation_weight) * error_translation.y();
-    residual[2] = T(rotation_weight) *
-      Rotation2D<T>().fromRotationMatrix(error_rotation_mat).angle();
+    residual[2] = T(rotation_weight) * error_rotation;
     return true;
   }
 
@@ -76,8 +77,7 @@ struct OdometryResidual {
                    double rotation_weight) :
           translation_weight(translation_weight),
           rotation_weight(rotation_weight),
-          R_odom(Rotation2D<float>(factor.rotation)
-                  .toRotationMatrix()),
+          R_odom(factor.rotation),
           T_odom(factor.translation) {}
 
   static AutoDiffCostFunction<OdometryResidual, 3, 3, 3>*
@@ -92,9 +92,8 @@ struct OdometryResidual {
 
   double translation_weight;
   double rotation_weight;
-  const Matrix2f R_odom;
+  const float R_odom;
   const Vector2f T_odom;
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
 struct LIDARPointBlobResidual {
@@ -164,9 +163,10 @@ struct LIDARPointBlobResidual {
 };
 
 void Solver::AddOdomFactors(ceres::Problem* ceres_problem,
+                            vector<OdometryFactor2D> factors,
                             double trans_weight,
                             double rot_weight) {
-  for (const OdometryFactor2D& odom_factor : problem_.odometry_factors) {
+  for (const OdometryFactor2D& odom_factor : factors) {
     CHECK_LT(odom_factor.pose_i, odom_factor.pose_j);
     CHECK_GT(solution_.size(), odom_factor.pose_i);
     CHECK_GT(solution_.size(), odom_factor.pose_j);
@@ -373,6 +373,7 @@ Solver::SolveSLAM() {
       ceres::Problem ceres_problem;
       // Add all the odometry constraints between our poses.
       AddOdomFactors(&ceres_problem,
+                     problem_.odometry_factors,
                      translation_weight_,
                      rotation_weight_);
       // For every SLAM node we want to optimize it against the past
@@ -612,6 +613,21 @@ void Solver::AddPointCloudResiduals(ceres::Problem* problem) {
   }
 }
 
+vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
+  CHECK_GT(solution_.size(), 1);
+  vector<OdometryFactor2D> factors;
+  for (uint64_t index = 1; index < solution_.size(); index++) {
+    // Get the change in translation.
+    Vector2f prev_loc(solution_[index - 1].pose[0],
+                      solution_[index - 1].pose[1]);
+    Vector2f loc(solution_[index].pose[0], solution_[index].pose[1]);
+    double rot_change = solution_[index].pose[2] - solution_[index - 1].pose[2];
+    Vector2f trans_change = loc - prev_loc;
+    factors.emplace_back(index - 1, index, trans_change, rot_change);
+  }
+  return factors;
+}
+
 void Solver::SolveForLC() {
   // Create a new problem with colinear residuals between these nodes and a
   // small weighted odometry residuals between all poses and between these ones.
@@ -624,7 +640,9 @@ void Solver::SolveForLC() {
     static_cast<int>(std::thread::hardware_concurrency());
   options.callbacks.push_back(vis_callback_.get());
   options.update_state_every_iteration = true;
+  vector<OdometryFactor2D> local_factors = GetSolvedOdomFactors();
   AddOdomFactors(&problem,
+                 local_factors,
                  lc_translation_weight_,
                  lc_rotation_weight_);
   AddCollinearResiduals(&problem);

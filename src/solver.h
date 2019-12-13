@@ -70,7 +70,7 @@ T IsBetween(const T& val, const T& a, const T& b) {
 
 template <typename T>
 T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
-                               const LineSegment<T>& line_seg) {
+                        const LineSegment<T>& line_seg) {
   typedef Eigen::Matrix<T, 2, 1> Vector2T;
   // Line segment is parametric, with a start point and endpoint.
   // Parameterized by t between 0 and 1.
@@ -354,6 +354,7 @@ class Solver {
                                  size_t source_node_index,
                                  size_t target_node_index);
   void AddOdomFactors(ceres::Problem* ceres_problem,
+                      vector<OdometryFactor2D> factors,
                       double trans_weight,
                       double rot_weight);
   void HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr);
@@ -366,6 +367,7 @@ class Solver {
   void AddCollinearResiduals(ceres::Problem* problem);
   double AddLidarResidualsForLC(ceres::Problem& problem);
   void AddPointCloudResiduals(ceres::Problem* problem);
+  vector<OdometryFactor2D> GetSolvedOdomFactors();
  private:
   double translation_weight_;
   double rotation_weight_;
