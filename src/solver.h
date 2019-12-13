@@ -152,7 +152,7 @@ class VisualizationCallback : public ceres::IterationCallback {
                                   0.0,
                                   0.0,
                                   &normals_marker);
-    pose_pub = n.advertise<PointCloud2>("/hitl_poses", 10);
+    constraint_pose_pub = n.advertise<PointCloud2>("/hitl_poses", 10);
     point_a_pub = n.advertise<PointCloud2>("/hitl_a_points",100);
     point_b_pub = n.advertise<PointCloud2>("/hitl_b_points",100);
     line_pub = n.advertise<visualization_msgs::Marker>("/line_a", 10);
@@ -365,7 +365,8 @@ class Solver {
   void SolveForLC();
   void AddCollinearResiduals(ceres::Problem* problem);
   double AddLidarResidualsForLC(ceres::Problem& problem);
-private:
+  void AddPointCloudResiduals(ceres::Problem* problem);
+ private:
   double translation_weight_;
   double rotation_weight_;
   double lc_translation_weight_;

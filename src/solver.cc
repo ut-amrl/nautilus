@@ -16,7 +16,7 @@
 #include "timer.h"
 #include "lidar_slam/HitlSlamInputMsg.h"
 
-#define LIDAR_CONSTRAINT_AMOUNT 3 //TODO: Change this back to 10 after testing.
+#define LIDAR_CONSTRAINT_AMOUNT 10 //TODO: Change this back to 10 after testing.
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
 #define HITL_POSE_POINT_THRESHOLD 3
@@ -483,6 +483,38 @@ struct PointToLineResidual {
     const vector<Vector2f> points_;
 };
 
+struct PointDistanceResidual {
+    template <typename T>
+    bool operator() (const T* pose_a, const T* pose_b, T* residuals) const {
+      typedef Eigen::Matrix<T, 2, 1> Vector2T;
+      typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
+      const Affine2T a_to_world =
+              PoseArrayToAffine(&pose_a[2], &pose_a[0]);
+      const Affine2T b_to_world =
+              PoseArrayToAffine(&pose_b[2], &pose_b[0]);
+      Vector2T a_center = pose_a_center_of_mass.cast<T>();
+      a_center = a_to_world * a_center;
+      Vector2T b_center = pose_b_center_of_mass.cast<T>();
+      b_center = b_to_world * b_center;
+      residuals[0] = (a_center - b_center).norm();
+      return true;
+    }
+
+    PointDistanceResidual(const Vector2f& a_center,
+                          const Vector2f& b_center) :
+            pose_a_center_of_mass(a_center),
+            pose_b_center_of_mass(b_center) {}
+
+    static AutoDiffCostFunction<PointDistanceResidual, 1, 3, 3>*
+    create(const Vector2f& a_center, const Vector2f& b_center) {
+      PointDistanceResidual* res = new PointDistanceResidual(a_center, b_center);
+      return new AutoDiffCostFunction<PointDistanceResidual, 1, 3, 3>(res);
+    }
+
+    const Vector2f pose_a_center_of_mass;
+    const Vector2f pose_b_center_of_mass;
+};
+
 vector<LineSegment<float>>
 LineSegmentsFromHitlMsg(const HitlSlamInputMsg& msg) {
   Vector2f start_a(msg.line_a_start.x, msg.line_a_start.y);
@@ -556,6 +588,30 @@ void Solver::AddCollinearResiduals(ceres::Problem* problem) {
   }
 }
 
+Vector2f GetCenterOfMass(vector<Vector2f> pointcloud) {
+  Vector2f total;
+  for (Vector2f point : pointcloud) {
+    total += point;
+  }
+  return total / pointcloud.size();
+}
+
+void Solver::AddPointCloudResiduals(ceres::Problem* problem) {
+  for (const LCConstraint& constraint : loop_closure_constraints_) {
+    for (const LCPose &a_pose : constraint.line_a_poses) {
+      const Vector2f a_center = GetCenterOfMass(a_pose.points_on_feature);
+      for (const LCPose &b_pose : constraint.line_b_poses) {
+        const Vector2f b_center = GetCenterOfMass(b_pose.points_on_feature);
+        problem
+          ->AddResidualBlock(PointDistanceResidual::create(a_center, b_center),
+                             NULL,
+                             solution_[a_pose.node_idx].pose,
+                             solution_[b_pose.node_idx].pose);
+      }
+    }
+  }
+}
+
 void Solver::SolveForLC() {
   // Create a new problem with colinear residuals between these nodes and a
   // small weighted odometry residuals between all poses and between these ones.
@@ -572,6 +628,7 @@ void Solver::SolveForLC() {
                  lc_translation_weight_,
                  lc_rotation_weight_);
   AddCollinearResiduals(&problem);
+  //AddPointCloudResiduals(&problem);
   ceres::Solve(options, &problem, &summary);
   vis_callback_->PubVisualization();
   std::cout << summary.FullReport() << std::endl;
