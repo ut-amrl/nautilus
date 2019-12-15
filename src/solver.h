@@ -64,7 +64,7 @@ struct LineSegment {
 
 // Returns if val is between a and b.
 template <typename T>
-T IsBetween(const T& val, const T& a, const T& b) {
+bool IsBetween(const T& val, const T& a, const T& b) {
   return (val >= a && val <= b) || (val >= b && val <= a);
 }
 

@@ -457,13 +457,16 @@ struct PointToLineResidual {
       typedef Eigen::Hyperplane<T, 2> Line2T;
       const Affine2T pose_to_world =
               PoseArrayToAffine(&pose[2], &pose[0]);
-      const Line2T line = Line2T::Through(line_segment_.start.cast<T>(), line_segment_.endpoint.cast<T>());
+      const Line2T line =
+        Line2T::Through(line_segment_.start.cast<T>(),
+                        line_segment_.endpoint.cast<T>());
       #pragma omp parallel for default(none) shared(residuals)
       for (size_t index = 0; index < points_.size(); index++) {
         Vector2T pointT = points_[index].cast<T>();
         // Transform source_point into the frame of the line
         pointT = pose_to_world * pointT;
-        T dist_along_normal = line.normal().dot(pointT - line_segment_.start.cast<T>());
+        T dist_along_normal =
+          DistanceToLineSegment(pointT, line_segment_.cast<T>());
         residuals[index] = dist_along_normal;
       }
       return true;
@@ -589,30 +592,6 @@ void Solver::AddCollinearResiduals(ceres::Problem* problem) {
   }
 }
 
-Vector2f GetCenterOfMass(vector<Vector2f> pointcloud) {
-  Vector2f total;
-  for (Vector2f point : pointcloud) {
-    total += point;
-  }
-  return total / pointcloud.size();
-}
-
-void Solver::AddPointCloudResiduals(ceres::Problem* problem) {
-  for (const LCConstraint& constraint : loop_closure_constraints_) {
-    for (const LCPose &a_pose : constraint.line_a_poses) {
-      const Vector2f a_center = GetCenterOfMass(a_pose.points_on_feature);
-      for (const LCPose &b_pose : constraint.line_b_poses) {
-        const Vector2f b_center = GetCenterOfMass(b_pose.points_on_feature);
-        problem
-          ->AddResidualBlock(PointDistanceResidual::create(a_center, b_center),
-                             NULL,
-                             solution_[a_pose.node_idx].pose,
-                             solution_[b_pose.node_idx].pose);
-      }
-    }
-  }
-}
-
 vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
   CHECK_GT(solution_.size(), 1);
   vector<OdometryFactor2D> factors;
@@ -646,7 +625,6 @@ void Solver::SolveForLC() {
                  lc_translation_weight_,
                  lc_rotation_weight_);
   AddCollinearResiduals(&problem);
-  //AddPointCloudResiduals(&problem);
   ceres::Solve(options, &problem, &summary);
   vis_callback_->PubVisualization();
   std::cout << summary.FullReport() << std::endl;
