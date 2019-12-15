@@ -451,22 +451,23 @@ Solver::Solver(double translation_weight,
 
 struct PointToLineResidual {
     template <typename T>
-    bool operator() (const T* pose, T* residuals) const {
+    bool operator() (const T* pose, const T* line_pose, T* residuals) const {
       typedef Eigen::Matrix<T, 2, 1> Vector2T;
       typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
-      typedef Eigen::Hyperplane<T, 2> Line2T;
       const Affine2T pose_to_world =
-              PoseArrayToAffine(&pose[2], &pose[0]);
-      const Line2T line =
-        Line2T::Through(line_segment_.start.cast<T>(),
-                        line_segment_.endpoint.cast<T>());
+        PoseArrayToAffine(&pose[2], &pose[0]);
+      const Affine2T line_to_world =
+        PoseArrayToAffine(&line_pose[2], &line_pose[0]);
+      Vector2T line_start = line_to_world * line_segment_.start.cast<T>();
+      Vector2T line_end = line_to_world * line_segment_.end.cast<T>();
+      const LineSegment<T> TransformedLineSegment(line_start, line_end);
       #pragma omp parallel for default(none) shared(residuals)
       for (size_t index = 0; index < points_.size(); index++) {
         Vector2T pointT = points_[index].cast<T>();
         // Transform source_point into the frame of the line
         pointT = pose_to_world * pointT;
         T dist_along_normal =
-          DistanceToLineSegment(pointT, line_segment_.cast<T>());
+          DistanceToLineSegment(pointT, TransformedLineSegment);
         residuals[index] = dist_along_normal;
       }
       return true;
@@ -477,46 +478,16 @@ struct PointToLineResidual {
                         line_segment_(line_segment),
                         points_(points) {}
 
-    static AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC, 3>*
+    static AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC, 3, 3>*
     create(const LineSegment<float>& line_segment, const vector<Vector2f> points) {
       PointToLineResidual* res = new PointToLineResidual(line_segment, points);
-      return new AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC, 3>(res, points.size());
+      return new AutoDiffCostFunction<PointToLineResidual,
+                                      ceres::DYNAMIC,
+                                      3, 3>(res, points.size());
     }
 
     const LineSegment<float> line_segment_;
     const vector<Vector2f> points_;
-};
-
-struct PointDistanceResidual {
-    template <typename T>
-    bool operator() (const T* pose_a, const T* pose_b, T* residuals) const {
-      typedef Eigen::Matrix<T, 2, 1> Vector2T;
-      typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
-      const Affine2T a_to_world =
-              PoseArrayToAffine(&pose_a[2], &pose_a[0]);
-      const Affine2T b_to_world =
-              PoseArrayToAffine(&pose_b[2], &pose_b[0]);
-      Vector2T a_center = pose_a_center_of_mass.cast<T>();
-      a_center = a_to_world * a_center;
-      Vector2T b_center = pose_b_center_of_mass.cast<T>();
-      b_center = b_to_world * b_center;
-      residuals[0] = (a_center - b_center).norm();
-      return true;
-    }
-
-    PointDistanceResidual(const Vector2f& a_center,
-                          const Vector2f& b_center) :
-            pose_a_center_of_mass(a_center),
-            pose_b_center_of_mass(b_center) {}
-
-    static AutoDiffCostFunction<PointDistanceResidual, 1, 3, 3>*
-    create(const Vector2f& a_center, const Vector2f& b_center) {
-      PointDistanceResidual* res = new PointDistanceResidual(a_center, b_center);
-      return new AutoDiffCostFunction<PointDistanceResidual, 1, 3, 3>(res);
-    }
-
-    const Vector2f pose_a_center_of_mass;
-    const Vector2f pose_b_center_of_mass;
 };
 
 vector<LineSegment<float>>
@@ -572,14 +543,15 @@ void Solver::AddColinearConstraints(const LCConstraint& constraint) {
 }
 
 void Solver::AddCollinearResiduals(ceres::Problem* problem) {
-  for (const LCConstraint& constraint : loop_closure_constraints_) {
+  for (LCConstraint& constraint : loop_closure_constraints_) {
     for (const LCPose &a_pose : constraint.line_a_poses) {
       const vector<Vector2f> &pointcloud_a = a_pose.points_on_feature;
       CHECK_LT(a_pose.node_idx, solution_.size());
       problem->AddResidualBlock(
               PointToLineResidual::create(constraint.line_a, pointcloud_a),
               NULL,
-              solution_[a_pose.node_idx].pose);
+              solution_[a_pose.node_idx].pose,
+              constraint.chosen_line_pose);
     }
     for (const LCPose &b_pose : constraint.line_b_poses) {
       const vector<Vector2f> &pointcloud_b = b_pose.points_on_feature;
@@ -587,7 +559,8 @@ void Solver::AddCollinearResiduals(ceres::Problem* problem) {
       problem->AddResidualBlock(
               PointToLineResidual::create(constraint.line_a, pointcloud_b),
               NULL,
-              solution_[b_pose.node_idx].pose);
+              solution_[b_pose.node_idx].pose,
+              constraint.chosen_line_pose);
     }
   }
 }
@@ -617,8 +590,8 @@ void Solver::SolveForLC() {
   options.minimizer_progress_to_stdout = true;
   options.num_threads =
     static_cast<int>(std::thread::hardware_concurrency());
-  options.callbacks.push_back(vis_callback_.get());
-  options.update_state_every_iteration = true;
+  //options.callbacks.push_back(vis_callback_.get());
+  //options.update_state_every_iteration = true;
   vector<OdometryFactor2D> local_factors = GetSolvedOdomFactors();
   AddOdomFactors(&problem,
                  local_factors,

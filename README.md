@@ -40,6 +40,7 @@ On linux:
 - ```--rotation_weight <num>``` the weight multiplier for changing the odometry predicted rotation between poses.
 - ```--translation_weight <num>``` the weight multiplier for changing the odometry predicted translation between poses.
 - ```--diff_odom``` does this bag use differential odometry? If the bag uses CobotOdometryMsg then you should use this flag.
+- ```--max_lidar_range``` specifies the max lidar range for the sensor. If unspecified will default to what the lidar ros message uses for max range.
 
 ### Examples:
 

@@ -66,6 +66,10 @@ DEFINE_string(
   hitl_lc_topic,
   "/hitl_slam_input",
   "The topic which the HITL line messages are published over.");
+DEFINE_double(
+  max_lidar_range,
+  0,
+  "The user specified range cutoff for lidar range data, if not used will be the sensor default specified in the bag (meters)");
 
 SLAMProblem2D ProcessBagFile(const char* bag_path,
                              const ros::NodeHandle& n) {
@@ -88,7 +92,9 @@ SLAMProblem2D ProcessBagFile(const char* bag_path,
   topics.emplace_back(FLAGS_odom_topic.c_str());
   topics.emplace_back(FLAGS_lidar_topic.c_str());
   rosbag::View view(bag, rosbag::TopicQuery(topics));
-  SLAMTypeBuilder slam_builder(FLAGS_pose_num, FLAGS_diff_odom);
+  SLAMTypeBuilder slam_builder(FLAGS_pose_num,
+                               FLAGS_diff_odom,
+                               FLAGS_max_lidar_range);
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
        ros::ok() && it != view.end() && !slam_builder.Done();

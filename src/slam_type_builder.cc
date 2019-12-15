@@ -40,7 +40,10 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
   if ((differential_odom_ && diff_tracking.ReadyForLidar()) ||
        odom_tracking.ReadyForLidar()) {
     // Transform this laser scan into a point cloud.s
-    std::vector<Vector2f> pointcloud = LaserScanToPointCloud(laser_scan);
+    double max_range =
+      (range_cutoff_ <= 0)? laser_scan.range_max : range_cutoff_;
+    std::vector<Vector2f> pointcloud =
+      LaserScanToPointCloud(laser_scan, max_range);
     LidarFactor lidar_factor(pose_id_, pointcloud);
     RobotPose2D pose;
     if (differential_odom_) {
@@ -87,9 +90,12 @@ slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
   return slam_problem;
 }
 
-SLAMTypeBuilder::SLAMTypeBuilder(uint64_t pose_num, bool differential_odom) :
+SLAMTypeBuilder::SLAMTypeBuilder(uint64_t pose_num,
+                                 bool differential_odom,
+                                 double range_cutoff) :
   pose_num_max_(pose_num),
-  differential_odom_(differential_odom) {}
+  differential_odom_(differential_odom),
+  range_cutoff_(range_cutoff) {}
 
 void DifferentialOdometryTracking::OdometryCallback(
         lidar_slam::CobotOdometryMsg &odometry) {

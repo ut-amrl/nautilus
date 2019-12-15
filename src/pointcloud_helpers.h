@@ -22,7 +22,7 @@ namespace pointcloud_helpers {
                          PointCloud2& point_cloud,
                          Publisher& pub);
   std::vector<Vector2f>
-      LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan);
+  LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan, double max_range);
 
 };
 #endif // SRC_POINTCLOUD_HELPERS_H_

@@ -45,15 +45,15 @@ PoseArrayToAffine(const T* rotation, const T* translation) {
 template <typename T>
 struct LineSegment {
     const Eigen::Matrix<T, 2, 1> start;
-    const Eigen::Matrix<T, 2, 1> endpoint;
+    const Eigen::Matrix<T, 2, 1> end;
     LineSegment(Eigen::Matrix<T, 2, 1>& start,
                 Eigen::Matrix<T, 2, 1>& endpoint) :
-      start(start), endpoint(endpoint) {};
+                start(start), end(endpoint) {};
     template <typename F>
     LineSegment<F> cast() const {
       typedef Eigen::Matrix<F, 2, 1> Vector2F;
       Vector2F startF = start.template cast<F>();
-      Vector2F endF = endpoint.template cast<F>();
+      Vector2F endF = end.template cast<F>();
       CHECK(ceres::IsFinite(startF.x()));
       CHECK(ceres::IsFinite(startF.y()));
       CHECK(ceres::IsFinite(endF.x()));
@@ -72,20 +72,20 @@ template <typename T>
 T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
                         const LineSegment<T>& line_seg) {
   typedef Eigen::Matrix<T, 2, 1> Vector2T;
-  // Line segment is parametric, with a start point and endpoint.
+  // Line segment is parametric, with a start point and end.
   // Parameterized by t between 0 and 1.
   // We can get the point on the line by projecting the start -> point onto
   // this line.
   Eigen::Hyperplane<T, 2> line =
-    Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.endpoint);
+    Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.end);
   Vector2T point_on_line = line.projection(point);
-  if (IsBetween(point_on_line.x(), line_seg.start.x(), line_seg.endpoint.x()) &&
-      IsBetween(point_on_line.y(), line_seg.start.y(), line_seg.endpoint.y())) {
+  if (IsBetween(point_on_line.x(), line_seg.start.x(), line_seg.end.x()) &&
+      IsBetween(point_on_line.y(), line_seg.start.y(), line_seg.end.y())) {
     return line.absDistance(point);
   }
 
   T dist_to_start = (point - line_seg.start).norm();
-  T dist_to_endpoint = (point - line_seg.endpoint).norm();
+  T dist_to_endpoint = (point - line_seg.end).norm();
   return std::min<T>(dist_to_start, dist_to_endpoint);
 }
 
@@ -101,6 +101,7 @@ struct LCConstraint {
     vector<LCPose> line_b_poses;
     const LineSegment<float> line_a;
     const LineSegment<float> line_b;
+    double chosen_line_pose[3]{0, 0, 0};
     LCConstraint(const LineSegment<float>& line_a,
                  const LineSegment<float>& line_b) :
                  line_a(line_a),
@@ -256,8 +257,8 @@ class VisualizationCallback : public ceres::IterationCallback {
       gui_helpers::AddLine(Vector3f(hitl_constraint.line_a.start.x(),
                                     hitl_constraint.line_a.start.y(),
                                     0.0),
-                           Vector3f(hitl_constraint.line_a.endpoint.x(),
-                                    hitl_constraint.line_a.endpoint.y(),
+                           Vector3f(hitl_constraint.line_a.end.x(),
+                                    hitl_constraint.line_a.end.y(),
                                     0.0),
                            gui_helpers::Color4f::kMagenta,
                            &line_marker);

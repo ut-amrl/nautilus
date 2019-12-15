@@ -61,7 +61,9 @@ class AbsoluteOdometryTracking {
 
 class SLAMTypeBuilder {
 public:
-    SLAMTypeBuilder(uint64_t pose_num, bool differential_odom_);
+    SLAMTypeBuilder(uint64_t pose_num,
+                    bool differential_odom_,
+                    double range_cutoff);
     void LidarCallback(sensor_msgs::LaserScan& laser_scan);
     void OdometryCallback(nav_msgs::Odometry& odometry);
     void OdometryCallback(lidar_slam::CobotOdometryMsg& odometry);
@@ -75,6 +77,7 @@ private:
     std::vector<slam_types::OdometryFactor2D> odom_factors_;
     uint64_t lidar_callback_count_ = 0;
     bool differential_odom_ = false;
+    double range_cutoff_;
     // Tracking for different types of odometry.
     AbsoluteOdometryTracking odom_tracking;
     DifferentialOdometryTracking diff_tracking;
