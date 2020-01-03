@@ -16,7 +16,7 @@
 #include "timer.h"
 #include "lidar_slam/HitlSlamInputMsg.h"
 
-#define LIDAR_CONSTRAINT_AMOUNT 10 //TODO: Change this back to 10 after testing.
+#define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
 #define HITL_POSE_POINT_THRESHOLD 3

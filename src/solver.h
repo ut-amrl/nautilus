@@ -42,6 +42,11 @@ PoseArrayToAffine(const T* rotation, const T* translation) {
   return affine;
 }
 
+template<typename T> Eigen::Transform<T, 2, Eigen::Affine>
+PoseArrayToAffine(const T* pose_array) {
+  return PoseArrayToAffine(&pose_array[2], &pose_array[0]);
+}
+
 template <typename T>
 struct LineSegment {
     const Eigen::Matrix<T, 2, 1> start;
@@ -285,11 +290,19 @@ class VisualizationCallback : public ceres::IterationCallback {
     for (uint64_t index = 0;
          index < last_correspondence.source_points.size();
          index++) {
-      Vector3f source_3d(last_correspondence.source_points[index].x(),
-                         last_correspondence.source_points[index].y(),
+      Vector2f source_point = last_correspondence.source_points[index];
+      Vector2f target_point = last_correspondence.target_points[index];
+      Affine2f source_to_world =
+        PoseArrayToAffine(last_correspondence.source_pose).cast<float>();
+      Affine2f target_to_world =
+        PoseArrayToAffine(last_correspondence.target_pose).cast<float>();
+      source_point = source_to_world * source_point;
+      target_point = target_to_world * target_point;
+      Vector3f source_3d(source_point.x(),
+                         source_point.y(),
                          0.0);
-      Vector3f target_3d(last_correspondence.target_points[index].x(),
-                         last_correspondence.target_points[index].y(),
+      Vector3f target_3d(target_point.x(),
+                         target_point.y(),
                          0.0);
       gui_helpers::AddLine(source_3d,
                            target_3d,
