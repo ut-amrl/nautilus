@@ -120,9 +120,20 @@ struct PointCorrespondences {
     vector<Vector2f> target_normals;
     double *source_pose;
     double *target_pose;
-    PointCorrespondences(double* source_pose, double* target_pose)
-      : source_pose(source_pose), target_pose(target_pose) {}
-    PointCorrespondences() : source_pose(nullptr), target_pose(nullptr) {}
+    uint64_t source_index;
+    uint64_t target_index;
+    PointCorrespondences(double* source_pose,
+                         double* target_pose,
+                         uint64_t source_index,
+                         uint64_t target_index)
+                         : source_pose(source_pose),
+                           target_pose(target_pose),
+                           source_index(source_index),
+                           target_index(target_index) {}
+    PointCorrespondences() : source_pose(nullptr),
+                             target_pose(nullptr),
+                             source_index(0),
+                             target_index(0) {}
 };
 
 class VisualizationCallback : public ceres::IterationCallback {
@@ -222,7 +233,10 @@ class VisualizationCallback : public ceres::IterationCallback {
                                             new_points_marker,
                                             new_point_pub);
       gui_helpers::ClearMarker(&match_line_list);
-      AddMatchLines();
+      printf("Match line list is %zu\n", last_correspondences.size());
+      for (const PointCorrespondences& corr : last_correspondences) {
+        AddMatchLines(corr);
+      }
       pose_pub.publish(pose_array);
       match_pub.publish(match_line_list);
       normals_pub.publish(normals_marker);
@@ -284,18 +298,18 @@ class VisualizationCallback : public ceres::IterationCallback {
     gui_helpers::ClearMarker(&normals_marker);
   }
 
-  void AddMatchLines() {
-    CHECK_EQ(last_correspondence.source_points.size(),
-             last_correspondence.target_points.size());
+  void AddMatchLines(const PointCorrespondences& correspondence) {
+    CHECK_EQ(correspondence.source_points.size(),
+             correspondence.target_points.size());
     for (uint64_t index = 0;
-         index < last_correspondence.source_points.size();
+         index < correspondence.source_points.size();
          index++) {
-      Vector2f source_point = last_correspondence.source_points[index];
-      Vector2f target_point = last_correspondence.target_points[index];
+      Vector2f source_point = correspondence.source_points[index];
+      Vector2f target_point = correspondence.target_points[index];
       Affine2f source_to_world =
-        PoseArrayToAffine(last_correspondence.source_pose).cast<float>();
+        PoseArrayToAffine(correspondence.source_pose).cast<float>();
       Affine2f target_to_world =
-        PoseArrayToAffine(last_correspondence.target_pose).cast<float>();
+        PoseArrayToAffine(correspondence.target_pose).cast<float>();
       source_point = source_to_world * source_point;
       target_point = target_to_world * target_point;
       Vector3f source_3d(source_point.x(),
@@ -312,7 +326,14 @@ class VisualizationCallback : public ceres::IterationCallback {
   }
 
   void UpdateLastCorrespondence(PointCorrespondences& point_correspondence) {
-    last_correspondence = point_correspondence;
+    // Comparing literal addresses because the same pose
+    // points to the same place.
+    if (!last_correspondences.empty() &&
+        point_correspondence.source_index !=
+        last_correspondences[0].source_index) {
+      last_correspondences.clear();
+    }
+    last_correspondences.push_back(point_correspondence);
   }
 
   void AddConstraint(const LCConstraint& constraint) {
@@ -347,7 +368,9 @@ class VisualizationCallback : public ceres::IterationCallback {
   PointCloud2 a_points_marker;
   PointCloud2 b_points_marker;
   visualization_msgs::Marker line_marker;
-  PointCorrespondences last_correspondence;
+  // All the correspondences were the source is the same
+  // (will be the last pointcloud aligned and all of its targets).
+  vector<PointCorrespondences> last_correspondences;
   vector<LCConstraint> constraints;
 };
 

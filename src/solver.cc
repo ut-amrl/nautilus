@@ -3,7 +3,6 @@
 //
 
 #include "./solver.h"
-#include <utility>
 #include <algorithm>
 #include <thread>
 #include <vector>
@@ -323,7 +322,9 @@ double Solver::AddLidarResidualsForLC(ceres::Problem& problem) {
         CHECK_LT(a_pose.node_idx, problem_.nodes.size());
         CHECK_LT(b_pose.node_idx, problem_.nodes.size());
         PointCorrespondences correspondence(solution_[a_pose.node_idx].pose,
-                                            solution_[b_pose.node_idx].pose);
+                                            solution_[b_pose.node_idx].pose,
+                                            a_pose.node_idx,
+                                            b_pose.node_idx);
         difference += GetPointCorrespondences(problem_,
                                               &solution_,
                                               &correspondence,
@@ -386,14 +387,16 @@ Solver::SolveSLAM() {
                          0l);
              node_j_index < node_i_index;
              node_j_index++) {
-          PointCorrespondences correspondence(solution_[node_j_index].pose,
-                                              solution_[node_i_index].pose);
+          PointCorrespondences correspondence(solution_[node_i_index].pose,
+                                              solution_[node_j_index].pose,
+                                              node_i_index,
+                                              node_j_index);
           // Get the correspondences between these two poses.
           difference += GetPointCorrespondences(problem_,
                                                 &solution_,
                                                 &correspondence,
-                                                node_j_index,
-                                                node_i_index);
+                                                node_i_index,
+                                                node_j_index);
           vis_callback_->UpdateLastCorrespondence(correspondence);
           difference /=
             problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
