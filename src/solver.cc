@@ -34,6 +34,7 @@ using lidar_slam::HitlSlamInputMsgConstPtr;
 using lidar_slam::HitlSlamInputMsg;
 using slam_types::SLAMNode2D;
 using Eigen::Vector3f;
+using math_util::NormalsSimilar;
 
 // Line needs an affine.
 // Penalize Radial distance as well.
@@ -178,12 +179,6 @@ void Solver::AddOdomFactors(ceres::Problem* ceres_problem,
   if (solution_.size() > 0) {
     ceres_problem->SetParameterBlockConstant(solution_[0].pose);
   }
-}
-
-inline bool NormalsSimilar(const Vector2f& n1,
-                           const Vector2f& n2,
-                           float max_cosine_value) {
-  return (fabs(n1.dot(n2)) > max_cosine_value);
 }
 
 // Source moves to target.

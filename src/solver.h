@@ -233,7 +233,6 @@ class VisualizationCallback : public ceres::IterationCallback {
                                             new_points_marker,
                                             new_point_pub);
       gui_helpers::ClearMarker(&match_line_list);
-      printf("Match line list is %zu\n", last_correspondences.size());
       for (const PointCorrespondences& corr : last_correspondences) {
         AddMatchLines(corr);
       }

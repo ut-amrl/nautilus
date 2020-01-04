@@ -42,7 +42,13 @@
 
 
 namespace math_util {
-  
+
+inline bool NormalsSimilar(const Eigen::Vector2f& n1,
+                           const Eigen::Vector2f& n2,
+                           float max_cosine_value) {
+  return (fabs(n1.dot(n2)) > max_cosine_value);
+}
+
 // Returns angle within [-PI,PI]
 template <class real>
 inline real angle_mod(real angle) MustUseResult;
