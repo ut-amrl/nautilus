@@ -62,8 +62,3 @@ TEST(LineSegDistanceTest, line_is_endpoint) {
   float dist = DistanceToLineSegment(point_to_find, line_seg);
   EXPECT_FLOAT_EQ(dist, 0) << "Distance to point was incorrect";
 }
-
-int main(int argc, char** argv) {
-  testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
-}

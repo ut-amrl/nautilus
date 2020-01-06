@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <thread>
 #include <vector>
+#include <sensor_msgs/Image.h>
 
 #include "ceres/ceres.h"
 #include "eigen3/Eigen/Geometry"
@@ -14,6 +15,7 @@
 #include "./math_util.h"
 #include "timer.h"
 #include "lidar_slam/HitlSlamInputMsg.h"
+#include "CorrelativeScanMatcher.h"
 
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
@@ -414,6 +416,25 @@ Solver::SolveSLAM() {
   // Call the visualization once more to see the finished optimization.
   for (int i = 0; i < 5; i++) {
     vis_callback_->PubVisualization();
+    sleep(1);
+  }
+  std::cout << "Testing Scan Matching Lookup Table." << std::endl;
+  // After all this we just want to see if the Lookup Tables are working correctly.
+  ros::Publisher image_pub = n_.advertise<sensor_msgs::Image>("/lookupTableImage", 10);
+  ros::Publisher blurred_image_pub =
+          n_.advertise<sensor_msgs::Image>("/lookupTableImageBlurred", 10);
+  CorrelativeScanMatcher scan_matcher;
+  LookupTable test_table =
+    scan_matcher.GetLookupTable(problem_.nodes[problem_.nodes.size() - 1].lidar_factor.pointcloud,
+                                30,
+                                0.03);
+  Image original_image = test_table.getDebugImage();
+  test_table.GaussianBlur();
+  Image blurred_image = test_table.getDebugImage();
+  for (int i = 0; i < 5; i++) {
+    image_pub.publish(original_image);
+    blurred_image_pub.publish(blurred_image);
+    ros::spinOnce();
     sleep(1);
   }
   return solution_;
