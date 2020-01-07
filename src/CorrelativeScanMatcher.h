@@ -91,6 +91,7 @@ struct LookupTable {
       vector<vector<double>> result_values = values;
       // Blur the table of values using a gaussian blur.
       for (uint64_t col = 0; col < width; col++) {
+        #pragma omp parallel for default(none) shared(result_values, col)
         for (uint64_t row = 0; row < height; row++) {
           ApplyGaussianKernel(values, result_values, col, row);
         }

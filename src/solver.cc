@@ -420,7 +420,7 @@ Solver::SolveSLAM() {
   }
   std::cout << "Testing Scan Matching Lookup Table." << std::endl;
   // After all this we just want to see if the Lookup Tables are working correctly.
-  ros::Publisher image_pub = n_.advertise<sensor_msgs::Image>("/lookupTableImage", 10);
+  /*ros::Publisher image_pub = n_.advertise<sensor_msgs::Image>("/lookupTableImage", 10);
   ros::Publisher blurred_image_pub =
           n_.advertise<sensor_msgs::Image>("/lookupTableImageBlurred", 10);
   CorrelativeScanMatcher scan_matcher;
@@ -436,7 +436,7 @@ Solver::SolveSLAM() {
     blurred_image_pub.publish(blurred_image);
     ros::spinOnce();
     sleep(1);
-  }
+  }*/
   return solution_;
 }
 
