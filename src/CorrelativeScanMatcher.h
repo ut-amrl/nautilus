@@ -20,8 +20,8 @@ using std::vector;
 using Eigen::Vector2f;
 using sensor_msgs::Image;
 
-#define GAUSSIAN_BLUR_COEFFICIENT 1
-#define GAUSSIAN_TAP_SIDE_SIZE 11
+#define DEFAULT_GAUSSIAN_SIGMA 4
+#define DEFAULT_GAUSSIAN_TAP_LENGTH 11
 
 struct LookupTable {
   uint64_t width;
@@ -56,29 +56,35 @@ struct LookupTable {
     values[x][y] = value;
   }
 
-  double GetGaussianWeight(uint64_t x, uint64_t y) {
-    const double sigma = GAUSSIAN_BLUR_COEFFICIENT;
+  double GetGaussianWeight(uint64_t x, uint64_t y, const double sigma) {
     return (1.0 / sqrt(2.0 * M_PI * sigma * sigma)) *
            pow(M_E, -static_cast<double>(x*x + y*y)/(2.0 * sigma * sigma));
   }
 
   double GetGaussianValue(const vector<vector<double>>& original_values,
                         uint64_t x,
-                        uint64_t y) {
+                        uint64_t y,
+                        const double sigma,
+                        const uint64_t tap_length) {
     double sum = 0.0;
     // When these fail we will have to re-work how we do the bounds,
     // but that would mean a massive grid size.
-    CHECK_GE(x + (GAUSSIAN_TAP_SIDE_SIZE / 2), 0);
-    CHECK_GE(y + (GAUSSIAN_TAP_SIDE_SIZE / 2), 0);
-    for (int64_t col = x - GAUSSIAN_TAP_SIDE_SIZE / 2; col <
-            static_cast<int64_t>(x + (GAUSSIAN_TAP_SIDE_SIZE / 2)); col++) {
-      for (int64_t row = y - GAUSSIAN_TAP_SIDE_SIZE / 2; row <
-              static_cast<int64_t>(y + (GAUSSIAN_TAP_SIDE_SIZE / 2)); row++) {
-        if (col < 0 || row < 0 || col >= static_cast<int64_t>(width) || row >= static_cast<int64_t>(height)) {
+    CHECK_GE(x + (tap_length / 2), 0);
+    CHECK_GE(y + (tap_length / 2), 0);
+    for (int64_t col = x - tap_length / 2;
+         col < static_cast<int64_t>(x + (tap_length / 2));
+         col++) {
+      for (int64_t row = y - tap_length / 2;
+           row < static_cast<int64_t>(y + (tap_length / 2));
+           row++) {
+        if (col < 0 ||
+            row < 0 ||
+            col >= static_cast<int64_t>(width) ||
+            row >= static_cast<int64_t>(height)) {
           continue;
         }
         sum +=
-          original_values[col][row]* GetGaussianWeight(col - x, row - y);
+          original_values[col][row]* GetGaussianWeight(col - x, row - y, sigma);
       }
     }
     // Gaussians don't produce a total sum greater than 1,
@@ -89,20 +95,24 @@ struct LookupTable {
     return sum;
   }
 
-  void GaussianBlur() {
+  void GaussianBlur(const double sigma, const uint64_t tap_length) {
     vector<vector<double>> result_values = values;
     std::mutex result_mtx;
     // Blur the table of values using a gaussian blur.
     #pragma omp parallel for default(none) shared(result_mtx, result_values)
     for (uint64_t col = 0; col < width; col++) {
       for (uint64_t row = 0; row < height; row++) {
-        double value = GetGaussianValue(values, col, row);
+        double value = GetGaussianValue(values, col, row, sigma, tap_length);
         result_mtx.lock();
         result_values[col][row] = value;
         result_mtx.unlock();
       }
     }
     values.swap(result_values);
+  }
+
+  void GaussianBlur() {
+    GaussianBlur(DEFAULT_GAUSSIAN_SIGMA, DEFAULT_GAUSSIAN_TAP_LENGTH);
   }
 
   Image getDebugImage() {
