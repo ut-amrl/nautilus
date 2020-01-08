@@ -14,8 +14,7 @@ LookupTable
 CorrelativeScanMatcher::GetLookupTable(const vector<Vector2f> pointcloud,
                                        const double range,
                                        const double resolution) {
-  uint64_t table_size = ceil((range * 2) / resolution);
-  LookupTable table(table_size, resolution);
+  LookupTable table(range, resolution);
   for (const Vector2f& point : pointcloud) {
     table.SetPointValue(point, 1);
   }
