@@ -13,15 +13,18 @@
 #include "string"
 #include "sensor_msgs/Image.h"
 #include "sensor_msgs/image_encodings.h"
-
 #include "Eigen/Dense"
+
+#include "./slam_type_builder.h"
+#include "./slam_types.h"
+
+#define DEFAULT_GAUSSIAN_SIGMA 4
+#define DEFAULT_GAUSSIAN_TAP_LENGTH 11
 
 using std::vector;
 using Eigen::Vector2f;
 using sensor_msgs::Image;
-
-#define DEFAULT_GAUSSIAN_SIGMA 4
-#define DEFAULT_GAUSSIAN_TAP_LENGTH 11
+using slam_types::RobotPose2D;
 
 struct LookupTable {
   uint64_t width;
@@ -38,7 +41,7 @@ struct LookupTable {
 
   LookupTable() : width(0), height(0), resolution(1) {}
 
-  double GetPointValue(Vector2f point) {
+  double GetPointValue(Vector2f point) const {
     uint64_t x = width / 2 + point.x() / resolution;
     uint64_t y = height / 2 + point.y() / resolution;
     if (x >= width || y >= height) {
@@ -56,16 +59,16 @@ struct LookupTable {
     values[x][y] = value;
   }
 
-  double GetGaussianWeight(uint64_t x, uint64_t y, const double sigma) {
+  double GetGaussianWeight(uint64_t x, uint64_t y, const double sigma) const {
     return (1.0 / sqrt(2.0 * M_PI * sigma * sigma)) *
            pow(M_E, -static_cast<double>(x*x + y*y)/(2.0 * sigma * sigma));
   }
 
   double GetGaussianValue(const vector<vector<double>>& original_values,
-                        uint64_t x,
-                        uint64_t y,
-                        const double sigma,
-                        const uint64_t tap_length) {
+                          uint64_t x,
+                          uint64_t y,
+                          const double sigma,
+                          const uint64_t tap_length) const {
     double sum = 0.0;
     // When these fail we will have to re-work how we do the bounds,
     // but that would mean a massive grid size.
@@ -115,7 +118,7 @@ struct LookupTable {
     GaussianBlur(DEFAULT_GAUSSIAN_SIGMA, DEFAULT_GAUSSIAN_TAP_LENGTH);
   }
 
-  Image getDebugImage() {
+  Image getDebugImage() const {
     Image image;
     image.header.frame_id = "map";
     image.width = width;
@@ -134,9 +137,17 @@ struct LookupTable {
 
 class CorrelativeScanMatcher {
  public:
-    LookupTable GetLookupTable(const vector<Vector2f> pointcloud,
-                               const double range,
-                               const double resolution);
+    CorrelativeScanMatcher(double scanner_range, double low_res, double high_res)
+    : range_(scanner_range), low_res_(low_res), high_res_(high_res) {};
+    RobotPose2D GetTransformation(const vector<Vector2f>& pointcloud_a,
+                                  const vector<Vector2f>& pointcloud_b);
+ private:
+    LookupTable GetLookupTable(const vector<Vector2f>& pointcloud, double resolution);
+    LookupTable GetLookupTableHighRes(const vector<Vector2f>& pointcloud);
+    LookupTable GetLookupTableLowRes(const vector<Vector2f>& pointcloud);
+    double range_;
+    double low_res_;
+    double high_res_;
 };
 
 
