@@ -40,6 +40,6 @@ TEST(CorrelativeScanMatcherTest, GetTransformationBasicTest) {
   }
   RobotPose2D pose = scan_matcher.GetTransformation(pointcloud_a, pointcloud_b);
   ASSERT_LE(fabs(pose.angle - M_PI / 4), 0.00001);
-  ASSERT_FLOAT_EQ(fabs(pose.loc.x() -  10.0), 0.001);
-  ASSERT_FLOAT_EQ((pose.loc.y(), 10.0), 0.001);
+  ASSERT_LE(fabs(pose.loc.x() -  10.0), 0.1);
+  ASSERT_LE(fabs(pose.loc.y() - 10.0), 0.1);
 }

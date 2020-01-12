@@ -9,6 +9,7 @@
 #include <memory>
 #include <vector>
 #include <mutex>
+#include <boost/dynamic_bitset.hpp>
 #include <glog/logging.h>
 #include "string"
 #include "sensor_msgs/Image.h"
@@ -145,6 +146,16 @@ class CorrelativeScanMatcher {
     LookupTable GetLookupTable(const vector<Vector2f>& pointcloud, double resolution);
     LookupTable GetLookupTableHighRes(const vector<Vector2f>& pointcloud);
     LookupTable GetLookupTableLowRes(const vector<Vector2f>& pointcloud);
+    std::pair<double, RobotPose2D> 
+      GetProbAndTransformation(const vector<Vector2f>& pointcloud_a,
+                               const vector<Vector2f>& pointcloud_b,
+                               double resolution,
+                               double x_min,
+                               double x_max,
+                               double y_min, 
+                               double y_max,
+                               bool excluding,
+                               const boost::dynamic_bitset<>& excluded);
     double range_;
     double low_res_;
     double high_res_;

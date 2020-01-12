@@ -60,7 +60,7 @@ struct RobotPose2D {
     Eigen::Vector2f loc;
     // Robot angle: rotates points from robot frame to global.
     // RADIANS
-    float angle;
+    float angle{0};
     // Default constructor: do nothing.
     RobotPose2D() {}
     // Convenience constructor: initialize everything.

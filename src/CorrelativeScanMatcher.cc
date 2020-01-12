@@ -3,6 +3,7 @@
 //
 
 #include <vector>
+#include <boost/dynamic_bitset.hpp>
 #include "Eigen/Dense"
 
 #include "CorrelativeScanMatcher.h"
@@ -11,7 +12,8 @@ using std::vector;
 using Eigen::Vector2f;
 
 LookupTable
-CorrelativeScanMatcher::GetLookupTable(const vector<Vector2f>& pointcloud, double resolution) {
+CorrelativeScanMatcher::GetLookupTable(const vector<Vector2f>& pointcloud,
+                                       double resolution) {
   LookupTable table(range_, resolution);
   for (const Vector2f& point : pointcloud) {
     table.SetPointValue(point, 1);
@@ -55,40 +57,107 @@ double CalculatePointcloudCost(const vector<Vector2f>& pointcloud,
                                const LookupTable& cost_table) {
   double probability = 1.0;
   for (const Vector2f& point : pointcloud) {
-    probability *= cost_table.GetPointValue(point);
+    probability += cost_table.GetPointValue(point);
   }
+  probability /= pointcloud.size();
   return probability;
 }
 
-RobotPose2D
-CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
-                                          const vector<Vector2f>& pointcloud_b) {
-  const LookupTable pointcloud_b_cost = GetLookupTable(pointcloud_b, high_res_);
+std::pair<double, RobotPose2D>
+CorrelativeScanMatcher::GetProbAndTransformation(const vector<Vector2f>& pointcloud_a,
+                                                 const vector<Vector2f>& pointcloud_b,
+                                                 double resolution,
+                                                 double x_min,
+                                                 double x_max,
+                                                 double y_min, 
+                                                 double y_max,
+                                                 bool excluding,
+                                                 const boost::dynamic_bitset<>& excluded) {
+  const LookupTable pointcloud_b_cost = GetLookupTable(pointcloud_b, resolution);
   RobotPose2D current_most_likely_trans;
   double current_most_likely_prob = 0.0;
-  std::mutex most_likely_mtx;
   // Two degree accuracy seems to be enough for now.
   for (double rotation = 0.0; rotation <= M_PI / 2; rotation += M_PI / 180) {
     // Rotate the pointcloud by this rotation.
     const vector<Vector2f> rotated_pointcloud_a =
       RotatePointcloud(pointcloud_a, rotation);
-    for (double x_trans = -range_; x_trans <= range_; x_trans += high_res_) {
-      for (double y_trans = -range_;
-           y_trans <= range_;
-           y_trans += high_res_) {
+    for (double x_trans = x_min; x_trans <= x_max; x_trans += resolution) {
+      for (double y_trans = y_min;
+           y_trans <= y_max;
+           y_trans += resolution) {
+        if (excluding && excluded[((pointcloud_b_cost.height / 2) +
+                                  round(y_trans / resolution)) *
+                                  pointcloud_b_cost.width +
+                                  ((pointcloud_b_cost.width / 2) +
+                                  round(x_trans / resolution))]) {
+          // Don't consider transformations that have already been found.
+          std::cout << "Continuing on " << x_trans << ", " << y_trans << std::endl;
+          continue;
+        }
         double probability =
           CalculatePointcloudCost(
             TranslatePointcloud(rotated_pointcloud_a, x_trans, y_trans),
             pointcloud_b_cost);
-        most_likely_mtx.lock();
         if (probability > current_most_likely_prob) {
           current_most_likely_trans = RobotPose2D(Vector2f(x_trans, y_trans),
                                                   rotation);
+          current_most_likely_prob = probability;
         }
-        most_likely_mtx.unlock();
       }
     }
-    std::cout << "Increasing rotation" << std::endl;
   }
-  return current_most_likely_trans;
+  return std::pair<double, RobotPose2D>(current_most_likely_prob,
+                                        current_most_likely_trans);
+}
+
+RobotPose2D
+CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
+                                          const vector<Vector2f>& pointcloud_b) {
+  double current_probability = 1.0;
+  double best_probability = 0.0;
+  RobotPose2D best_transformation;
+  uint64_t low_res_width = (range_ * 2.0) / low_res_ + 1;
+  boost::dynamic_bitset<> excluded_low_res(low_res_width * low_res_width);
+  boost::dynamic_bitset<> excluded_high_res(0); // Dumby value, never used.
+  while (current_probability >= best_probability) {
+    // Evaluate over the low_res lookup table.
+    auto prob_and_trans_low_res =
+      GetProbAndTransformation(pointcloud_a,
+                               pointcloud_b,
+                               low_res_,
+                               -range_,
+                               range_,
+                               -range_,
+                               range_,
+                               true,
+                               excluded_low_res);
+    if (prob_and_trans_low_res.first < best_probability) {
+      return best_transformation;
+    }
+    double x_min_high_res = prob_and_trans_low_res.second.loc.x() - low_res_;
+    double x_max_high_res = prob_and_trans_low_res.second.loc.x();
+    double y_min_high_res = prob_and_trans_low_res.second.loc.y() - low_res_;
+    double y_max_high_res = prob_and_trans_low_res.second.loc.y();
+    excluded_low_res.set(
+            ((low_res_width / 2) + round(y_max_high_res / low_res_)) *
+            low_res_width + ((low_res_width / 2) +
+            round(x_max_high_res / low_res_)), true);
+    auto prob_and_trans_high_res = GetProbAndTransformation(pointcloud_a,
+                                                            pointcloud_b,
+                                                            high_res_,
+                                                            x_min_high_res,
+                                                            x_max_high_res,
+                                                            y_min_high_res,
+                                                            y_max_high_res,
+                                                            false,
+                                                            excluded_high_res);
+    if (prob_and_trans_high_res.first > best_probability) {
+      // This is the new best and we should keep searching to make
+      // sure there is nothing better.
+      best_probability = prob_and_trans_high_res.first;
+      best_transformation = prob_and_trans_high_res.second;
+    }
+    current_probability = prob_and_trans_high_res.first;
+  }
+  return best_transformation;
 }
