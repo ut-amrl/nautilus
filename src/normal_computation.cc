@@ -45,10 +45,11 @@ inline bool MeansDontIntersect(CircularHoughAccumulator& accum) {
   return mean_difference >= lower_bound;
 }
 
-vector<Vector2f> NormalComputation::getNormals(const vector<Vector2f>& points) {
+vector<Vector2f>
+NormalComputation::GetNormals(const vector<Vector2f>& points) {
   // For each point we have to randomly sample points within its neighborhood.
-  // Then when we either reach the upper limit of samples, or pass the threshold
-  // of confidence stop.
+  // Then when we either reach the upper limit of samples, or pass the 
+  // threshold of confidence and stop.
   // Pick the most selected bin and set the normal of this point to the average
   // angle of that bin.
   // Compute the line using that angle and a point at (1,0).

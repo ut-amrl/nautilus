@@ -59,9 +59,9 @@ struct CircularHoughAccumulator {
 }
 
   // Returns a list of normals for the corresponding list of points. 
-  // Normals are unit sized, but because we use meters as our unit, they are 1 meter
-  // long.
-  vector<Vector2f> getNormals(const vector<Vector2f>& points);
+  // Normals are unit sized, but because we use meters as our unit, 
+  // they are 1 meter long.
+  vector<Vector2f> GetNormals(const vector<Vector2f>& points);
 }
 
 #endif
