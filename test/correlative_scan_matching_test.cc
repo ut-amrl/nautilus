@@ -28,7 +28,6 @@ TEST(CorrelativeScanMatcherTest, GetTransformationBasicTest) {
     // Draw two lines in the scan, like a perfect hallway.
     pointcloud_a.push_back(Vector2f(i, 1));
     pointcloud_a.push_back(Vector2f(i, -1));
-    std::cout << pointcloud_a.size() << " " << i << std::endl;
   }
   vector<Vector2f> pointcloud_b;
   // Rotate by 45 degrees and shift by 10 and 10, try and see if we can't get

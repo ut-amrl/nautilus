@@ -18,6 +18,7 @@
 
 #include "./slam_type_builder.h"
 #include "./slam_types.h"
+#include "./timer.h"
 
 #define DEFAULT_GAUSSIAN_SIGMA 4
 #define DEFAULT_GAUSSIAN_TAP_LENGTH 11
@@ -42,7 +43,7 @@ struct LookupTable {
 
   LookupTable() : width(0), height(0), resolution(1) {}
 
-  double GetPointValue(Vector2f point) const {
+  inline double GetPointValue(Vector2f point) const {
     uint64_t x = width / 2 + point.x() / resolution;
     uint64_t y = height / 2 + point.y() / resolution;
     if (x >= width || y >= height) {

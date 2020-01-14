@@ -8,4 +8,4 @@ macro(package_add_test TESTNAME)
 endmacro()
 
 package_add_test(solver_test solver_test.cc)
-package_add_test(correlative_scan_matching_test correlative_scan_matching_test.cc ../src/CorrelativeScanMatcher.cc)
+package_add_test(correlative_scan_matching_test correlative_scan_matching_test.cc ../src/CorrelativeScanMatcher.cc ../src/timer.cc)
