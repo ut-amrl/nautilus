@@ -103,7 +103,7 @@ class CorrelativeScanMatcher {
     LookupTable GetLookupTable(const vector<Vector2f>& pointcloud, double resolution);
     std::pair<double, RobotPose2D> 
       GetProbAndTransformation(const vector<Vector2f>& pointcloud_a,
-                               const vector<Vector2f>& pointcloud_b,
+                               const LookupTable& pointcloud_b_cost,
                                double resolution,
                                double x_min,
                                double x_max,

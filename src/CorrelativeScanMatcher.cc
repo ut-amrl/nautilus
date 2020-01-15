@@ -87,7 +87,7 @@ CumulativeFunctionTimer prob_and_trans_timer("GetProbAndTransformation");
 
 std::pair<double, RobotPose2D>
 CorrelativeScanMatcher::GetProbAndTransformation(const vector<Vector2f>& pointcloud_a,
-                                                 const vector<Vector2f>& pointcloud_b,
+                                                 const LookupTable& pointcloud_b_cost,
                                                  double resolution,
                                                  double x_min,
                                                  double x_max,
@@ -96,7 +96,6 @@ CorrelativeScanMatcher::GetProbAndTransformation(const vector<Vector2f>& pointcl
                                                  bool excluding,
                                                  const boost::dynamic_bitset<>& excluded) {
   CumulativeFunctionTimer::Invocation invocation(&prob_and_trans_timer);
-  const LookupTable pointcloud_b_cost = GetLookupTable(pointcloud_b, resolution);
   RobotPose2D current_most_likely_trans;
   double current_most_likely_prob = 0.0;
   // Two degree accuracy seems to be enough for now.
@@ -143,11 +142,14 @@ CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
   uint64_t low_res_width = (range_ * 2.0) / low_res_ + 1;
   boost::dynamic_bitset<> excluded_low_res(low_res_width * low_res_width);
   boost::dynamic_bitset<> excluded_high_res(0); // Dumby value, never used.
+  const LookupTable pointcloud_b_cost_high_res = GetLookupTableHighRes(pointcloud_b);
+  const LookupTable pointcloud_b_cost_low_res =
+    GetLookupTableLowRes(pointcloud_b_cost_high_res);
   while (current_probability >= best_probability) {
     // Evaluate over the low_res lookup table.
     auto prob_and_trans_low_res =
       GetProbAndTransformation(pointcloud_a,
-                               pointcloud_b,
+                               pointcloud_b_cost_low_res,
                                low_res_,
                                -range_,
                                range_,
@@ -167,7 +169,7 @@ CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
             low_res_width + ((low_res_width / 2) +
             round(x_max_high_res / low_res_)), true);
     auto prob_and_trans_high_res = GetProbAndTransformation(pointcloud_a,
-                                                            pointcloud_b,
+                                                            pointcloud_b_cost_high_res,
                                                             high_res_,
                                                             x_min_high_res,
                                                             x_max_high_res,
