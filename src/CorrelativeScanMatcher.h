@@ -16,6 +16,7 @@
 #include "sensor_msgs/image_encodings.h"
 #include "Eigen/Dense"
 
+#include "./CImg.h"
 #include "./slam_type_builder.h"
 #include "./slam_types.h"
 #include "./timer.h"
@@ -27,18 +28,21 @@ using std::vector;
 using Eigen::Vector2f;
 using sensor_msgs::Image;
 using slam_types::RobotPose2D;
+using cimg_library::CImg;
 
 struct LookupTable {
   uint64_t width;
   uint64_t height;
   double resolution;
-  vector<vector<double>> values;
+  CImg<double> values;
   LookupTable(const uint64_t range,
               const double resolution) :
               width((range * 2.0) / resolution + 1),
               height((range * 2.0) / resolution + 1),
               resolution(resolution) {
-    values = vector<vector<double>>(height, vector<double>(width, 0));
+    // Construct a width x height image, with only 1 z level.
+    // And, only one double per color with default value 0.0.
+    values = CImg<double>(width, height, 1, 1, 0.0);
   }
 
   LookupTable() : width(0), height(0), resolution(1) {}
@@ -49,7 +53,7 @@ struct LookupTable {
     if (x >= width || y >= height) {
       return 0.0;
     }
-    return values[x][y];
+    return values(x, y);
   }
 
   void SetPointValue(Vector2f point, double value) {
@@ -58,82 +62,19 @@ struct LookupTable {
     if (x >= width || y >= height) {
       return;
     }
-    values[x][y] = value;
-  }
-
-  double GetGaussianWeight(uint64_t x, uint64_t y, const double sigma) const {
-    return (1.0 / sqrt(2.0 * M_PI * sigma * sigma)) *
-           pow(M_E, -static_cast<double>(x*x + y*y)/(2.0 * sigma * sigma));
-  }
-
-  double GetGaussianValue(const vector<vector<double>>& original_values,
-                          uint64_t x,
-                          uint64_t y,
-                          const double sigma,
-                          const uint64_t tap_length) const {
-    double sum = 0.0;
-    // When these fail we will have to re-work how we do the bounds,
-    // but that would mean a massive grid size.
-    CHECK_GE(x + (tap_length / 2), 0);
-    CHECK_GE(y + (tap_length / 2), 0);
-    for (int64_t col = x - tap_length / 2;
-         col < static_cast<int64_t>(x + (tap_length / 2));
-         col++) {
-      for (int64_t row = y - tap_length / 2;
-           row < static_cast<int64_t>(y + (tap_length / 2));
-           row++) {
-        if (col < 0 ||
-            row < 0 ||
-            col >= static_cast<int64_t>(width) ||
-            row >= static_cast<int64_t>(height)) {
-          continue;
-        }
-        sum +=
-          original_values[col][row]* GetGaussianWeight(col - x, row - y, sigma);
-      }
-    }
-    // Gaussians don't produce a total sum greater than 1,
-    // but because of rounding errors it is totally possible here.
-    if (sum >= 1.0) {
-      sum = 1.0;
-    }
-    return sum;
+    values(x, y) = value;
   }
 
   void GaussianBlur(const double sigma, const uint64_t tap_length) {
-    vector<vector<double>> result_values = values;
-    std::mutex result_mtx;
-    // Blur the table of values using a gaussian blur.
-    #pragma omp parallel for default(none) shared(result_mtx, result_values)
-    for (uint64_t col = 0; col < width; col++) {
-      for (uint64_t row = 0; row < height; row++) {
-        double value = GetGaussianValue(values, col, row, sigma, tap_length);
-        result_mtx.lock();
-        result_values[col][row] = value;
-        result_mtx.unlock();
-      }
-    }
-    values.swap(result_values);
+    values = values.blur(sigma, sigma, sigma, true, true); 
   }
 
   void GaussianBlur() {
     GaussianBlur(DEFAULT_GAUSSIAN_SIGMA, DEFAULT_GAUSSIAN_TAP_LENGTH);
   }
 
-  Image getDebugImage() const {
-    Image image;
-    image.header.frame_id = "map";
-    image.width = width;
-    image.height = height;
-    image.encoding = sensor_msgs::image_encodings::MONO8;
-    image.is_bigendian = 0;
-    image.step = width;
-    for (vector<double> row : values) {
-      for (double prob : row) {
-        image.data.push_back(prob * 255);
-      }
-    }
-    return image;
+  void displayDebugImage(cimg_library::CImgDisplay& window) {
+    values.display(window);
   }
 };
 
