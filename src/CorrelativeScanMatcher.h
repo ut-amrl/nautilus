@@ -73,8 +73,21 @@ struct LookupTable {
     GaussianBlur(DEFAULT_GAUSSIAN_SIGMA, DEFAULT_GAUSSIAN_TAP_LENGTH);
   }
 
-  void displayDebugImage(cimg_library::CImgDisplay& window) {
+  void displayDebugImage(cimg_library::CImgDisplay& window) const {
     values.display(window);
+  }
+
+  double MaxArea(double start_x, double start_y, double end_x, double end_y) const {
+    double max = 0.0;
+    for (double x = start_x; x < end_x; x += resolution) {
+      for (double y = start_y; y < end_y; y += resolution) {
+        double temp = GetPointValue(Vector2f(x, y));
+        if (temp > max) {
+          max = temp;
+        }
+      }
+    }
+    return max;
   }
 };
 
@@ -84,10 +97,10 @@ class CorrelativeScanMatcher {
     : range_(scanner_range), low_res_(low_res), high_res_(high_res) {};
     RobotPose2D GetTransformation(const vector<Vector2f>& pointcloud_a,
                                   const vector<Vector2f>& pointcloud_b);
+    LookupTable GetLookupTableHighRes(const vector<Vector2f>& pointcloud);
+    LookupTable GetLookupTableLowRes(const LookupTable& high_res_table);
  private:
     LookupTable GetLookupTable(const vector<Vector2f>& pointcloud, double resolution);
-    LookupTable GetLookupTableHighRes(const vector<Vector2f>& pointcloud);
-    LookupTable GetLookupTableLowRes(const vector<Vector2f>& pointcloud);
     std::pair<double, RobotPose2D> 
       GetProbAndTransformation(const vector<Vector2f>& pointcloud_a,
                                const vector<Vector2f>& pointcloud_b,

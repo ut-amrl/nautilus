@@ -24,8 +24,18 @@ CorrelativeScanMatcher::GetLookupTable(const vector<Vector2f>& pointcloud,
 }
 
 LookupTable
-CorrelativeScanMatcher::GetLookupTableLowRes(const vector<Vector2f>& pointcloud) {
-  return GetLookupTable(pointcloud, low_res_);
+CorrelativeScanMatcher::GetLookupTableLowRes(const LookupTable& high_res_table) {
+  LookupTable low_res_table(range_, low_res_);
+  // Run the max filter over the portions of this table.
+  for (double x = -range_; x <= range_; x += low_res_) {
+    for (double y = -range_; y <= range_; y += low_res_) {
+      // Get the max value for all the cells that this low res
+      // cell encompasses.
+      double max = high_res_table.MaxArea(x - low_res_, y - low_res_, x, y);
+      low_res_table.SetPointValue(Vector2f(x, y), max);
+    }
+  }
+  return low_res_table;
 }
 
 LookupTable
