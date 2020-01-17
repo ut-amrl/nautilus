@@ -47,7 +47,8 @@ ROSBUILD_ADD_EXECUTABLE(lidar_slam
                         src/solver.cc
                         src/slam_type_builder.cc
                         src/kdtree.cc
-                        src/CorrelativeScanMatcher.cc)
+                        src/CorrelativeScanMatcher.cc
+                        src/normal_computation.cc)
 
 ADD_LIBRARY(shared_library
             src/gui_helpers.cc

@@ -57,8 +57,11 @@ class KDTree {
   // Construct the KDTree using the @values provided.
   explicit KDTree(const std::vector<KDNodeValue<T, K> >& values);
 
-  static std::vector<KDNodeValue<T, K>>
-  EigenToKD(const std::vector<Eigen::Matrix<T, K, 1>>& values);
+  static std::vector<KDNodeValue<float, 2>>
+  EigenToKD(const std::vector<Eigen::Vector2f>& values);
+
+  static std::vector<KDNodeValue<float, 2>>
+  EigenToKDNoNormals(const std::vector<Eigen::Vector2f>& values);
 
   // Rebuild the KDTree using the @values provided.
   KDTree<T, K>* BuildKDTree(std::vector<KDNodeValue<T, K> > values);

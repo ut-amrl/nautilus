@@ -201,6 +201,7 @@ class VisualizationCallback : public ceres::IterationCallback {
                                 &(solution_c[i].pose[0])).cast<float>();
       Eigen::Vector3f pose(solution_c[i].pose[0], solution_c[i].pose[1], 0.0);
       gui_helpers::AddPoint(pose, gui_helpers::Color4f::kGreen, &pose_array);
+      gui_helpers::ClearMarker(&normals_marker);
       for (const Vector2f& point : pointcloud) {
         new_points.push_back(robot_to_world * point);
         // Visualize normal
