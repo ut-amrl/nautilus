@@ -43,11 +43,8 @@ CorrelativeScanMatcher::GetLookupTableHighRes(const vector<Vector2f>& pointcloud
   return GetLookupTable(pointcloud, high_res_);
 }
 
-CumulativeFunctionTimer rotate_pointcloud_timer("RotatePointcloud");
-
 vector<Vector2f> RotatePointcloud(const vector<Vector2f>& pointcloud,
                                   const double rotation) {
-  CumulativeFunctionTimer::Invocation invocation(&rotate_pointcloud_timer);
   const Eigen::Matrix2f rot_matrix =
     Eigen::Rotation2Df(rotation).toRotationMatrix();
   vector<Vector2f> rotated_pointcloud;
@@ -68,13 +65,10 @@ vector<Vector2f> TranslatePointcloud(const vector<Vector2f>& pointcloud,
   return translated_pointcloud;
 }
 
-CumulativeFunctionTimer calculate_pointcloud_cost_timer("CalculatePointcloudCost");
-
 double CalculatePointcloudCost(const vector<Vector2f>& pointcloud,
                                const double x_trans,
                                const double y_trans,
                                const LookupTable& cost_table) {
-  CumulativeFunctionTimer::Invocation invocation(&calculate_pointcloud_cost_timer);
   double probability = 0.0;
   for (const Vector2f& point : pointcloud) {
     probability += cost_table.GetPointValue(point + Vector2f(x_trans, y_trans));
@@ -82,8 +76,6 @@ double CalculatePointcloudCost(const vector<Vector2f>& pointcloud,
   probability /= pointcloud.size();
   return probability;
 }
-
-CumulativeFunctionTimer prob_and_trans_timer("GetProbAndTransformation");
 
 std::pair<double, RobotPose2D>
 CorrelativeScanMatcher::GetProbAndTransformation(const vector<Vector2f>& pointcloud_a,
@@ -95,7 +87,6 @@ CorrelativeScanMatcher::GetProbAndTransformation(const vector<Vector2f>& pointcl
                                                  double y_max,
                                                  bool excluding,
                                                  const boost::dynamic_bitset<>& excluded) {
-  CumulativeFunctionTimer::Invocation invocation(&prob_and_trans_timer);
   RobotPose2D current_most_likely_trans;
   double current_most_likely_prob = 0.0;
   // Two degree accuracy seems to be enough for now.

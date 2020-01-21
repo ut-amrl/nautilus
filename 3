@@ -27,8 +27,8 @@ void SLAMTypeBuilder::AddOdomFactor(
   auto node_i = nodes_[nodes_.size() - 1];
   auto node_j = nodes_[nodes_.size() - 2];
   double angle = node_i.pose.angle - node_j.pose.angle;
-  Vector2f translation = node_i.pose.loc - node_j.pose.loc;
-  OdometryFactor2D odom_factor(nodes_.size() - 2, nodes_.size() - 1, translation, angle);
+  Vector2f translation = nods_i.pose.loc - node_j.pose.loc;
+  OdometryFactor2D odom_factor(nodes_.size() - 1, nodes_.size() - 2, translation, angle);
   odom_factors.emplace_back(odom_factor);
 }
 
@@ -58,6 +58,7 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
     SLAMNode2D slam_node(pose_id_, laser_scan.header.stamp.toSec(), pose,
                          lidar_factor);
     nodes_.push_back(slam_node);
+    CHECK_EQ(nodes_.size(), pose_id_ + 1);
     if (pose_id_ > 0) {
       AddOdomFactor(odom_factors_);
     }
