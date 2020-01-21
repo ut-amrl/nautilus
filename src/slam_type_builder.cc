@@ -117,6 +117,8 @@ RobotPose2D DifferentialOdometryTracking::GetPose() {
   // is in the context of the last robots position's frame.
   total_translation += Rotation2Df(total_rotation) * pending_translation_;
   total_rotation = math_util::angle_mod(total_rotation + pending_rotation_);
+  pending_translation_ = Vector2f(0,0);
+  pending_rotation_ = 0.0;
   return RobotPose2D(total_translation, total_rotation);
 }
 
@@ -135,5 +137,9 @@ void AbsoluteOdometryTracking::OdometryCallback(nav_msgs::Odometry &odometry) {
 }
 
 RobotPose2D AbsoluteOdometryTracking::GetPose() {
-  return RobotPose2D(odom_translation_ - init_odom_translation_, odom_angle_ - init_odom_angle_);
+  Vector2f translation = odom_translation_ - init_odom_translation_;
+  double angle = odom_angle_ - init_odom_angle_;
+  last_odom_angle_ = odom_angle_;
+  last_odom_translation_ = odom_translation_;
+  return RobotPose2D(translation, angle);
 }
