@@ -15,14 +15,15 @@
 #include "sensor_msgs/Image.h"
 #include "sensor_msgs/image_encodings.h"
 #include "Eigen/Dense"
+#include "ros/ros.h"
 
 #include "./CImg.h"
 #include "./slam_type_builder.h"
 #include "./slam_types.h"
 #include "./timer.h"
+#include "./solver.h"
 
-#define DEFAULT_GAUSSIAN_SIGMA 4
-#define DEFAULT_GAUSSIAN_TAP_LENGTH 11
+#define DEFAULT_GAUSSIAN_SIGMA 4 
 
 using std::vector;
 using Eigen::Vector2f;
@@ -65,16 +66,16 @@ struct LookupTable {
     values(x, y) = value;
   }
 
-  void GaussianBlur(const double sigma, const uint64_t tap_length) {
+  void GaussianBlur(const double sigma) {
     values = values.blur(sigma, sigma, sigma, true, true); 
   }
 
   void GaussianBlur() {
-    GaussianBlur(DEFAULT_GAUSSIAN_SIGMA, DEFAULT_GAUSSIAN_TAP_LENGTH);
+    GaussianBlur(DEFAULT_GAUSSIAN_SIGMA);
   }
 
-  void displayDebugImage(cimg_library::CImgDisplay& window) const {
-    values.display(window);
+  CImg<double> GetDebugImage() const {
+    return values;
   }
 
   double MaxArea(double start_x, double start_y, double end_x, double end_y) const {
@@ -89,10 +90,19 @@ struct LookupTable {
     }
     return max;
   }
+
+  // Converts the x and y into an absolute 1D coordinate.
+  size_t AbsCoords(double x, double y) const {
+    size_t row = ((height / 2) + round(y / resolution)) * width;
+    size_t col = (width / 2) + round (x / resolution);
+    CHECK_GE(row + col, 0);
+    return row + col;
+  }
 };
 
 class CorrelativeScanMatcher {
  public:
+    static void TestCorrelativeScanMatcher(ros::NodeHandle& n, slam_types::SLAMProblem2D problem, vector<slam_types::SLAMNodeSolution2D> solution, const size_t pose_a, const size_t pose_b);
     CorrelativeScanMatcher(double scanner_range, double low_res, double high_res)
     : range_(scanner_range), low_res_(low_res), high_res_(high_res) {};
     RobotPose2D GetTransformation(const vector<Vector2f>& pointcloud_a,

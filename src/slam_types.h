@@ -62,7 +62,7 @@ struct RobotPose2D {
     // RADIANS
     float angle{0};
     // Default constructor: do nothing.
-    RobotPose2D() {}
+    RobotPose2D() : loc(0, 0) {}
     // Convenience constructor: initialize everything.
     RobotPose2D(const Eigen::Vector2f&  loc,
                 const float angle) :

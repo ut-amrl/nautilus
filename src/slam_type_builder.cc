@@ -138,7 +138,7 @@ void AbsoluteOdometryTracking::OdometryCallback(nav_msgs::Odometry &odometry) {
 
 RobotPose2D AbsoluteOdometryTracking::GetPose() {
   Vector2f translation = odom_translation_ - init_odom_translation_;
-  double angle = odom_angle_ - init_odom_angle_;
+  double angle = odom_angle_;
   last_odom_angle_ = odom_angle_;
   last_odom_translation_ = odom_translation_;
   return RobotPose2D(translation, angle);

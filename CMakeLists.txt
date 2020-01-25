@@ -58,7 +58,8 @@ TARGET_LINK_LIBRARIES(lidar_slam
                       shared_library
                       ${libs}
                       ${CERES_LIBRARIES})
-if (TESTING)
-    enable_testing()
-    add_subdirectory(test)
-endif()
+
+#if (TESTING)
+# enable_testing()
+#add_subdirectory(test)
+#endif()

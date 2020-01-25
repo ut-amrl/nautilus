@@ -1,4 +1,3 @@
-//
 // Created by jack on 9/25/19.
 //
 
@@ -347,6 +346,8 @@ double Solver::AddLidarResidualsForLC(ceres::Problem& problem) {
 vector<SLAMNodeSolution2D>
 Solver::SolveSLAM() {
   // Setup ceres for evaluation of the problem.
+  CorrelativeScanMatcher::TestCorrelativeScanMatcher(n_, problem_, solution_, 71, 327);
+  return vector<SLAMNodeSolution2D>();
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::SPARSE_SCHUR;
@@ -612,6 +613,7 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   std::cout << "Found " << collinear_constraint.line_b_poses.size()
             << " poses for the second line." << std::endl;
   AddColinearConstraints(collinear_constraint);
+  vis_callback_->PubConstraintVisualization();
   SolveForLC();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
