@@ -25,73 +25,6 @@ using slam_types::RobotPose2D;
 using slam_types::SLAMProblem2D;
 using sensor_msgs::PointCloud2;
 
-#define COST_GAMMA 1.0 / 50.0
-
-void
-CorrelativeScanMatcher::TestCorrelativeScanMatcher(ros::NodeHandle& n,
-                                                   SLAMProblem2D problem,
-                                                   vector<SLAMNodeSolution2D> solution,
-                                                   const size_t pose_a,
-                                                   const size_t pose_b) {
-  PointCloud2 pointCloud_a;
-  PointCloud2 pointCloud_b;
-  pointcloud_helpers::InitPointcloud(&pointCloud_a);
-  pointcloud_helpers::InitPointcloud(&pointCloud_b);
-  ros::Publisher pub_a = n.advertise<PointCloud2>("/corr_pose_a", 10);
-  ros::Publisher pub_b = n.advertise<PointCloud2>("/corr_pose_b", 10);
-  std::cout << "Comparing node " << pose_a << " with node " << pose_b << std::endl;
-  std::cout << "Publishing pointclouds" << std::endl;
-  vector<Vector2f> point_a;
-  point_a.push_back(Vector2f(solution[pose_a].pose[0], solution[pose_a].pose[1]));
-  vector<Vector2f> point_b;
-  point_b.push_back(Vector2f(solution[pose_b].pose[0], solution[pose_b].pose[1]));
-  sleep(1);
-  for (int i = 0; i < 5; i++) {
-    pointcloud_helpers::PublishPointcloud(point_a, pointCloud_a, pub_a);
-    pointcloud_helpers::PublishPointcloud(point_b, pointCloud_b, pub_b);
-    ros::spinOnce();
-  }
-  CHECK_LT(pose_a, problem.nodes.size());
-  CHECK_LT(pose_b, problem.nodes.size());
-  SLAMNode2D& node_a = problem.nodes[pose_a];
-  SLAMNode2D& node_b = problem.nodes[pose_b];
-  auto pointcloud_a = node_a.lidar_factor.pointcloud;
-  auto pointcloud_b = node_b.lidar_factor.pointcloud;
-  Vector2f loc_a(solution[pose_a].pose[0], solution[pose_a].pose[1]);
-  Vector2f loc_b(solution[pose_b].pose[0], solution[pose_b].pose[1]);
-  std::cout << "Testing Scan Get Transformation" << std::endl;
-  CorrelativeScanMatcher scan_matcher(2, 0.3, 0.03);
-  RobotPose2D transformation = scan_matcher.GetTransformation(pointcloud_a, pointcloud_b);
-  std::cout << "Done" << std::endl;
-  std::cout << "Found transformation: " << std::endl << "Translation: " << transformation.loc << std::endl << "Rotation: " << math_util::RadToDeg(transformation.angle) << std::endl;
-  Eigen::Affine2f trans = Eigen::Translation2f(transformation.loc) * Eigen::Rotation2Df(transformation.angle);
-  vector<Vector2f> new_pointcloud_b;
-  for (const Vector2f& point : pointcloud_b) {
-    new_pointcloud_b.emplace_back(trans * point);
-  }
-  LookupTable a_lookup = scan_matcher.GetLookupTableHighRes(pointcloud_a);
-  LookupTable b_lookup = scan_matcher.GetLookupTableHighRes(new_pointcloud_b);
-  LookupTable old_b_lookup = scan_matcher.GetLookupTableHighRes(pointcloud_b);
-  LookupTable old_b_low_res_lookup = scan_matcher.GetLookupTableLowRes(old_b_lookup);
-  cimg_library::CImgDisplay display;
-  cimg_library::CImgDisplay old_display_b;
-  cimg_library::CImgDisplay old_b_low_res;
-  cimg_library::CImg<double> a_img = a_lookup.GetDebugImage();
-  cimg_library::CImg<double> b_img = b_lookup.GetDebugImage();
-  old_display_b.display(old_b_lookup.GetDebugImage());
-  old_b_low_res.display(old_b_low_res_lookup.GetDebugImage());
-  cimg_library::CImg<double> mix_img(a_img.width(), a_img.height(), 1, 3, 0);
-  for (int x = 0; x < a_img.width(); x++) {
-    for (int y = 0; y < a_img.height(); y++) {
-      mix_img(x, y, 0, 0) = a_img(x, y);
-      mix_img(x, y, 0, 1) = b_img(x, y);
-    }
-  }
-  display.display(mix_img);
-  std::cout << "Displaying debug images" << std::endl;
-  while (!display.is_closed()) {}
-}
-
 LookupTable
 CorrelativeScanMatcher::GetLookupTable(const vector<Vector2f>& pointcloud,
                                        double resolution) {
@@ -193,7 +126,7 @@ CorrelativeScanMatcher::GetProbAndTransformation(const vector<Vector2f>& pointcl
                                         current_most_likely_trans);
 }
 
-RobotPose2D
+std::pair<double, RobotPose2D>
 CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
                                           const vector<Vector2f>& pointcloud_b) {
   double current_probability = 1.0;
@@ -207,7 +140,6 @@ CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
     GetLookupTableLowRes(pointcloud_b_cost_high_res);
   while (current_probability >= best_probability) {
     // Evaluate over the low_res lookup table.
-    std::cout << "Low Res Iteration" << std::endl;
     auto prob_and_trans_low_res =
       GetProbAndTransformation(pointcloud_a,
                                pointcloud_b_cost_low_res,
@@ -218,11 +150,8 @@ CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
                                range_,
                                true,
                                excluded_low_res);
-    std::cout << "Low Res Transformation Best: " << std::endl;
-    std::cout << prob_and_trans_low_res.second.loc.x() << " " << prob_and_trans_low_res.second.loc.y() << std::endl;
-    std::cout << prob_and_trans_low_res.second.angle << std::endl;
     if (prob_and_trans_low_res.first < best_probability) {
-      return best_transformation;
+      return std::make_pair(best_probability, best_transformation);
     }
     double x_min_high_res = prob_and_trans_low_res.second.loc.x() - low_res_;
     double x_max_high_res = prob_and_trans_low_res.second.loc.x();
@@ -237,7 +166,6 @@ CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
     excluded_low_res.set(pointcloud_b_cost_low_res.AbsCoords(x_max_high_res,
                                                              y_max_high_res),
                          true);
-    std::cout << "High res iteration" << std::endl;
     auto prob_and_trans_high_res = GetProbAndTransformation(pointcloud_a,
                                                             pointcloud_b_cost_high_res,
                                                             high_res_,
@@ -255,5 +183,17 @@ CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
     }
     current_probability = prob_and_trans_high_res.first;
   }
-  return best_transformation;
+  return std::make_pair(best_probability, best_transformation);
+}
+
+std::pair<double, RobotPose2D>
+CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
+                                          const vector<Vector2f>& pointcloud_b,
+                                          const double rotation_a,
+                                          const double rotation_b) {
+  const vector<Vector2f>& rotated_pointcloud_a =
+    RotatePointcloud(pointcloud_a, rotation_a);
+  const vector<Vector2f>& rotated_pointcloud_b =
+    RotatePointcloud(pointcloud_b, rotation_b);
+  return GetTransformation(rotated_pointcloud_a, rotated_pointcloud_b);
 }

@@ -37,9 +37,11 @@ using slam_types::SLAMNode2D;
 using Eigen::Vector3f;
 using math_util::NormalsSimilar;
 
-// Line needs an affine.
-// Penalize Radial distance as well.
-// Be able to override bag file max distance.
+double DistBetween(double pose_a[3], double pose_b[3]) {
+  Vector2f pose_a_pos(pose_a[0], pose_a[1]);
+  Vector2f pose_b_pos(pose_b[0], pose_b[1]);
+  return (pose_a_pos - pose_b_pos).norm();
+}
 
 struct OdometryResidual {
   template <typename T>
@@ -308,36 +310,47 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
   return difference;
 }
 
+//TODO: This probably shouldn't be dynamically matching poses each time.
 double Solver::AddLidarResidualsForLC(ceres::Problem& problem) {
   double difference = 0.0;
+  // For every constraint, add lidar residuals to the
+  // two closest poses on either constraint line.
   for (const LCConstraint constraint : loop_closure_constraints_) {
+    CHECK_GT(constraint.line_b_poses.size(), 0);
     for (const LCPose& a_pose : constraint.line_a_poses) {
+      CHECK_LT(a_pose.node_idx, solution_.size());
+      auto pose_a_sol_pose = solution_[a_pose.node_idx].pose;
+      size_t closest_b_pose_idx = constraint.line_b_poses[0].node_idx;
+      double closest_dist = DistBetween(pose_a_sol_pose,
+                                        solution_[closest_b_pose_idx].pose);
       for (const LCPose& b_pose : constraint.line_b_poses) {
-        CHECK_LT(a_pose.node_idx, solution_.size());
-        CHECK_LT(b_pose.node_idx, solution_.size());
-        CHECK_LT(a_pose.node_idx, problem_.nodes.size());
-        CHECK_LT(b_pose.node_idx, problem_.nodes.size());
-        PointCorrespondences correspondence(solution_[a_pose.node_idx].pose,
-                                            solution_[b_pose.node_idx].pose,
-                                            a_pose.node_idx,
-                                            b_pose.node_idx);
-        difference += GetPointCorrespondences(problem_,
-                                              &solution_,
-                                              &correspondence,
-                                              a_pose.node_idx,
-                                              b_pose.node_idx);
-        difference /=
-                problem_.nodes[a_pose.node_idx].lidar_factor.pointcloud.size();
-        // Add the correspondences as constraints in the optimization problem.
-        problem.AddResidualBlock(
-                LIDARPointBlobResidual::create(correspondence.source_points,
-                                               correspondence.target_points,
-                                               correspondence.source_normals,
-                                               correspondence.target_normals),
-                NULL,
-                correspondence.source_pose,
-                correspondence.target_pose);
+        auto pose_b_sol_pose = solution_[b_pose.node_idx].pose;
+        if (DistBetween(pose_a_sol_pose, pose_b_sol_pose) < closest_dist) {
+          closest_dist = DistBetween(pose_a_sol_pose, pose_b_sol_pose);
+          closest_b_pose_idx = b_pose.node_idx;
+        }
       }
+      CHECK_LT(closest_b_pose_idx, solution_.size());
+      PointCorrespondences correspondence(solution_[a_pose.node_idx].pose,
+                                          solution_[closest_b_pose_idx].pose,
+                                          a_pose.node_idx,
+                                          closest_b_pose_idx);
+      double temp_diff = GetPointCorrespondences(problem_,
+                                                 &solution_,
+                                                 &correspondence,
+                                                 a_pose.node_idx,
+                                                 closest_b_pose_idx);
+      // Add the correspondences as constraints in the optimization problem.
+      problem.AddResidualBlock(
+              LIDARPointBlobResidual::create(correspondence.source_points,
+                                             correspondence.target_points,
+                                             correspondence.source_normals,
+                                             correspondence.target_normals),
+              NULL,
+              correspondence.source_pose,
+              correspondence.target_pose);
+      difference =
+        temp_diff / problem_.nodes[a_pose.node_idx].lidar_factor.pointcloud.size();
     }
   }
   return difference;
@@ -346,8 +359,6 @@ double Solver::AddLidarResidualsForLC(ceres::Problem& problem) {
 vector<SLAMNodeSolution2D>
 Solver::SolveSLAM() {
   // Setup ceres for evaluation of the problem.
-  CorrelativeScanMatcher::TestCorrelativeScanMatcher(n_, problem_, solution_, 71, 327);
-  return vector<SLAMNodeSolution2D>();
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::SPARSE_SCHUR;
@@ -410,7 +421,7 @@ Solver::SolveSLAM() {
         }
       }
       difference += AddLidarResidualsForLC(ceres_problem);
-      AddCollinearResiduals(&ceres_problem);
+      //AddCollinearResiduals(&ceres_problem);
       ceres::Solve(options, &ceres_problem, &summary);
     } while (abs(difference - last_difference) > stopping_accuracy_);
   }
@@ -539,31 +550,43 @@ void Solver::AddColinearConstraints(const LCConstraint& constraint) {
       constraint.line_b_poses.size() == 0) {
     return;
   }
+  CorrelativeScanMatcher scan_matcher(4, 0.3, 0.03);
+  // Find the closest pose to each pose on a on the b line.
+  for (const LCPose& pose_a : constraint.line_a_poses) {
+    std::cout << "Applying for one pose" << std::endl;
+    auto pose_a_sol_pose = solution_[pose_a.node_idx].pose;
+    size_t closest_pose = constraint.line_b_poses[0].node_idx;
+    double closest_dist = DistBetween(pose_a_sol_pose,
+                                      solution_[constraint.line_b_poses[0].node_idx].pose);
+    for (const LCPose& pose_b : constraint.line_b_poses) {
+      auto pose_b_sol_pose = solution_[pose_b.node_idx].pose;
+      if (DistBetween(pose_a_sol_pose, pose_b_sol_pose) < closest_dist) {
+        closest_dist = DistBetween(pose_a_sol_pose, pose_b_sol_pose);
+        closest_pose = pose_b.node_idx;
+      }
+    }
+    // Apply the transformations to the pose of a.
+    CHECK_LT(closest_pose, problem_.nodes.size());
+    CHECK_LT(pose_a.node_idx, problem_.nodes.size());
+    std::cout << "Finding trans" << std::endl;
+    std::pair<double, RobotPose2D> trans_prob_pair =
+      scan_matcher.GetTransformation(
+        problem_.nodes[pose_a.node_idx].lidar_factor.pointcloud,
+        problem_.nodes[closest_pose].lidar_factor.pointcloud,
+        solution_[pose_a.node_idx].pose[2],
+        solution_[closest_pose].pose[2]);
+    auto trans = trans_prob_pair.second;
+    std::cout << "Found trans with prob: " << trans_prob_pair.first << std::endl;
+    std::cout << "Transformation: " << std::endl << trans.loc << std::endl << trans.angle << std::endl;
+    auto closest_pose_arr = solution_[closest_pose].pose;
+    solution_[pose_a.node_idx].pose[0] +=
+      (closest_pose_arr[0] - pose_a_sol_pose[0]) + trans.loc.x();
+    solution_[pose_a.node_idx].pose[1] +=
+      (closest_pose_arr[1] - pose_a_sol_pose[1]) + trans.loc.y();
+    solution_[pose_a.node_idx].pose[2] += trans.angle;
+  }
   loop_closure_constraints_.push_back(constraint);
   vis_callback_->AddConstraint(constraint);
-}
-
-void Solver::AddCollinearResiduals(ceres::Problem* problem) {
-  for (LCConstraint& constraint : loop_closure_constraints_) {
-    for (const LCPose &a_pose : constraint.line_a_poses) {
-      const vector<Vector2f> &pointcloud_a = a_pose.points_on_feature;
-      CHECK_LT(a_pose.node_idx, solution_.size());
-      problem->AddResidualBlock(
-              PointToLineResidual::create(constraint.line_a, pointcloud_a),
-              NULL,
-              solution_[a_pose.node_idx].pose,
-              constraint.chosen_line_pose);
-    }
-    for (const LCPose &b_pose : constraint.line_b_poses) {
-      const vector<Vector2f> &pointcloud_b = b_pose.points_on_feature;
-      CHECK_LT(b_pose.node_idx, solution_.size());
-      problem->AddResidualBlock(
-              PointToLineResidual::create(constraint.line_a, pointcloud_b),
-              NULL,
-              solution_[b_pose.node_idx].pose,
-              constraint.chosen_line_pose);
-    }
-  }
 }
 
 vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
@@ -581,29 +604,6 @@ vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
   return factors;
 }
 
-void Solver::SolveForLC() {
-  // Create a new problem with colinear residuals between these nodes and a
-  // small weighted odometry residuals between all poses and between these ones.
-  ceres::Problem problem;
-  ceres::Solver::Options options;
-  ceres::Solver::Summary summary;
-  options.linear_solver_type = ceres::SPARSE_SCHUR;
-  options.minimizer_progress_to_stdout = true;
-  options.num_threads =
-    static_cast<int>(std::thread::hardware_concurrency());
-  //options.callbacks.push_back(vis_callback_.get());
-  //options.update_state_every_iteration = true;
-  vector<OdometryFactor2D> local_factors = GetSolvedOdomFactors();
-  AddOdomFactors(&problem,
-                 local_factors,
-                 lc_translation_weight_,
-                 lc_rotation_weight_);
-  AddCollinearResiduals(&problem);
-  ceres::Solve(options, &problem, &summary);
-  vis_callback_->PubVisualization();
-  std::cout << summary.FullReport() << std::endl;
-}
-
 void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   const HitlSlamInputMsg hitl_msg = *hitl_ptr;
   // Get the poses that belong to this input.
@@ -614,7 +614,6 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
             << " poses for the second line." << std::endl;
   AddColinearConstraints(collinear_constraint);
   vis_callback_->PubConstraintVisualization();
-  SolveForLC();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
   SolveSLAM();

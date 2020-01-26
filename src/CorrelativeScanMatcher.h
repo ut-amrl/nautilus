@@ -102,11 +102,16 @@ struct LookupTable {
 
 class CorrelativeScanMatcher {
  public:
-    static void TestCorrelativeScanMatcher(ros::NodeHandle& n, slam_types::SLAMProblem2D problem, vector<slam_types::SLAMNodeSolution2D> solution, const size_t pose_a, const size_t pose_b);
     CorrelativeScanMatcher(double scanner_range, double low_res, double high_res)
     : range_(scanner_range), low_res_(low_res), high_res_(high_res) {};
-    RobotPose2D GetTransformation(const vector<Vector2f>& pointcloud_a,
-                                  const vector<Vector2f>& pointcloud_b);
+    std::pair<double, RobotPose2D>
+    GetTransformation(const vector<Vector2f>& pointcloud_a,
+                      const vector<Vector2f>& pointcloud_b);
+    std::pair<double, RobotPose2D>
+    GetTransformation(const vector<Vector2f>& pointcloud_a,
+                      const vector<Vector2f>& pointcloud_b,
+                      const double rotation_a,
+                      const double rotation_b);
     LookupTable GetLookupTableHighRes(const vector<Vector2f>& pointcloud);
     LookupTable GetLookupTableLowRes(const LookupTable& high_res_table);
  private:
