@@ -6,6 +6,7 @@
 #define LIDAR_SLAM_CORRELATIVESCANMATCHER_H
 
 #include <cstdint>
+#include <cmath>
 #include <memory>
 #include <vector>
 #include <mutex>
@@ -52,7 +53,7 @@ struct LookupTable {
     uint64_t x = width / 2 + point.x() / resolution;
     uint64_t y = height / 2 + point.y() / resolution;
     if (x >= width || y >= height) {
-      return 0.0;
+      return -1.0;
     }
     return values(x, y);
   }
@@ -93,6 +94,8 @@ struct LookupTable {
 
   // Converts the x and y into an absolute 1D coordinate.
   size_t AbsCoords(double x, double y) const {
+    x -= std::fmod(x, resolution);
+    y -= std::fmod(y, resolution);
     size_t row = ((height / 2) + round(y / resolution)) * width;
     size_t col = (width / 2) + round (x / resolution);
     CHECK_GE(row + col, 0);
@@ -112,6 +115,8 @@ class CorrelativeScanMatcher {
                       const vector<Vector2f>& pointcloud_b,
                       const double rotation_a,
                       const double rotation_b);
+    Eigen::Matrix3f GetUncertaintyMatrix(const vector<Vector2f>& pointcloud_a,
+                                         const vector<Vector2f>& pointcloud_b);
     LookupTable GetLookupTableHighRes(const vector<Vector2f>& pointcloud);
     LookupTable GetLookupTableLowRes(const LookupTable& high_res_table);
  private:

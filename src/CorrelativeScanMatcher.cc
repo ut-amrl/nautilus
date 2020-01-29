@@ -17,6 +17,8 @@
 #include "./pointcloud_helpers.h"
 #include "./math_util.h"
 
+#define UNCERTAINTY_USELESS_THRESHOLD 0.01
+
 using std::vector;
 using Eigen::Vector2f;
 
@@ -72,10 +74,17 @@ double CalculatePointcloudCost(const vector<Vector2f>& pointcloud,
                                const double y_trans,
                                const LookupTable& cost_table) {
   double probability = 1.0;
+  size_t hits = 0;
   for (const Vector2f& point : pointcloud) {
-    probability += cost_table.GetPointValue(point + Vector2f(x_trans, y_trans));
+    double cost = cost_table.GetPointValue(point + Vector2f(x_trans, y_trans));
+    if (cost < 0) {
+      continue;
+    }
+    // Only count as percentage of points that fall inside the grid.
+    hits++;
+    probability += cost;
   }
-  probability /= pointcloud.size();
+  probability /= hits;
   return probability;
 }
 
@@ -92,7 +101,7 @@ CorrelativeScanMatcher::GetProbAndTransformation(const vector<Vector2f>& pointcl
   RobotPose2D current_most_likely_trans;
   double current_most_likely_prob = 0.0;
   // One degree accuracy seems to be enough for now.
-  for (double rotation = 0.0; rotation <= M_2PI; rotation += M_PI / 180) {
+  for (double rotation = 0; rotation <= M_2PI; rotation += M_PI / 180) {
     // Rotate the pointcloud by this rotation.
     const vector<Vector2f> rotated_pointcloud_a =
       RotatePointcloud(pointcloud_a, rotation);
@@ -157,6 +166,8 @@ CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
     double x_max_high_res = prob_and_trans_low_res.second.loc.x();
     double y_min_high_res = prob_and_trans_low_res.second.loc.y() - low_res_;
     double y_max_high_res = prob_and_trans_low_res.second.loc.y();
+    y_min_high_res = (y_min_high_res < -range_)? 0 : y_min_high_res;
+    x_min_high_res = (x_min_high_res < -range_)? 0 : x_min_high_res;
     CHECK_GE(x_min_high_res, -range_);
     CHECK_LT(x_min_high_res, range_);
     CHECK_GE(y_min_high_res, -range_);
@@ -195,5 +206,65 @@ CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
     RotatePointcloud(pointcloud_a, rotation_a);
   const vector<Vector2f>& rotated_pointcloud_b =
     RotatePointcloud(pointcloud_b, rotation_b);
-  return GetTransformation(rotated_pointcloud_a, rotated_pointcloud_b);
+  return GetTransformation(rotated_pointcloud_a,
+                           rotated_pointcloud_b);
+}
+
+Eigen::Matrix3f
+CorrelativeScanMatcher::GetUncertaintyMatrix(const vector<Vector2f>& pointcloud_a,
+                                             const vector<Vector2f>& pointcloud_b) {
+  // Calculation Method taken from Realtime Correlative Scan Matching
+  // by Edward Olsen.
+  Eigen::Matrix3f K = Eigen::Matrix3f::Zero();
+  Eigen::Vector3f u(0, 0, 0);
+  double s = 0;
+  const LookupTable pointcloud_b_cost_high_res = GetLookupTableHighRes(pointcloud_b);
+  const LookupTable pointcloud_b_cost_low_res =
+          GetLookupTableLowRes(pointcloud_b_cost_high_res);
+  vector<double> low_res_costs(pointcloud_b_cost_low_res.AbsCoords(range_, range_) + 1, -1);
+  for (double rotation = 0; rotation <= M_2PI; rotation += M_PI / 180) {
+    // Rotate the pointcloud by this rotation.
+    const vector<Vector2f> rotated_pointcloud_a =
+            RotatePointcloud(pointcloud_a, rotation);
+    for (double x_trans = -range_ + high_res_;
+         x_trans <= range_;
+         x_trans += high_res_) {
+      for (double y_trans = -range_ + high_res_;
+           y_trans <= range_;
+           y_trans += high_res_) {
+        // If this is a negligible amount of the total sum then just use the
+        // low res cost, don't worry about the high res cost.
+        size_t low_res_cost_idx =
+          pointcloud_b_cost_low_res.AbsCoords(x_trans, y_trans);
+        double low_res_cost =
+          low_res_costs[low_res_cost_idx];
+        if (low_res_cost < 0) {
+          double low_res_x = x_trans - std::fmod(x_trans, low_res_);
+          double low_res_y = y_trans - std::fmod(y_trans, low_res_);
+          low_res_costs[low_res_cost_idx] =
+            CalculatePointcloudCost(rotated_pointcloud_a,
+                                    low_res_x,
+                                    low_res_y,
+                                    pointcloud_b_cost_low_res);
+        }
+        CHECK_GE(low_res_cost, 0);
+        double cost = 0.0;
+        if (low_res_cost <= UNCERTAINTY_USELESS_THRESHOLD) {
+          cost = low_res_cost;
+        } else {
+          cost = CalculatePointcloudCost(rotated_pointcloud_a,
+                                         x_trans,
+                                         y_trans,
+                                         pointcloud_b_cost_high_res);
+        }
+        Vector3f x(x_trans, y_trans, rotation);
+        K += x * x.transpose() * cost;
+        u += x * cost;
+        s += cost;
+      }
+    }
+  }
+  // Calculate Uncertainty matrix.
+  Eigen::Matrix3f uncertainty = (1.0/s) * K - (1.0/(s*s)) * u * u.transpose();
+  return uncertainty;
 }
