@@ -60,6 +60,10 @@ void InitializeMarker(
   msg->scale.y = scale_y;
   msg->scale.z = scale_z;
   msg->header.frame_id = "map";
+  msg->color.a = color.a;
+  msg->color.r = color.r;
+  msg->color.g = color.g;
+  msg->color.b = color.b;
 }
 
 void ClearMarker(visualization_msgs::Marker* msg) {

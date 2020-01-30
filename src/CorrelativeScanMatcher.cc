@@ -246,6 +246,7 @@ CorrelativeScanMatcher::GetUncertaintyMatrix(const vector<Vector2f>& pointcloud_
                                     low_res_x,
                                     low_res_y,
                                     pointcloud_b_cost_low_res);
+          low_res_cost = low_res_costs[low_res_cost_idx];
         }
         CHECK_GE(low_res_cost, 0);
         double cost = 0.0;
@@ -267,4 +268,16 @@ CorrelativeScanMatcher::GetUncertaintyMatrix(const vector<Vector2f>& pointcloud_
   // Calculate Uncertainty matrix.
   Eigen::Matrix3f uncertainty = (1.0/s) * K - (1.0/(s*s)) * u * u.transpose();
   return uncertainty;
+}
+
+Eigen::Matrix3f
+CorrelativeScanMatcher::GetUncertaintyMatrix(const vector<Vector2f>& pointcloud_a,
+                                             const vector<Vector2f>& pointcloud_b,
+                                             double rotation_a,
+                                             double rotation_b) {
+  const vector<Vector2f>& rotated_pointcloud_a =
+    RotatePointcloud(pointcloud_a, rotation_a);
+  const vector<Vector2f>& rotated_pointcloud_b =
+    RotatePointcloud(pointcloud_b, rotation_b);
+  return GetUncertaintyMatrix(rotated_pointcloud_a, rotated_pointcloud_b);
 }

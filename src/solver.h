@@ -399,7 +399,7 @@ class Solver {
     return solution_;
   }
   LCConstraint GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg);
-  void AddColinearConstraints(const LCConstraint& constraint);
+  void AddCollinearConstraints(const LCConstraint& constraint);
   void SolveForLC();
   void AddCollinearResiduals(ceres::Problem* problem);
   double AddLidarResidualsForLC(ceres::Problem& problem);

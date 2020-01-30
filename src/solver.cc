@@ -5,8 +5,9 @@
 #include <algorithm>
 #include <thread>
 #include <vector>
-#include <sensor_msgs/Image.h>
 
+#include <sensor_msgs/Image.h>
+#include <visualization_msgs/Marker.h>
 #include "ceres/ceres.h"
 #include "eigen3/Eigen/Geometry"
 
@@ -15,6 +16,7 @@
 #include "timer.h"
 #include "lidar_slam/HitlSlamInputMsg.h"
 #include "CorrelativeScanMatcher.h"
+#include "./gui_helpers.h"
 
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
@@ -545,7 +547,7 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
   return hitl_constraint;
 }
 
-void Solver::AddColinearConstraints(const LCConstraint& constraint) {
+void Solver::AddCollinearConstraints(const LCConstraint& constraint) {
   if (constraint.line_a_poses.size() == 0 ||
       constraint.line_b_poses.size() == 0) {
     return;
@@ -586,7 +588,6 @@ void Solver::AddColinearConstraints(const LCConstraint& constraint) {
     solution_[pose_a.node_idx].pose[2] += trans.angle;
   }
   loop_closure_constraints_.push_back(constraint);
-  vis_callback_->AddConstraint(constraint);
 }
 
 vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
@@ -604,6 +605,22 @@ vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
   return factors;
 }
 
+double DistanceBetweenPoses(double *pose_a, double *pose_b) {
+  Vector2f loc_a(pose_a[0], pose_a[1]);
+  Vector2f loc_b(pose_b[0], pose_b[1]);
+  return (loc_a - loc_b).norm();
+}
+
+size_t FindLargestEigenvalueIndex(Eigen::Matrix<std::complex<float>, 3, 1> mat) {
+  // Assuming 3 rows for now.
+  if (mat(0,0).real() > mat(1,0).real() && mat(0,0).real() > mat(2,0).real()) {
+    return 0;
+  } else if (mat(1,0).real() > mat(0,0).real() && mat(1,0).real() > mat(2,0).real()) {
+    return 1;
+  }
+  return 2;
+}
+
 void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   const HitlSlamInputMsg hitl_msg = *hitl_ptr;
   // Get the poses that belong to this input.
@@ -612,8 +629,70 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
     << " poses for the first line." << std::endl;
   std::cout << "Found " << collinear_constraint.line_b_poses.size()
             << " poses for the second line." << std::endl;
-  AddColinearConstraints(collinear_constraint);
+  vis_callback_->AddConstraint(collinear_constraint);
   vis_callback_->PubConstraintVisualization();
+  // Get the two closest poses and visualize their uncertainty.
+  std::pair<size_t, size_t> closest_poses = std::make_pair(collinear_constraint.line_a_poses[0].node_idx,
+                                                           collinear_constraint.line_b_poses[0].node_idx);
+  double max_distance = DistanceBetweenPoses(solution_[closest_poses.first].pose,
+                                             solution_[closest_poses.second].pose);
+  for (const LCPose& pose_a : collinear_constraint.line_a_poses) {
+    for (const LCPose& pose_b : collinear_constraint.line_b_poses) {
+      if (DistanceBetweenPoses(solution_[pose_a.node_idx].pose, solution_[pose_b.node_idx].pose) < max_distance) {
+        max_distance = DistanceBetweenPoses(solution_[pose_a.node_idx].pose, solution_[pose_b.node_idx].pose);
+        closest_poses = std::make_pair(pose_a.node_idx, pose_b.node_idx);
+      }
+    }
+  }
+  // Find the covariance matrix
+  CorrelativeScanMatcher scan_matcher(2, 0.3, 0.03);
+  Eigen::Matrix3f covariance_mat = scan_matcher.GetUncertaintyMatrix(problem_.nodes[closest_poses.first].lidar_factor.pointcloud,
+                                                                     problem_.nodes[closest_poses.second].lidar_factor.pointcloud,
+                                                                     solution_[closest_poses.first].pose[2],
+                                                                     solution_[closest_poses.second].pose[2]);
+  Eigen::EigenSolver<Eigen::Matrix3f> es;
+  es.compute(covariance_mat);
+//  Eigen::Matrix<std::complex<float>, 3, 1> eigen_vector_x = es.eigenvectors().col(0);
+//  Eigen::Matrix<std::complex<float>, 3, 1> eigen_vector_y = es.eigenvectors().col(1);
+//  Eigen::Matrix<std::complex<float>, 3, 1> eigen_vector_theta = es.eigenvectors().col(2);
+  size_t index = FindLargestEigenvalueIndex(es.eigenvalues());
+  Eigen::Matrix3f rotation;
+  double angle = atan(es.eigenvectors().col(index)(1, 0).real() / es.eigenvectors().col(index)(0,0).real());
+//  rotation << eigen_vector_x(0, 0).real(), eigen_vector_x(1, 0).real(), eigen_vector_x(2, 0).real(),
+//              eigen_vector_y(0, 0).real(), eigen_vector_y(1, 0).real(), eigen_vector_y(2, 0).real(),
+//              eigen_vector_theta(0, 0).real(), eigen_vector_theta(1, 0).real(), eigen_vector_theta(2, 0).real();
+  Eigen::Matrix3f xy_rot;
+//  double xy_rot = solution_[closest_poses.first].pose[2];
+  xy_rot << cos(angle), -sin(angle), 0, sin(angle), cos(angle), 0, 0, 0, 1;
+  Eigen::Quaternionf quaternion(xy_rot);
+  ros::Publisher sphere_pub = n_.advertise<visualization_msgs::Marker>("/cov", 10);
+  visualization_msgs::Marker sphere;
+  std::complex<float> scale_x = es.eigenvalues()(0, 0);
+  std::complex<float> scale_y = es.eigenvalues()(1, 0);
+  std::complex<float> scale_theta = es.eigenvalues()(2, 0);
+  gui_helpers::InitializeMarker(visualization_msgs::Marker::SPHERE,
+                                gui_helpers::Color4f::kGreen,
+                                scale_x.real(),
+                                scale_y.real(),
+                                scale_theta.real(),
+                                &sphere);
+  sphere.pose.orientation.x = quaternion.x();
+  sphere.pose.orientation.y = quaternion.y();
+  sphere.pose.orientation.z = quaternion.z();
+  sphere.pose.orientation.w = quaternion.w();
+  sphere.pose.position.x = solution_[closest_poses.first].pose[0];
+  sphere.pose.position.y = solution_[closest_poses.first].pose[1];
+  for (int i = 0; i < 5; i++) {
+    sphere_pub.publish(sphere);
+    sleep(1);
+  }
+  cimg_library::CImgDisplay display1;
+  cimg_library::CImgDisplay display2;
+  LookupTable a_lookup = scan_matcher.GetLookupTableHighRes(problem_.nodes[closest_poses.first].lidar_factor.pointcloud);
+  LookupTable b_lookup = scan_matcher.GetLookupTableHighRes(problem_.nodes[closest_poses.second].lidar_factor.pointcloud);
+  display1.display(a_lookup.GetDebugImage());
+  display2.display(b_lookup.GetDebugImage());
+  AddCollinearConstraints(collinear_constraint);
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
   SolveSLAM();
