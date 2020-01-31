@@ -73,19 +73,20 @@ double CalculatePointcloudCost(const vector<Vector2f>& pointcloud,
                                const double x_trans,
                                const double y_trans,
                                const LookupTable& cost_table) {
-  double probability = 1.0;
-  size_t hits = 0;
+  double probability = 0.0;
+  double min_cost = 1.0;
   for (const Vector2f& point : pointcloud) {
     double cost = cost_table.GetPointValue(point + Vector2f(x_trans, y_trans));
     if (cost < 0) {
       continue;
     }
     // Only count as percentage of points that fall inside the grid.
-    hits++;
-    probability += cost;
+    probability += log(cost);
+    if (cost < min_cost) {
+      min_cost = cost;
+    }
   }
-  probability /= hits;
-  return probability;
+  return exp(probability);
 }
 
 std::pair<double, RobotPose2D>
@@ -144,7 +145,8 @@ CorrelativeScanMatcher::GetTransformation(const vector<Vector2f>& pointcloud_a,
   uint64_t low_res_width = (range_ * 2.0) / low_res_ + 1;
   boost::dynamic_bitset<> excluded_low_res(low_res_width * low_res_width);
   boost::dynamic_bitset<> excluded_high_res(0); // Dumby value, never used.
-  const LookupTable pointcloud_b_cost_high_res = GetLookupTableHighRes(pointcloud_b);
+  const LookupTable pointcloud_b_cost_high_res =
+    GetLookupTableHighRes(pointcloud_b);
   const LookupTable pointcloud_b_cost_low_res =
     GetLookupTableLowRes(pointcloud_b_cost_high_res);
   while (current_probability >= best_probability) {
@@ -266,6 +268,9 @@ CorrelativeScanMatcher::GetUncertaintyMatrix(const vector<Vector2f>& pointcloud_
     }
   }
   // Calculate Uncertainty matrix.
+  std::cout << "K: " << std::endl << K << std::endl;
+  std::cout << "u " << std::endl << u << std::endl;
+  std::cout << "s: " << std::endl << s << std::endl;
   Eigen::Matrix3f uncertainty = (1.0/s) * K - (1.0/(s*s)) * u * u.transpose();
   return uncertainty;
 }

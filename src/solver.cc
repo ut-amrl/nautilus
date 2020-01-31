@@ -644,46 +644,74 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
       }
     }
   }
+  CorrelativeScanMatcher test_scan_matcher(2, 0.3, 0.03);
+  std::pair<double, RobotPose2D> results = test_scan_matcher.GetTransformation(problem_.nodes[closest_poses.first].lidar_factor.pointcloud,problem_.nodes[closest_poses.first].lidar_factor.pointcloud);
+  std::cout << "Results of With itself " << results.first << std::endl;
   // Find the covariance matrix
-  CorrelativeScanMatcher scan_matcher(2, 0.3, 0.03);
+  CorrelativeScanMatcher scan_matcher(4, 0.3, 0.03);
   Eigen::Matrix3f covariance_mat = scan_matcher.GetUncertaintyMatrix(problem_.nodes[closest_poses.first].lidar_factor.pointcloud,
-                                                                     problem_.nodes[closest_poses.second].lidar_factor.pointcloud,
-                                                                     solution_[closest_poses.first].pose[2],
-                                                                     solution_[closest_poses.second].pose[2]);
+                                                                     problem_.nodes[closest_poses.second].lidar_factor.pointcloud);
   Eigen::EigenSolver<Eigen::Matrix3f> es;
   es.compute(covariance_mat);
 //  Eigen::Matrix<std::complex<float>, 3, 1> eigen_vector_x = es.eigenvectors().col(0);
 //  Eigen::Matrix<std::complex<float>, 3, 1> eigen_vector_y = es.eigenvectors().col(1);
 //  Eigen::Matrix<std::complex<float>, 3, 1> eigen_vector_theta = es.eigenvectors().col(2);
-  size_t index = FindLargestEigenvalueIndex(es.eigenvalues());
-  Eigen::Matrix3f rotation;
-  double angle = atan(es.eigenvectors().col(index)(1, 0).real() / es.eigenvectors().col(index)(0,0).real());
+//  size_t index = FindLargestEigenvalueIndex(es.eigenvalues());
+//  Eigen::Matrix3f rotation;
+  std::cout << "Cov Matrix" << std::endl;
+  std::cout << covariance_mat << std::endl;
+  std::cout << "Eigen Values" << std::endl;
+  std::cout << es.eigenvalues() << std::endl;
+//  double angle = atan(es.eigenvectors().col(index)(1, 0).real() / es.eigenvectors().col(index)(0,0).real());
+  std::cout << "Eigen Vectors" << std::endl;
+  std::cout << es.eigenvectors() << std::endl;
 //  rotation << eigen_vector_x(0, 0).real(), eigen_vector_x(1, 0).real(), eigen_vector_x(2, 0).real(),
 //              eigen_vector_y(0, 0).real(), eigen_vector_y(1, 0).real(), eigen_vector_y(2, 0).real(),
 //              eigen_vector_theta(0, 0).real(), eigen_vector_theta(1, 0).real(), eigen_vector_theta(2, 0).real();
   Eigen::Matrix3f xy_rot;
 //  double xy_rot = solution_[closest_poses.first].pose[2];
-  xy_rot << cos(angle), -sin(angle), 0, sin(angle), cos(angle), 0, 0, 0, 1;
-  Eigen::Quaternionf quaternion(xy_rot);
-  ros::Publisher sphere_pub = n_.advertise<visualization_msgs::Marker>("/cov", 10);
-  visualization_msgs::Marker sphere;
-  std::complex<float> scale_x = es.eigenvalues()(0, 0);
-  std::complex<float> scale_y = es.eigenvalues()(1, 0);
-  std::complex<float> scale_theta = es.eigenvalues()(2, 0);
-  gui_helpers::InitializeMarker(visualization_msgs::Marker::SPHERE,
-                                gui_helpers::Color4f::kGreen,
-                                scale_x.real(),
-                                scale_y.real(),
-                                scale_theta.real(),
-                                &sphere);
-  sphere.pose.orientation.x = quaternion.x();
-  sphere.pose.orientation.y = quaternion.y();
-  sphere.pose.orientation.z = quaternion.z();
-  sphere.pose.orientation.w = quaternion.w();
-  sphere.pose.position.x = solution_[closest_poses.first].pose[0];
-  sphere.pose.position.y = solution_[closest_poses.first].pose[1];
+  xy_rot << cos(solution_[closest_poses.first].pose[2]), -sin(solution_[closest_poses.first].pose[2]), 0, sin(solution_[closest_poses.first].pose[2]), cos(solution_[closest_poses.first].pose[2]), 0, 0, 0, 1;
+//  Eigen::Quaternionf quaternion(xy_rot);
+  ros::Publisher arrow_pub = n_.advertise<visualization_msgs::Marker>("/cov", 10);
+  vector<visualization_msgs::Marker> arrows(3);
+//  std::complex<float> scale_x = es.eigenvalues()(0, 0);
+//  std::complex<float> scale_y = es.eigenvalues()(1, 0);
+//  std::complex<float> scale_theta = es.eigenvalues()(2, 0);
+  for (int i = 0; i < 3; i++) {
+    gui_helpers::InitializeMarker(visualization_msgs::Marker::ARROW,
+                                  gui_helpers::Color4f::kGreen,
+                                  0.1, 0.1, 0.1,
+                                  &arrows[i]);
+  }
+//  sphere.pose.orientation.x = quaternion.x();
+//  sphere.pose.orientation.y = quaternion.y();
+//  sphere.pose.orientation.z = quaternion.z();
+//  sphere.pose.orientation.w = quaternion.w();
+//  sphere.pose.position.x = solution_[closest_poses.first].pose[0];
+//  sphere.pose.position.y = solution_[closest_poses.first].pose[1];
+// Now we want to graph each eigen vector the same as an arrow scaled by its eigen value.
+  for (int i = 0; i < es.eigenvalues().rows(); i++) {
+    Eigen::Matrix<std::complex<float>, 3, 1> eigen_vector = es.eigenvectors().col(i);
+    std::complex<float> eigen_value = es.eigenvalues()(i, 0);
+    Eigen::Matrix<float, 3, 1> eigen_vector_real;
+    eigen_vector_real << eigen_vector(0,0).real(), eigen_vector(1,0).real(), eigen_vector(2,0).real();
+    eigen_vector_real = xy_rot * (eigen_value.real() * eigen_vector_real);
+    geometry_msgs::Point pivot_point;
+    pivot_point.x = solution_[closest_poses.first].pose[0];
+    pivot_point.y = solution_[closest_poses.first].pose[1];
+    pivot_point.z = 0;
+    geometry_msgs::Point end_point;
+    end_point.x = pivot_point.x + eigen_vector_real(0,0);
+    end_point.y = pivot_point.y + eigen_vector_real(1,0);
+    end_point.z = pivot_point.z + eigen_vector_real(2,0);
+    arrows[i].points.push_back(pivot_point);
+    arrows[i].points.push_back(end_point);
+  }
+  sleep(1);
   for (int i = 0; i < 5; i++) {
-    sphere_pub.publish(sphere);
+    for (visualization_msgs::Marker m : arrows) {
+      arrow_pub.publish(m);
+    }
     sleep(1);
   }
   cimg_library::CImgDisplay display1;
