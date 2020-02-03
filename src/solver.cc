@@ -644,6 +644,7 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
       }
     }
   }
+  std::cout << "Correlative Scan Matching The Following Poses: " << closest_poses.first << " " << closest_poses.second << std::endl;
   CorrelativeScanMatcher test_scan_matcher(2, 0.3, 0.03);
   std::pair<double, RobotPose2D> results = test_scan_matcher.GetTransformation(problem_.nodes[closest_poses.first].lidar_factor.pointcloud,problem_.nodes[closest_poses.first].lidar_factor.pointcloud);
   std::cout << "Results of With itself " << results.first << std::endl;

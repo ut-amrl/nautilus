@@ -74,7 +74,6 @@ double CalculatePointcloudCost(const vector<Vector2f>& pointcloud,
                                const double y_trans,
                                const LookupTable& cost_table) {
   double probability = 0.0;
-  double min_cost = 1.0;
   for (const Vector2f& point : pointcloud) {
     double cost = cost_table.GetPointValue(point + Vector2f(x_trans, y_trans));
     if (cost < 0) {
@@ -82,9 +81,6 @@ double CalculatePointcloudCost(const vector<Vector2f>& pointcloud,
     }
     // Only count as percentage of points that fall inside the grid.
     probability += log(cost);
-    if (cost < min_cost) {
-      min_cost = cost;
-    }
   }
   return exp(probability);
 }

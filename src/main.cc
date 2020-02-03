@@ -84,7 +84,7 @@ SLAMProblem2D ProcessBagFile(const char* bag_path,
   try {
     bag.open(bag_path, rosbag::bagmode::Read);
   } catch (rosbag::BagException& exception) {
-    printf("Unable to read %s, reason %s:", bag_path, exception.what());
+    printf("Unable to read %s, reason: %s\n", bag_path, exception.what());
     return slam_types::SLAMProblem2D();
   }
   // Get the topics we want
@@ -95,11 +95,17 @@ SLAMProblem2D ProcessBagFile(const char* bag_path,
   SLAMTypeBuilder slam_builder(FLAGS_pose_num,
                                FLAGS_diff_odom,
                                FLAGS_max_lidar_range);
+  bool bag_start_time_printed = false;
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
        ros::ok() && it != view.end() && !slam_builder.Done();
        ++it) {
     const rosbag::MessageInstance &message = *it;
+    if (!bag_start_time_printed) {
+      bag_start_time_printed = true;
+      ros::Time current_time = message.getTime();
+      std::cout << "Start Time: " << current_time.sec << " s " << current_time.nsec << " n " << std::endl;
+    }
     {
       // Load all the point clouds into memory.
       sensor_msgs::LaserScanPtr laser_scan =
@@ -137,7 +143,7 @@ int main(int argc, char** argv) {
   google::InitGoogleLogging(*argv);
   google::ParseCommandLineFlags(&argc, &argv, false);
   if (FLAGS_bag_path.compare("") == 0) {
-    printf("Must specify an input bag!");
+    printf("Must specify an input bag!\n");
     exit(0);
   }
   ros::init(argc, argv, "lidar_slam");

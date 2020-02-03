@@ -40,7 +40,7 @@ struct LookupTable {
   CImg<double> values;
   LookupTable(const uint64_t range,
               const double resolution) :
-              width((range *. 2.0) / resolution + 1),
+              width((range * 2.0) / resolution + 1),
               height((range * 2.0) / resolution + 1),
               resolution(resolution) {
     // Construct a width x height image, with only 1 z level.
