@@ -53,12 +53,6 @@ struct OdometryResidual {
     // Predicted pose_j = pose_i * odometry.
     // Hence, error = pose_j.inverse() * pose_i * odometry;
     typedef Eigen::Matrix<T, 2, 1> Vector2T;
-//    typedef Eigen::Matrix<T, 2, 2> Matrix2T;
-    // Extract the rotation matrices.
-//    const Matrix2T Ri = Rotation2D<T>(pose_i[2])
-//      .toRotationMatrix();
-//    const Matrix2T Rj = Rotation2D<T>(pose_j[2])
-//      .toRotationMatrix();
     // Extract the translation.
     const Vector2T Ti(pose_i[0], pose_i[1]);
     const Vector2T Tj(pose_j[0], pose_j[1]);
@@ -547,6 +541,10 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
   return hitl_constraint;
 }
 
+/*
+ * Applies the CSM transformation to each of the closest poses in A to those in B.
+ *
+ */
 void Solver::AddCollinearConstraints(const LCConstraint& constraint) {
   if (constraint.line_a_poses.size() == 0 ||
       constraint.line_b_poses.size() == 0) {
@@ -571,21 +569,22 @@ void Solver::AddCollinearConstraints(const LCConstraint& constraint) {
     CHECK_LT(closest_pose, problem_.nodes.size());
     CHECK_LT(pose_a.node_idx, problem_.nodes.size());
     std::cout << "Finding trans" << std::endl;
-    std::pair<double, RobotPose2D> trans_prob_pair =
+    std::pair<double, std::pair<Vector2f, float>> trans_prob_pair =
       scan_matcher.GetTransformation(
         problem_.nodes[pose_a.node_idx].lidar_factor.pointcloud,
         problem_.nodes[closest_pose].lidar_factor.pointcloud,
         solution_[pose_a.node_idx].pose[2],
-        solution_[closest_pose].pose[2]);
+        solution_[closest_pose].pose[2],
+        math_util::DegToRad(180));
     auto trans = trans_prob_pair.second;
     std::cout << "Found trans with prob: " << trans_prob_pair.first << std::endl;
-    std::cout << "Transformation: " << std::endl << trans.loc << std::endl << trans.angle << std::endl;
+    std::cout << "Transformation: " << std::endl << trans.first << std::endl << trans.second << std::endl;
     auto closest_pose_arr = solution_[closest_pose].pose;
     solution_[pose_a.node_idx].pose[0] +=
-      (closest_pose_arr[0] - pose_a_sol_pose[0]) + trans.loc.x();
+      (closest_pose_arr[0] - pose_a_sol_pose[0]) + trans.first.x();
     solution_[pose_a.node_idx].pose[1] +=
-      (closest_pose_arr[1] - pose_a_sol_pose[1]) + trans.loc.y();
-    solution_[pose_a.node_idx].pose[2] += trans.angle;
+      (closest_pose_arr[1] - pose_a_sol_pose[1]) + trans.first.y();
+    solution_[pose_a.node_idx].pose[2] += trans.second;
   }
   loop_closure_constraints_.push_back(constraint);
 }
@@ -605,125 +604,26 @@ vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
   return factors;
 }
 
-double DistanceBetweenPoses(double *pose_a, double *pose_b) {
-  Vector2f loc_a(pose_a[0], pose_a[1]);
-  Vector2f loc_b(pose_b[0], pose_b[1]);
-  return (loc_a - loc_b).norm();
-}
-
-size_t FindLargestEigenvalueIndex(Eigen::Matrix<std::complex<float>, 3, 1> mat) {
-  // Assuming 3 rows for now.
-  if (mat(0,0).real() > mat(1,0).real() && mat(0,0).real() > mat(2,0).real()) {
-    return 0;
-  } else if (mat(1,0).real() > mat(0,0).real() && mat(1,0).real() > mat(2,0).real()) {
-    return 1;
-  }
-  return 2;
-}
-
 void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
+  problem_.odometry_factors = GetSolvedOdomFactors();
   const HitlSlamInputMsg hitl_msg = *hitl_ptr;
   // Get the poses that belong to this input.
   const LCConstraint collinear_constraint = GetRelevantPosesForHITL(hitl_msg);
   std::cout << "Found " << collinear_constraint.line_a_poses.size()
     << " poses for the first line." << std::endl;
   std::cout << "Found " << collinear_constraint.line_b_poses.size()
-            << " poses for the second line." << std::endl;
+    << " poses for the second line." << std::endl;
   vis_callback_->AddConstraint(collinear_constraint);
-  vis_callback_->PubConstraintVisualization();
-  // Get the two closest poses and visualize their uncertainty.
-  std::pair<size_t, size_t> closest_poses = std::make_pair(collinear_constraint.line_a_poses[0].node_idx,
-                                                           collinear_constraint.line_b_poses[0].node_idx);
-  double max_distance = DistanceBetweenPoses(solution_[closest_poses.first].pose,
-                                             solution_[closest_poses.second].pose);
-  for (const LCPose& pose_a : collinear_constraint.line_a_poses) {
-    for (const LCPose& pose_b : collinear_constraint.line_b_poses) {
-      if (DistanceBetweenPoses(solution_[pose_a.node_idx].pose, solution_[pose_b.node_idx].pose) < max_distance) {
-        max_distance = DistanceBetweenPoses(solution_[pose_a.node_idx].pose, solution_[pose_b.node_idx].pose);
-        closest_poses = std::make_pair(pose_a.node_idx, pose_b.node_idx);
-      }
-    }
-  }
-  std::cout << "Correlative Scan Matching The Following Poses: " << closest_poses.first << " " << closest_poses.second << std::endl;
-  CorrelativeScanMatcher test_scan_matcher(2, 0.3, 0.03);
-  std::pair<double, RobotPose2D> results = test_scan_matcher.GetTransformation(problem_.nodes[closest_poses.first].lidar_factor.pointcloud,problem_.nodes[closest_poses.first].lidar_factor.pointcloud);
-  std::cout << "Results of With itself " << results.first << std::endl;
-  // Find the covariance matrix
-  CorrelativeScanMatcher scan_matcher(4, 0.3, 0.03);
-  Eigen::Matrix3f covariance_mat = scan_matcher.GetUncertaintyMatrix(problem_.nodes[closest_poses.first].lidar_factor.pointcloud,
-                                                                     problem_.nodes[closest_poses.second].lidar_factor.pointcloud);
-  Eigen::EigenSolver<Eigen::Matrix3f> es;
-  es.compute(covariance_mat);
-//  Eigen::Matrix<std::complex<float>, 3, 1> eigen_vector_x = es.eigenvectors().col(0);
-//  Eigen::Matrix<std::complex<float>, 3, 1> eigen_vector_y = es.eigenvectors().col(1);
-//  Eigen::Matrix<std::complex<float>, 3, 1> eigen_vector_theta = es.eigenvectors().col(2);
-//  size_t index = FindLargestEigenvalueIndex(es.eigenvalues());
-//  Eigen::Matrix3f rotation;
-  std::cout << "Cov Matrix" << std::endl;
-  std::cout << covariance_mat << std::endl;
-  std::cout << "Eigen Values" << std::endl;
-  std::cout << es.eigenvalues() << std::endl;
-//  double angle = atan(es.eigenvectors().col(index)(1, 0).real() / es.eigenvectors().col(index)(0,0).real());
-  std::cout << "Eigen Vectors" << std::endl;
-  std::cout << es.eigenvectors() << std::endl;
-//  rotation << eigen_vector_x(0, 0).real(), eigen_vector_x(1, 0).real(), eigen_vector_x(2, 0).real(),
-//              eigen_vector_y(0, 0).real(), eigen_vector_y(1, 0).real(), eigen_vector_y(2, 0).real(),
-//              eigen_vector_theta(0, 0).real(), eigen_vector_theta(1, 0).real(), eigen_vector_theta(2, 0).real();
-  Eigen::Matrix3f xy_rot;
-//  double xy_rot = solution_[closest_poses.first].pose[2];
-  xy_rot << cos(solution_[closest_poses.first].pose[2]), -sin(solution_[closest_poses.first].pose[2]), 0, sin(solution_[closest_poses.first].pose[2]), cos(solution_[closest_poses.first].pose[2]), 0, 0, 0, 1;
-//  Eigen::Quaternionf quaternion(xy_rot);
-  ros::Publisher arrow_pub = n_.advertise<visualization_msgs::Marker>("/cov", 10);
-  vector<visualization_msgs::Marker> arrows(3);
-//  std::complex<float> scale_x = es.eigenvalues()(0, 0);
-//  std::complex<float> scale_y = es.eigenvalues()(1, 0);
-//  std::complex<float> scale_theta = es.eigenvalues()(2, 0);
-  for (int i = 0; i < 3; i++) {
-    gui_helpers::InitializeMarker(visualization_msgs::Marker::ARROW,
-                                  gui_helpers::Color4f::kGreen,
-                                  0.1, 0.1, 0.1,
-                                  &arrows[i]);
-  }
-//  sphere.pose.orientation.x = quaternion.x();
-//  sphere.pose.orientation.y = quaternion.y();
-//  sphere.pose.orientation.z = quaternion.z();
-//  sphere.pose.orientation.w = quaternion.w();
-//  sphere.pose.position.x = solution_[closest_poses.first].pose[0];
-//  sphere.pose.position.y = solution_[closest_poses.first].pose[1];
-// Now we want to graph each eigen vector the same as an arrow scaled by its eigen value.
-  for (int i = 0; i < es.eigenvalues().rows(); i++) {
-    Eigen::Matrix<std::complex<float>, 3, 1> eigen_vector = es.eigenvectors().col(i);
-    std::complex<float> eigen_value = es.eigenvalues()(i, 0);
-    Eigen::Matrix<float, 3, 1> eigen_vector_real;
-    eigen_vector_real << eigen_vector(0,0).real(), eigen_vector(1,0).real(), eigen_vector(2,0).real();
-    eigen_vector_real = xy_rot * (eigen_value.real() * eigen_vector_real);
-    geometry_msgs::Point pivot_point;
-    pivot_point.x = solution_[closest_poses.first].pose[0];
-    pivot_point.y = solution_[closest_poses.first].pose[1];
-    pivot_point.z = 0;
-    geometry_msgs::Point end_point;
-    end_point.x = pivot_point.x + eigen_vector_real(0,0);
-    end_point.y = pivot_point.y + eigen_vector_real(1,0);
-    end_point.z = pivot_point.z + eigen_vector_real(2,0);
-    arrows[i].points.push_back(pivot_point);
-    arrows[i].points.push_back(end_point);
-  }
-  sleep(1);
+  AddCollinearConstraints(collinear_constraint);
   for (int i = 0; i < 5; i++) {
-    for (visualization_msgs::Marker m : arrows) {
-      arrow_pub.publish(m);
-    }
+    vis_callback_->PubVisualization();
     sleep(1);
   }
-  cimg_library::CImgDisplay display1;
-  cimg_library::CImgDisplay display2;
-  LookupTable a_lookup = scan_matcher.GetLookupTableHighRes(problem_.nodes[closest_poses.first].lidar_factor.pointcloud);
-  LookupTable b_lookup = scan_matcher.GetLookupTableHighRes(problem_.nodes[closest_poses.second].lidar_factor.pointcloud);
-  display1.display(a_lookup.GetDebugImage());
-  display2.display(b_lookup.GetDebugImage());
-  AddCollinearConstraints(collinear_constraint);
+  vis_callback_->PubConstraintVisualization();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
+  translation_weight_ = lc_translation_weight_;
+  rotation_weight_ = lc_rotation_weight_;
   SolveSLAM();
   std::cout << "Waiting for Loop Closure input." << std::endl;
 }

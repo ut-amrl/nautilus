@@ -170,12 +170,14 @@ class VisualizationCallback : public ceres::IterationCallback {
                                   0.0,
                                   &normals_marker);
     constraint_pose_pub = n.advertise<PointCloud2>("/hitl_poses", 10);
+    hitl_pointclouds = n.advertise<PointCloud2>("/hitl_pointclouds", 10);
     point_a_pub = n.advertise<PointCloud2>("/hitl_a_points",100);
     point_b_pub = n.advertise<PointCloud2>("/hitl_b_points",100);
     line_pub = n.advertise<visualization_msgs::Marker>("/line_a", 10);
     pointcloud_helpers::InitPointcloud(&pose_point_marker);
     pointcloud_helpers::InitPointcloud(&a_points_marker);
     pointcloud_helpers::InitPointcloud(&b_points_marker);
+    pointcloud_helpers::InitPointcloud(&hitl_points_marker);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
                                   gui_helpers::Color4f::kMagenta,
                                   0.10,
@@ -292,6 +294,35 @@ class VisualizationCallback : public ceres::IterationCallback {
         sleep(1);
       }
     }
+    PubConstraintPointclouds();
+  }
+
+  void AddPosePointcloud(vector<Vector2f>& pointcloud,
+                         const LCPose& pose) {
+    size_t node_idx = pose.node_idx;
+    vector<SLAMNodeSolution2D> solution_c = *solution;
+    vector<Vector2f> p_cloud = problem.nodes[node_idx].lidar_factor.pointcloud;
+    double* pose_arr = solution_c[node_idx].pose;
+    Affine2f robot_to_world =
+      PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
+    for (const Vector2f& p : p_cloud) {
+      pointcloud.push_back(robot_to_world * p);
+    }
+  }
+
+  void PubConstraintPointclouds() {
+    vector<Vector2f> pointclouds;
+    for (const LCConstraint &hitl_constraint : constraints) {
+      for (const LCPose& pose : hitl_constraint.line_a_poses) {
+        AddPosePointcloud(pointclouds, pose);
+      }
+      for (const LCPose& pose : hitl_constraint.line_b_poses) {
+        AddPosePointcloud(pointclouds, pose);
+      }
+    }
+    pointcloud_helpers::PublishPointcloud(pointclouds,
+                                          hitl_points_marker,
+                                          hitl_pointclouds);
   }
 
   void ClearNormals() {
@@ -361,12 +392,14 @@ class VisualizationCallback : public ceres::IterationCallback {
   ros::Publisher point_a_pub;
   ros::Publisher point_b_pub;
   ros::Publisher line_pub;
+  ros::Publisher hitl_pointclouds;
   visualization_msgs::Marker pose_array;
   visualization_msgs::Marker match_line_list;
   visualization_msgs::Marker normals_marker;
   PointCloud2 pose_point_marker;
   PointCloud2 a_points_marker;
   PointCloud2 b_points_marker;
+  PointCloud2 hitl_points_marker;
   visualization_msgs::Marker line_marker;
   // All the correspondences were the source is the same
   // (will be the last pointcloud aligned and all of its targets).
