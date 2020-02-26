@@ -3,6 +3,7 @@
 #include <vector>
 #include <algorithm>
 
+#include <boost/math/distributions/chi_squared.hpp>
 #include <boost/dynamic_bitset.hpp>
 #include "Eigen/Dense"
 #include "ros/ros.h"
@@ -17,6 +18,9 @@
 using std::vector;
 using std::pair;
 using Eigen::Vector2f;
+using boost::math::chi_squared;
+using boost::math::complement;
+using boost::math::quantile;
 
 using sensor_msgs::PointCloud2;
 
@@ -371,3 +375,26 @@ GetUncertaintyMatrix(const vector<Vector2f>& pointcloud_a,
     RotatePointcloud(pointcloud_b, rotation_b);
   return GetUncertaintyMatrix(rotated_pointcloud_a, rotated_pointcloud_b);
 }
+
+bool CorrelativeScanMatcher::SimilarScans(const vector<Vector2f>& pointcloud_a,
+                                          const vector<Vector2f>& pointcloud_b,
+                                          const double certainty) {
+  CHECK_LE(certainty, 1.0);
+  CHECK_GE(certainty, 0.0);
+  const double uncertainty = 1 - certainty;
+  const LookupTable b_table = GetLookupTableHighRes(pointcloud_b);
+  double chi_squared_val = 0.0;
+  for (const Vector2f& point : pointcloud_a) {
+    // For every point the value here is 1, the value in b could be anything.
+    double expected = b_table.GetPointValue(point);
+    double observed = 1;
+    chi_squared_val += pow(observed - expected, 2) / expected;
+  }
+  // Degrees of freedom is pointcloud size.
+  chi_squared dist(pointcloud_a.size());
+  if (chi_squared_val >= quantile(dist, uncertainty)) {
+    return false;
+  }
+  return true;
+}
+

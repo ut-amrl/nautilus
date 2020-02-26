@@ -24,6 +24,7 @@
 #define HITL_POSE_POINT_THRESHOLD 3
 
 using std::vector;
+using std::pair;
 using slam_types::OdometryFactor2D;
 using slam_types::LidarFactor;
 using ceres::AutoDiffCostFunction;
@@ -626,4 +627,77 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   rotation_weight_ = lc_rotation_weight_;
   SolveSLAM();
   std::cout << "Waiting for Loop Closure input." << std::endl;
+}
+
+vector<Vector2f> TransformPointcloud(const vector<Vector2f>& pointcloud,
+                                     const pair<Vector2f, float>& trans) {
+  vector<Vector2f> new_pointcloud;
+  Eigen::Affine2f transformation =
+    Eigen::Translation2f(trans.first) * Eigen::Rotation2Df(trans.second);
+  for (const Vector2f& point : pointcloud) {
+    new_pointcloud.push_back(transformation * point);
+  }
+  return new_pointcloud;
+}
+
+vector<size_t> Solver::GetLoopClosurePoses() {
+  CorrelativeScanMatcher scan_matcher(4, 0.3, 0.03);
+  // The first scan is automatically a loop closure pose.
+  vector<size_t> loop_closure_pose_nums;
+  loop_closure_pose_nums.push_back(problem_.nodes[0].node_idx);
+  // Loop over the rest of the pointclouds, if sufficiently different from all
+  // other loop closure positions then save.
+  for (const SLAMNode2D& node : problem_.nodes) {
+    bool save_as_lc = true;
+    const vector<Vector2f>& pointcloud = node.lidar_factor.pointcloud;
+    for (const size_t lc_pose_num : loop_closure_pose_nums) {
+      CHECK_LT(lc_pose_num, problem_.nodes.size());
+      const SLAMNode2D& lc_node = problem_.nodes[lc_pose_num];
+      const vector<Vector2f> lc_pointcloud = lc_node.lidar_factor.pointcloud;
+      // Transform this pointcloud to the lc_pose;
+      auto transformation =
+        scan_matcher.GetTransformation(pointcloud,
+                                       lc_pointcloud,
+                                       solution_[node.node_idx].pose[2],
+                                       solution_[lc_node.node_idx].pose[2],
+                                       math_util::DegToRad(180));
+      const vector<Vector2f> transformed_pointcloud =
+        TransformPointcloud(pointcloud, transformation.second);
+      if (scan_matcher.SimilarScans(transformed_pointcloud, lc_pointcloud, 0.99)) {
+        save_as_lc = false;
+        break;
+      }
+    }
+    if (save_as_lc) {
+      loop_closure_pose_nums.push_back(node.node_idx);
+    }
+  }
+  return loop_closure_pose_nums;
+}
+
+void Solver::LoopCloseWithCSM() {
+  // Then loop back over, if further than the COMPARISON DISTANCE then compare using
+  // Similar scans, if the same loop close, otherwise continue.
+
+  // Get the poses that all other scans will be
+  // compared against for loop closure.
+  vector<size_t> loop_closure_pose_nums = GetLoopClosurePoses();
+  ros::Publisher lc_points_pub = n_.advertise<PointCloud2>("/lc_points", 10);
+  PointCloud2 lc_points_marker;
+  pointcloud_helpers::InitPointcloud(&lc_points_marker);
+  vector<Vector2f> lc_points;
+  for (const SLAMNode2D& node : problem_.nodes) {
+    const vector<Vector2f> pointcloud = node.lidar_factor.pointcloud;
+    lc_points.insert(lc_points.end(), pointcloud.begin(), pointcloud.end());
+  }
+  for (int i = 0; i < 5; i++) {
+    pointcloud_helpers::PublishPointcloud(lc_points,
+                                          lc_points_marker,
+                                          lc_points_pub);
+    sleep(1);
+  }
+  // Loop over all pointclouds, and if not the same scan or within the solver
+  // comparison distance then compare them for loop closure. We can only loop
+  // close with one pose. So break after finding one to loop close with.
+
 }

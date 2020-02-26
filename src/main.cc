@@ -164,11 +164,12 @@ int main(int argc, char** argv) {
                 slam_problem,
                 n);
   solver.SolveSLAM();
-  std::cout << "Waiting for Loop Closure input" << std::endl;
-  ros::Subscriber hitl_sub = n.subscribe(FLAGS_hitl_lc_topic,
-                                         10,
-                                         &Solver::HitlCallback,
-                                         &solver);
+  solver.LoopCloseWithCSM();
+//  std::cout << "Waiting for Loop Closure input" << std::endl;
+//  ros::Subscriber hitl_sub = n.subscribe(FLAGS_hitl_lc_topic,
+//                                         10,
+//                                         &Solver::HitlCallback,
+//                                         &solver);
   ros::spin();
   return 0;
 }

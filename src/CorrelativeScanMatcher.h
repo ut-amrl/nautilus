@@ -152,7 +152,9 @@ class CorrelativeScanMatcher {
                                          double rotation_b);
     LookupTable GetLookupTableHighRes(const vector<Vector2f>& pointcloud);
     LookupTable GetLookupTableLowRes(const LookupTable& high_res_table);
-
+    bool SimilarScans(const vector<Vector2f>& pointcloud_a,
+                      const vector<Vector2f>& pointcloud_b,
+                      const double certainty);
  private:
     LookupTable GetLookupTable(const vector<Vector2f>& pointcloud,
                                double resolution);

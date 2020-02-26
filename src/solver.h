@@ -438,7 +438,9 @@ class Solver {
   double AddLidarResidualsForLC(ceres::Problem& problem);
   void AddPointCloudResiduals(ceres::Problem* problem);
   vector<OdometryFactor2D> GetSolvedOdomFactors();
+  void LoopCloseWithCSM();
  private:
+  vector<size_t> GetLoopClosurePoses();
   double translation_weight_;
   double rotation_weight_;
   double lc_translation_weight_;
