@@ -30,7 +30,7 @@ using slam_types::SLAMProblem2D;
 using slam_types::SLAMNode2D;
 using lidar_slam::HitlSlamInputMsgConstPtr;
 using lidar_slam::HitlSlamInputMsg;
-using lidar_slam::WriteMsgPtr;
+using lidar_slam::WriteMsgConstPtr;
 using Eigen::Affine2f;
 using Eigen::Vector3f;
 
@@ -431,7 +431,7 @@ class Solver {
                       double trans_weight,
                       double rot_weight);
   void HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr);
-  void WriteCallback(const WriteMsgPtr& msg);
+  void WriteCallback(const WriteMsgConstPtr& msg);
   vector<SLAMNodeSolution2D> GetSolution() {
     return solution_;
   }

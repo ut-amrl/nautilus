@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <thread>
 #include <vector>
-#include <ofstream>
 #include <fstream>
 
 #include <sensor_msgs/Image.h>
@@ -600,7 +599,7 @@ vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
   vector<OdometryFactor2D> factors;
   for (uint64_t index = 1; index < solution_.size(); index++) {
     // Get the change in translation.
-    Vector2f prev_loc(solution_[index - 1].posez[0],
+    Vector2f prev_loc(solution_[index - 1].pose[0],
                       solution_[index - 1].pose[1]);
     Vector2f loc(solution_[index].pose[0], solution_[index].pose[1]);
     double rot_change = solution_[index].pose[2] - solution_[index - 1].pose[2];
@@ -640,6 +639,7 @@ void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
     std::cout << "No output file specified, not writing!" << std::endl;
     return;
   }
+  std::cout << "Writing Poses" << std::endl;
   std::ofstream output_file;
   output_file.open(pose_output_file_);
   for (const SLAMNodeSolution2D& sol_node : solution_) {

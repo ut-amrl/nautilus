@@ -177,9 +177,9 @@ int main(int argc, char** argv) {
                                          10,
                                          &Solver::HitlCallback,
                                          &solver);
-  ros::Subscriber write_sub = n.subscribe("/write_poses",
+  ros::Subscriber write_sub = n.subscribe("/write_output",
                                           10,
-                                          &Solver::WriteCallback
+                                          &Solver::WriteCallback,
                                           &solver);
   ros::spin();
   return 0;
