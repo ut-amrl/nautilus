@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <thread>
 #include <vector>
+#include <ofstream>
+#include <fstream>
 
 #include <sensor_msgs/Image.h>
 #include <visualization_msgs/Marker.h>
@@ -17,6 +19,7 @@
 #include "lidar_slam/HitlSlamInputMsg.h"
 #include "CorrelativeScanMatcher.h"
 #include "./gui_helpers.h"
+#include "lidar_slam/WriteMsg.h"
 
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
@@ -35,6 +38,7 @@ using slam_types::SLAMProblem2D;
 using Eigen::Affine2f;
 using lidar_slam::HitlSlamInputMsgConstPtr;
 using lidar_slam::HitlSlamInputMsg;
+using lidar_slam::WriteMsgConstPtr;
 using slam_types::SLAMNode2D;
 using Eigen::Vector3f;
 using math_util::NormalsSimilar;
@@ -434,6 +438,7 @@ Solver::Solver(double translation_weight,
                double lc_translation_weight,
                double lc_rotation_weight,
                double stopping_accuracy,
+               std::string pose_output_file,
                SLAMProblem2D& problem,
                ros::NodeHandle& n) :
                translation_weight_(translation_weight),
@@ -441,6 +446,7 @@ Solver::Solver(double translation_weight,
                lc_translation_weight_(lc_translation_weight),
                lc_rotation_weight_(lc_rotation_weight),
                stopping_accuracy_(stopping_accuracy),
+               pose_output_file_(pose_output_file),
                problem_(problem),
                n_(n) {
   // Copy all the data to a list that we are going to modify as we optimize.
@@ -594,7 +600,7 @@ vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
   vector<OdometryFactor2D> factors;
   for (uint64_t index = 1; index < solution_.size(); index++) {
     // Get the change in translation.
-    Vector2f prev_loc(solution_[index - 1].pose[0],
+    Vector2f prev_loc(solution_[index - 1].posez[0],
                       solution_[index - 1].pose[1]);
     Vector2f loc(solution_[index].pose[0], solution_[index].pose[1]);
     double rot_change = solution_[index].pose[2] - solution_[index - 1].pose[2];
@@ -627,3 +633,18 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   SolveSLAM();
   std::cout << "Waiting for Loop Closure input." << std::endl;
 }
+
+
+void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
+  if (pose_output_file_.compare("") == 0) {
+    std::cout << "No output file specified, not writing!" << std::endl;
+    return;
+  }
+  std::ofstream output_file;
+  output_file.open(pose_output_file_);
+  for (const SLAMNodeSolution2D& sol_node : solution_) {
+    output_file << sol_node.pose[0] << " " << sol_node.pose[1] << " " << sol_node.pose[2] << std::endl;
+  }
+  output_file.close();
+}
+

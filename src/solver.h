@@ -20,6 +20,7 @@
 #include "lidar_slam/HitlSlamInputMsg.h"
 #include "./pointcloud_helpers.h"
 #include "./gui_helpers.h"
+#include "lidar_slam/WriteMsg.h"
 
 using std::vector;
 using Eigen::Vector2f;
@@ -29,6 +30,7 @@ using slam_types::SLAMProblem2D;
 using slam_types::SLAMNode2D;
 using lidar_slam::HitlSlamInputMsgConstPtr;
 using lidar_slam::HitlSlamInputMsg;
+using lidar_slam::WriteMsgPtr;
 using Eigen::Affine2f;
 using Eigen::Vector3f;
 
@@ -414,6 +416,7 @@ class Solver {
          double lc_translation_weight,
          double lc_rotation_weight,
          double stopping_accuracy,
+         std::string pose_output_file,
          SLAMProblem2D& problem,
          ros::NodeHandle& n);
   vector<SLAMNodeSolution2D> SolveSLAM();
@@ -428,6 +431,7 @@ class Solver {
                       double trans_weight,
                       double rot_weight);
   void HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr);
+  void WriteCallback(const WriteMsgPtr& msg);
   vector<SLAMNodeSolution2D> GetSolution() {
     return solution_;
   }
@@ -444,6 +448,7 @@ class Solver {
   double lc_translation_weight_;
   double lc_rotation_weight_;
   double stopping_accuracy_;
+  std::string pose_output_file_;
   SLAMProblem2D problem_;
   vector<SLAMNodeSolution2D> solution_;
   ros::NodeHandle n_;

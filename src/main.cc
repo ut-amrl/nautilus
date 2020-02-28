@@ -13,6 +13,7 @@
 #include "./slam_types.h"
 #include "./solver.h"
 #include "lidar_slam/CobotOdometryMsg.h"
+#include "lidar_slam/WriteMsg.h"
 
 using std::string;
 using std::vector;
@@ -21,6 +22,7 @@ using slam_types::SLAMProblem2D;
 using slam_types::SLAMNode2D;
 using lidar_slam::CobotOdometryMsg;
 using lidar_slam::HitlSlamInputMsg;
+using lidar_slam::WriteMsg;
 
 DEFINE_string(
   bag_path,
@@ -67,9 +69,14 @@ DEFINE_string(
   "/hitl_slam_input",
   "The topic which the HITL line messages are published over.");
 DEFINE_double(
-  max_lidar_range,
+   max_lidar_range,
   0,
   "The user specified range cutoff for lidar range data, if not used will be the sensor default specified in the bag (meters)");
+DEFINE_string(
+    pose_output_file,
+    "poses.txt",
+    "The file to output the finalized poses into");
+
 
 SLAMProblem2D ProcessBagFile(const char* bag_path,
                              const ros::NodeHandle& n) {
@@ -83,7 +90,7 @@ SLAMProblem2D ProcessBagFile(const char* bag_path,
   rosbag::Bag bag;
   try {
     bag.open(bag_path, rosbag::bagmode::Read);
-  } catch (rosbag::BagException& exception) {
+  } catch (rosbag::BagException &exception) {
     printf("Unable to read %s, reason: %s\n", bag_path, exception.what());
     return slam_types::SLAMProblem2D();
   }
@@ -161,6 +168,7 @@ int main(int argc, char** argv) {
                 FLAGS_lc_translation_weight,
                 FLAGS_lc_rotation_weight,
                 FLAGS_stopping_accuracy,
+                FLAGS_pose_output_file,
                 slam_problem,
                 n);
   solver.SolveSLAM();
@@ -169,6 +177,10 @@ int main(int argc, char** argv) {
                                          10,
                                          &Solver::HitlCallback,
                                          &solver);
+  ros::Subscriber write_sub = n.subscribe("/write_poses",
+                                          10,
+                                          &Solver::WriteCallback
+                                          &solver);
   ros::spin();
   return 0;
 }
