@@ -441,6 +441,14 @@ class Solver {
   void LoopCloseWithCSM();
  private:
   vector<size_t> GetLoopClosurePoses();
+  OdometryFactor2D GetTotalOdomChange(const uint64_t node_a,
+                                      const uint64_t node_b);
+  std::pair<Eigen::Vector3d, Eigen::Matrix3d>
+  GetResidualsFromSolving(const uint64_t node_a,
+                          const uint64_t node_b);
+  bool SimilarScans(const size_t node_a,
+                    const size_t node_b,
+                    const double certainty);
   double translation_weight_;
   double rotation_weight_;
   double lc_translation_weight_;

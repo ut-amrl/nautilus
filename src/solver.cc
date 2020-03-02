@@ -6,6 +6,7 @@
 #include <thread>
 #include <vector>
 
+#include <boost/math/distributions/chi_squared.hpp>
 #include <sensor_msgs/Image.h>
 #include <visualization_msgs/Marker.h>
 #include "ceres/ceres.h"
@@ -39,6 +40,9 @@ using lidar_slam::HitlSlamInputMsg;
 using slam_types::SLAMNode2D;
 using Eigen::Vector3f;
 using math_util::NormalsSimilar;
+using boost::math::chi_squared;
+using boost::math::complement;
+using boost::math::quantile;
 
 double DistBetween(double pose_a[3], double pose_b[3]) {
   Vector2f pose_a_pos(pose_a[0], pose_a[1]);
@@ -458,47 +462,6 @@ Solver::Solver(double translation_weight,
  * Methods relevant to HITL loop closure.
  */
 
-struct PointToLineResidual {
-    template <typename T>
-    bool operator() (const T* pose, const T* line_pose, T* residuals) const {
-      typedef Eigen::Matrix<T, 2, 1> Vector2T;
-      typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
-      const Affine2T pose_to_world =
-        PoseArrayToAffine(&pose[2], &pose[0]);
-      const Affine2T line_to_world =
-        PoseArrayToAffine(&line_pose[2], &line_pose[0]);
-      Vector2T line_start = line_to_world * line_segment_.start.cast<T>();
-      Vector2T line_end = line_to_world * line_segment_.end.cast<T>();
-      const LineSegment<T> TransformedLineSegment(line_start, line_end);
-      #pragma omp parallel for default(none) shared(residuals)
-      for (size_t index = 0; index < points_.size(); index++) {
-        Vector2T pointT = points_[index].cast<T>();
-        // Transform source_point into the frame of the line
-        pointT = pose_to_world * pointT;
-        T dist_along_normal =
-          DistanceToLineSegment(pointT, TransformedLineSegment);
-        residuals[index] = dist_along_normal;
-      }
-      return true;
-    }
-
-    PointToLineResidual(const LineSegment<float>& line_segment,
-                        const vector<Vector2f> points) :
-                        line_segment_(line_segment),
-                        points_(points) {}
-
-    static AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC, 3, 3>*
-    create(const LineSegment<float>& line_segment, const vector<Vector2f> points) {
-      PointToLineResidual* res = new PointToLineResidual(line_segment, points);
-      return new AutoDiffCostFunction<PointToLineResidual,
-                                      ceres::DYNAMIC,
-                                      3, 3>(res, points.size());
-    }
-
-    const LineSegment<float> line_segment_;
-    const vector<Vector2f> points_;
-};
-
 vector<LineSegment<float>>
 LineSegmentsFromHitlMsg(const HitlSlamInputMsg& msg) {
   Vector2f start_a(msg.line_a_start.x, msg.line_a_start.y);
@@ -645,25 +608,13 @@ vector<size_t> Solver::GetLoopClosurePoses() {
   // The first scan is automatically a loop closure pose.
   vector<size_t> loop_closure_pose_nums;
   loop_closure_pose_nums.push_back(problem_.nodes[0].node_idx);
-  // Loop over the rest of the pointclouds, if sufficiently different from all
+  // Loop over the rest of the nodes, if sufficiently different from all
   // other loop closure positions then save.
   for (const SLAMNode2D& node : problem_.nodes) {
     bool save_as_lc = true;
-    const vector<Vector2f>& pointcloud = node.lidar_factor.pointcloud;
     for (const size_t lc_pose_num : loop_closure_pose_nums) {
       CHECK_LT(lc_pose_num, problem_.nodes.size());
-      const SLAMNode2D& lc_node = problem_.nodes[lc_pose_num];
-      const vector<Vector2f> lc_pointcloud = lc_node.lidar_factor.pointcloud;
-      // Transform this pointcloud to the lc_pose;
-      auto transformation =
-        scan_matcher.GetTransformation(pointcloud,
-                                       lc_pointcloud,
-                                       solution_[node.node_idx].pose[2],
-                                       solution_[lc_node.node_idx].pose[2],
-                                       math_util::DegToRad(180));
-      const vector<Vector2f> transformed_pointcloud =
-        TransformPointcloud(pointcloud, transformation.second);
-      if (scan_matcher.SimilarScans(transformed_pointcloud, lc_pointcloud, 0.99)) {
+      if (SimilarScans(node.node_idx, lc_pose_num, 0.95)) {
         save_as_lc = false;
         break;
       }
@@ -673,6 +624,108 @@ vector<size_t> Solver::GetLoopClosurePoses() {
     }
   }
   return loop_closure_pose_nums;
+}
+
+OdometryFactor2D Solver::GetTotalOdomChange(const uint64_t node_a,
+                                            const uint64_t node_b) {
+  std::sort(problem_.odometry_factors.begin(),
+            problem_.odometry_factors.end(),
+            [](OdometryFactor2D& a, OdometryFactor2D& b) {
+    return a.pose_i < b.pose_i;
+  });
+  Vector2f init_trans(0, 0);
+  OdometryFactor2D factor(node_a, node_b, init_trans, 0);
+  std::cout << "From " << node_a << " to " << node_b << std::endl;
+  CHECK_EQ(problem_.odometry_factors[node_a].pose_i, node_a);
+  for (size_t odom_idx = node_a; odom_idx < node_b; odom_idx++) {
+    OdometryFactor2D curr_factor = problem_.odometry_factors[odom_idx];
+    factor.translation += curr_factor.translation;
+    factor.rotation += curr_factor.rotation;
+    factor.rotation = math_util::AngleMod(factor.rotation);
+  }
+  return factor;
+}
+
+std::pair<Eigen::Vector3d, Eigen::Matrix3d>
+Solver::GetResidualsFromSolving(const uint64_t node_a,
+                                const uint64_t node_b) {
+  CHECK_LT(node_a, solution_.size());
+  CHECK_LT(node_b, solution_.size());
+  OdometryFactor2D odom_factor = GetTotalOdomChange(node_a, node_b);
+  ceres::Solver::Options options;
+  ceres::Solver::Summary summary;
+  options.linear_solver_type = ceres::SPARSE_SCHUR;
+  options.minimizer_progress_to_stdout = false;
+  options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
+  ceres::Problem problem;
+  PointCorrespondences correspondence(solution_[node_a].pose,
+                                      solution_[node_b].pose,
+                                      node_a,
+                                      node_b);
+  GetPointCorrespondences(problem_, &solution_, &correspondence, node_b, node_a);
+  vector<ceres::ResidualBlockId> residual_ids;
+  problem.AddResidualBlock(LIDARPointBlobResidual::create(
+          correspondence.source_points,
+          correspondence.target_points,
+          correspondence.source_normals,
+          correspondence.target_normals),
+          nullptr,
+          solution_[node_a].pose,
+          solution_[node_b].pose);
+  ceres::ResidualBlockId odom_res_id =
+    problem.AddResidualBlock(OdometryResidual::create(odom_factor,
+                                                      translation_weight_,
+                                                      rotation_weight_),
+                             nullptr,
+                             solution_[node_a].pose,
+                             solution_[node_b].pose);
+  residual_ids.push_back(odom_res_id);
+  ceres::Solve(options, &problem, &summary);
+  ceres::Problem::EvaluateOptions eval_options;
+  eval_options.residual_blocks = residual_ids;
+  vector<double> residuals;
+  problem.Evaluate(eval_options, nullptr, &residuals, nullptr, nullptr);
+  ceres::Covariance::Options cov_options;
+  cov_options.algorithm_type = ceres::DENSE_SVD;
+  cov_options.null_space_rank = -1;
+  ceres::Covariance covariance(cov_options);
+  vector<pair<const double *, const double *>> cov_blocks;
+  cov_blocks.push_back(std::make_pair(solution_[node_a].pose,
+                                      solution_[node_b].pose));
+  CHECK(covariance.Compute(cov_blocks, &problem));
+  double covariance_ab[3 * 3];
+  covariance.GetCovarianceBlock(solution_[node_a].pose,
+                                solution_[node_b].pose,
+                                covariance_ab);
+  Eigen::Matrix3d cov(covariance_ab);
+  Eigen::Vector3d res(residuals.data());
+  pair<Eigen::Vector3d, Eigen::Matrix3d> res_and_cov =
+    std::make_pair(res, cov);
+  return res_and_cov;
+}
+
+bool Solver::SimilarScans(const uint64_t node_a,
+                          const uint64_t node_b,
+                          const double certainty) {
+  if (node_a == node_b) {
+    return false;
+  }
+  CHECK_LE(certainty, 1.0);
+  CHECK_GE(certainty, 0.0);
+  double uncertainty = 1 - certainty;
+  pair<Eigen::Vector3d, Eigen::Matrix3d> res_and_cov =
+    GetResidualsFromSolving(std::min(node_a, node_b), std::max(node_a, node_b));
+  Eigen::Vector3d residuals = res_and_cov.first;
+  Eigen::Matrix3d covariance = res_and_cov.second;
+  double chi_num = residuals.transpose() * covariance * residuals;
+  std::cout << "Chi Number: " << chi_num << std::endl;
+  chi_squared dist(2);
+  if (chi_num <= quantile(dist, uncertainty)) {
+    std::cout << "Adding!" << std::endl;
+    return true;
+  }
+  std::cout << "Not Adding!" << std::endl;
+  return false;
 }
 
 void Solver::LoopCloseWithCSM() {
