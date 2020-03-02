@@ -23,7 +23,8 @@
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
-#define HITL_POSE_POINT_THRESHOLD 3
+#define HITL_POSE_POINT_THRESHOLD 10
+#define DEBUG false
 
 using std::vector;
 using slam_types::OdometryFactor2D;
@@ -556,9 +557,14 @@ void Solver::AddCollinearConstraints(const LCConstraint& constraint) {
     return;
   }
   CorrelativeScanMatcher scan_matcher(4, 0.3, 0.03);
+  
   // Find the closest pose to each pose on a on the b line.
-  for (const LCPose& pose_a : constraint.line_a_poses) {
+  #pragma omp parallel for
+  for (unsigned int i = 0; i < constraint.line_a_poses.size(); i++) {
+    const LCPose& pose_a = constraint.line_a_poses[i];
+    #if DEBUG
     std::cout << "Applying for one pose" << std::endl;
+    #endif
     auto pose_a_sol_pose = solution_[pose_a.node_idx].pose;
     size_t closest_pose = constraint.line_b_poses[0].node_idx;
     double closest_dist = DistBetween(pose_a_sol_pose,
@@ -573,7 +579,9 @@ void Solver::AddCollinearConstraints(const LCConstraint& constraint) {
     // Apply the transformations to the pose of a.
     CHECK_LT(closest_pose, problem_.nodes.size());
     CHECK_LT(pose_a.node_idx, problem_.nodes.size());
+    #if DEBUG
     std::cout << "Finding trans" << std::endl;
+    #endif
     std::pair<double, std::pair<Vector2f, float>> trans_prob_pair =
       scan_matcher.GetTransformation(
         problem_.nodes[pose_a.node_idx].lidar_factor.pointcloud,
@@ -582,8 +590,10 @@ void Solver::AddCollinearConstraints(const LCConstraint& constraint) {
         solution_[closest_pose].pose[2],
         math_util::DegToRad(180));
     auto trans = trans_prob_pair.second;
+    #if DEBUG
     std::cout << "Found trans with prob: " << trans_prob_pair.first << std::endl;
     std::cout << "Transformation: " << std::endl << trans.first << std::endl << trans.second << std::endl;
+    #endif
     auto closest_pose_arr = solution_[closest_pose].pose;
     solution_[pose_a.node_idx].pose[0] +=
       (closest_pose_arr[0] - pose_a_sol_pose[0]) + trans.first.x();
@@ -643,7 +653,7 @@ void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
   std::ofstream output_file;
   output_file.open(pose_output_file_);
   for (const SLAMNodeSolution2D& sol_node : solution_) {
-    output_file << sol_node.pose[0] << " " << sol_node.pose[1] << " " << sol_node.pose[2] << std::endl;
+    output_file << std::fixed << sol_node.timestamp << " " << sol_node.pose[0] << " " << sol_node.pose[1] << " " << sol_node.pose[2] << std::endl;
   }
   output_file.close();
 }
