@@ -593,10 +593,9 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
 }
 
 vector<Vector2f> TransformPointcloud(const vector<Vector2f>& pointcloud,
-                                     const pair<Vector2f, float>& trans) {
+                                     const double * pose) {
   vector<Vector2f> new_pointcloud;
-  Eigen::Affine2f transformation =
-    Eigen::Translation2f(trans.first) * Eigen::Rotation2Df(trans.second);
+  Eigen::Affine2f transformation = PoseArrayToAffine(&pose[2], &pose[0]).cast<float>();
   for (const Vector2f& point : pointcloud) {
     new_pointcloud.push_back(transformation * point);
   }
@@ -604,8 +603,6 @@ vector<Vector2f> TransformPointcloud(const vector<Vector2f>& pointcloud,
 }
 
 vector<size_t> Solver::GetLoopClosurePoses() {
-  CorrelativeScanMatcher scan_matcher(4, 0.3, 0.03);
-  // The first scan is automatically a loop closure pose.
   vector<size_t> loop_closure_pose_nums;
   loop_closure_pose_nums.push_back(problem_.nodes[0].node_idx);
   // Loop over the rest of the nodes, if sufficiently different from all
@@ -614,7 +611,7 @@ vector<size_t> Solver::GetLoopClosurePoses() {
     bool save_as_lc = true;
     for (const size_t lc_pose_num : loop_closure_pose_nums) {
       CHECK_LT(lc_pose_num, problem_.nodes.size());
-      if (SimilarScans(node.node_idx, lc_pose_num, 0.95)) {
+      if (SimilarScans(node.node_idx, lc_pose_num, 0.80)) {
         save_as_lc = false;
         break;
       }
@@ -628,16 +625,10 @@ vector<size_t> Solver::GetLoopClosurePoses() {
 
 OdometryFactor2D Solver::GetTotalOdomChange(const uint64_t node_a,
                                             const uint64_t node_b) {
-  std::sort(problem_.odometry_factors.begin(),
-            problem_.odometry_factors.end(),
-            [](OdometryFactor2D& a, OdometryFactor2D& b) {
-    return a.pose_i < b.pose_i;
-  });
   Vector2f init_trans(0, 0);
   OdometryFactor2D factor(node_a, node_b, init_trans, 0);
-  std::cout << "From " << node_a << " to " << node_b << std::endl;
   CHECK_EQ(problem_.odometry_factors[node_a].pose_i, node_a);
-  for (size_t odom_idx = node_a; odom_idx < node_b; odom_idx++) {
+  for (size_t odom_idx = node_a; odom_idx < node_b && odom_idx < problem_.odometry_factors.size(); odom_idx++) {
     OdometryFactor2D curr_factor = problem_.odometry_factors[odom_idx];
     factor.translation += curr_factor.translation;
     factor.rotation += curr_factor.rotation;
@@ -651,6 +642,11 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
                                 const uint64_t node_b) {
   CHECK_LT(node_a, solution_.size());
   CHECK_LT(node_b, solution_.size());
+  double * pose_a = solution_[node_a].pose;
+  // We don't want these to effect the original pose.
+  double local_pose_a[] = {pose_a[0], pose_a[1], pose_a[2]};
+  double * pose_b = solution_[node_b].pose;
+  double local_pose_b[] = {pose_b[0], pose_b[1], pose_b[2]};
   OdometryFactor2D odom_factor = GetTotalOdomChange(node_a, node_b);
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
@@ -658,8 +654,8 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
   options.minimizer_progress_to_stdout = false;
   options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
   ceres::Problem problem;
-  PointCorrespondences correspondence(solution_[node_a].pose,
-                                      solution_[node_b].pose,
+  PointCorrespondences correspondence(local_pose_a,
+                                      local_pose_b,
                                       node_a,
                                       node_b);
   GetPointCorrespondences(problem_, &solution_, &correspondence, node_b, node_a);
@@ -670,15 +666,15 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
           correspondence.source_normals,
           correspondence.target_normals),
           nullptr,
-          solution_[node_a].pose,
-          solution_[node_b].pose);
+          local_pose_a,
+          local_pose_b);
   ceres::ResidualBlockId odom_res_id =
     problem.AddResidualBlock(OdometryResidual::create(odom_factor,
                                                       translation_weight_,
                                                       rotation_weight_),
                              nullptr,
-                             solution_[node_a].pose,
-                             solution_[node_b].pose);
+                             local_pose_a,
+                             local_pose_b);
   residual_ids.push_back(odom_res_id);
   ceres::Solve(options, &problem, &summary);
   ceres::Problem::EvaluateOptions eval_options;
@@ -690,12 +686,12 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
   cov_options.null_space_rank = -1;
   ceres::Covariance covariance(cov_options);
   vector<pair<const double *, const double *>> cov_blocks;
-  cov_blocks.push_back(std::make_pair(solution_[node_a].pose,
-                                      solution_[node_b].pose));
+  cov_blocks.push_back(std::make_pair(local_pose_a,
+                                      local_pose_b));
   CHECK(covariance.Compute(cov_blocks, &problem));
   double covariance_ab[3 * 3];
-  covariance.GetCovarianceBlock(solution_[node_a].pose,
-                                solution_[node_b].pose,
+  covariance.GetCovarianceBlock(local_pose_a,
+                                local_pose_b,
                                 covariance_ab);
   Eigen::Matrix3d cov(covariance_ab);
   Eigen::Vector3d res(residuals.data());
@@ -712,20 +708,16 @@ bool Solver::SimilarScans(const uint64_t node_a,
   }
   CHECK_LE(certainty, 1.0);
   CHECK_GE(certainty, 0.0);
-  double uncertainty = 1 - certainty;
   pair<Eigen::Vector3d, Eigen::Matrix3d> res_and_cov =
     GetResidualsFromSolving(std::min(node_a, node_b), std::max(node_a, node_b));
   Eigen::Vector3d residuals = res_and_cov.first;
   Eigen::Matrix3d covariance = res_and_cov.second;
   double chi_num = residuals.transpose() * covariance * residuals;
-  std::cout << "Chi Number: " << chi_num << std::endl;
   chi_squared dist(2);
-  if (chi_num <= quantile(dist, uncertainty)) {
-    std::cout << "Adding!" << std::endl;
-    return true;
+  if (chi_num > quantile(dist, certainty)) {
+    return false;
   }
-  std::cout << "Not Adding!" << std::endl;
-  return false;
+  return true;
 }
 
 void Solver::LoopCloseWithCSM() {
@@ -734,14 +726,17 @@ void Solver::LoopCloseWithCSM() {
 
   // Get the poses that all other scans will be
   // compared against for loop closure.
+  std::cout << "Looking for Loop Closure Positions" << std::endl;
   vector<size_t> loop_closure_pose_nums = GetLoopClosurePoses();
+  std::cout << "Found " << loop_closure_pose_nums.size() << " poses for LC" << std::endl;
   ros::Publisher lc_points_pub = n_.advertise<PointCloud2>("/lc_points", 10);
   PointCloud2 lc_points_marker;
   pointcloud_helpers::InitPointcloud(&lc_points_marker);
   vector<Vector2f> lc_points;
-  for (const SLAMNode2D& node : problem_.nodes) {
-    const vector<Vector2f> pointcloud = node.lidar_factor.pointcloud;
-    lc_points.insert(lc_points.end(), pointcloud.begin(), pointcloud.end());
+  for (const size_t lc_idx : loop_closure_pose_nums) {
+    const vector<Vector2f> pointcloud = problem_.nodes[lc_idx].lidar_factor.pointcloud;
+    const vector<Vector2f> trans_points = TransformPointcloud(pointcloud, solution_[lc_idx].pose);
+    lc_points.insert(lc_points.end(), trans_points.begin(), trans_points.end());
   }
   for (int i = 0; i < 5; i++) {
     pointcloud_helpers::PublishPointcloud(lc_points,
