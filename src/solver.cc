@@ -683,7 +683,7 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
   problem.Evaluate(eval_options, nullptr, &residuals, nullptr, nullptr);
   ceres::Covariance::Options cov_options;
   cov_options.algorithm_type = ceres::DENSE_SVD;
-  cov_options.null_space_rank = -1;
+  cov_options.null_space_rank = 2;
   ceres::Covariance covariance(cov_options);
   vector<pair<const double *, const double *>> cov_blocks;
   cov_blocks.push_back(std::make_pair(local_pose_a,
@@ -713,11 +713,14 @@ bool Solver::SimilarScans(const uint64_t node_a,
   Eigen::Vector3d residuals = res_and_cov.first;
   Eigen::Matrix3d covariance = res_and_cov.second;
   double chi_num = residuals.transpose() * covariance * residuals;
-  chi_squared dist(2);
-  if (chi_num > quantile(dist, certainty)) {
+  if (chi_num < 0) {
     return false;
   }
-  return true;
+  chi_squared dist(2);
+  if (boost::math::cdf(dist, chi_num) <= certainty) {
+    return true;
+  }
+  return false;
 }
 
 void Solver::LoopCloseWithCSM() {
