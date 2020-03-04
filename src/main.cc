@@ -181,6 +181,11 @@ int main(int argc, char** argv) {
                                           10,
                                           &Solver::WriteCallback,
                                           &solver);
+  ros::Subscriber vector_sub = n.subscribe("/vectorize_output",
+                                           10,
+                                           &Solver::Vectorize,
+                                           &solver);
+  solver.Vectorize(nullptr);
   ros::spin();
   return 0;
 }

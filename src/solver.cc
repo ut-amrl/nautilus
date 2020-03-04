@@ -19,6 +19,8 @@
 #include "CorrelativeScanMatcher.h"
 #include "./gui_helpers.h"
 #include "lidar_slam/WriteMsg.h"
+#include "./line_extraction.h"
+#include "CImg.h"
 
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
@@ -646,5 +648,63 @@ void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
     output_file << sol_node.pose[0] << " " << sol_node.pose[1] << " " << sol_node.pose[2] << std::endl;
   }
   output_file.close();
+}
+
+vector<Vector2f> TransformPointcloud(double * pose, const vector<Vector2f> pointcloud) {
+  vector<Vector2f> pcloud;
+  Eigen::Affine2f trans = PoseArrayToAffine(&pose[2], &pose[0]).cast<float>();
+  for (const Vector2f& p : pointcloud) {
+    pcloud.push_back(trans * p);
+  }
+  return pcloud;
+}
+
+void Solver::Vectorize(const WriteMsgConstPtr& msg) {
+  std::cout << "Vectorizing" << std::endl;
+  using VectorMaps::LineSegment;
+  vector<Vector2f> whole_pointcloud;
+  for (const SLAMNode2D& n : problem_.nodes) {
+    vector<Vector2f> pc = n.lidar_factor.pointcloud;
+    pc = TransformPointcloud(solution_[n.node_idx].pose, pc);
+    whole_pointcloud.insert(whole_pointcloud.begin(), pc.begin(), pc.end());
+  }
+  std::cout << "List Compiled" << std::endl;
+  vector<LineSegment> lines = VectorMaps::ExtractLines(whole_pointcloud);
+  // --- Visualize ---
+  double min_x = INFINITY;
+  double max_x = -INFINITY;
+  double min_y = INFINITY;
+  double max_y = -INFINITY;
+  for (const Vector2f& point : whole_pointcloud) {
+    min_x = std::min(min_x, static_cast<double>(point.x()));
+    max_x = std::max(max_x, static_cast<double>(point.x()));
+    min_y = std::min(min_y, static_cast<double>(point.y()));
+    max_y = std::max(max_y, static_cast<double>(point.y()));
+  }
+  cimg_library::CImgDisplay display_1;
+  double line_color[] = {1.0};
+  Vector2f shift(0, 0);
+  if (min_x < 0) {
+    shift.x() = abs(min_x);
+  }
+  if (min_y < 0) {
+    shift.y() = abs(min_y);
+  }
+  double points_width = max_x - min_x;
+  double points_height = max_y - min_y;
+  std::cout << "points_width: " << points_width << std::endl;
+  cimg_library::CImg<double> lines_image(std::ceil(points_width) * 10, std::ceil(points_height) * 10, 1, 1, 0);
+  for (const LineSegment& line : lines) {
+    Vector2f line_start = (shift + line.start_point);
+    Vector2f line_end = (shift + line.end_point);
+    lines_image.draw_line(line_start.x() * 10, line_start.y() * 10,
+                          line_end.x() * 10, line_end.y() * 10, line_color);
+  }
+  display_1.display(lines_image.resize_doubleXY().resize_doubleXY());
+  std::cout << "Pointcloud size: " << whole_pointcloud.size() << std::endl;
+  std::cout << "Lines size: " << lines.size() << std::endl;
+  while(!display_1.is_closed()) {
+    display_1.wait();
+  }
 }
 
