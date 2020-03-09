@@ -1,5 +1,6 @@
 /*
- * Work Based on "Curating Long-Term Vector Maps" by Samer Nashed and Joydeep Biswas.
+ * Work Based on "Curating Long-Term Vector Maps"
+ * by Samer Nashed and Joydeep Biswas.
  */
 
 #include <time.h>
@@ -10,6 +11,7 @@
 #include "ceres/ceres.h"
 
 #include "line_extraction.h"
+
 #include <DEBUG.h>
 
 using std::vector;
@@ -22,8 +24,14 @@ using ceres::AutoDiffCostFunction;
 #define INLIER_THRESHOLD 0.05
 #define CONVERGANCE_THRESHOLD 0.01
 #define NEIGHBORHOOD_SIZE 0.25
-#define NEIGHBORHOOD_GROWTH_SIZE 0.10
+#define NEIGHBORHOOD_GROWTH_SIZE 0.15
 #define UNCERTAINTY_SAMPLE_NUM 1000
+#define RESIDUAL_CLOSE_POINTS_EPSILON 0.00001
+#define POINT_NUM_ACCEPTANCE_THRESHOLD 50
+
+//TODO : Implement square root fix. If two points are sufficiently close, then always use endpoint distance.
+//TODO : Expose both components of vector to the solver.
+//TODO : Penalize the line length exponentially when more than the longest distance along the line.
 
 namespace VectorMaps {
 
@@ -71,7 +79,7 @@ namespace VectorMaps {
       return best_segment;
     }
 
-    vector<Vector2f> GetNeighborhood(const vector<Vector2f> points) {
+    vector<Vector2f> GetNeighborhood(vector<Vector2f>& points) {
       // Pick a random point to center this around.
       vector<Vector2f> remaining_points = points;
       srand(time(NULL));
@@ -90,7 +98,18 @@ namespace VectorMaps {
           }
         }
         if (neighborhood.size() <= 1) {
-          remaining_points.erase(remaining_points.begin() + rand_idx);
+          // Remove the point both from the points we are searching in, and from the
+          // original list, as its an outlier.
+          bool found = false;
+          for (size_t p_index = 0; p_index < points.size(); p_index++) {
+            if (points[p_index].x() == center_point.x() && points[p_index].y() == center_point.y()) {
+              points.erase(points.begin() + p_index);
+              remaining_points.erase(remaining_points.begin() + rand_idx);
+              found = true;
+              break;
+            }
+          }
+          CHECK(found) << "Didn't find point in overall list of points.";
         }
       } while(neighborhood.size() <= 1);
       CHECK_GT(neighborhood.size(), 1);
@@ -100,7 +119,8 @@ namespace VectorMaps {
     vector<Vector2f> GetNeighborhoodAroundLine(const LineSegment& line, const vector<Vector2f> points) {
       vector<Vector2f> neighborhood;
       for (const Vector2f& p : points) {
-        if (line.DistanceToLineSegment(p) <= NEIGHBORHOOD_GROWTH_SIZE) {
+        double dist = line.DistanceToLineSegment(p);
+        if (dist <= NEIGHBORHOOD_GROWTH_SIZE) {
           neighborhood.push_back(p);
         }
       }
@@ -125,24 +145,21 @@ namespace VectorMaps {
           const Vector2T first_pointT(first_point[0], first_point[1]);
           const Vector2T second_pointT(second_point[0], second_point[1]);
           const Vector2T pointT = point.cast<T>();
-          //Vector2T center = center_of_mass.cast<T>();
-          // Find the centroid (missing denominator which is used later).
-//      T r = T((center_of_mass - first_pointT).norm() +
-//            (center_of_mass - second_pointT).norm());
           Vector2T diff_vec = second_pointT - first_pointT;
           T t = (pointT - first_pointT).dot(diff_vec) /
                 (diff_vec.dot(diff_vec));
-          T dist;
+          Vector2T dist_vec;
+          // If points are sufficiently close then its the same as being closer to the start_point of the line.
           if (t < T(0)) {
-            dist = (pointT - first_pointT).dot(pointT - first_pointT);
+            dist_vec = pointT - first_pointT;
           } else if (t > T(1)) {
-            dist = (pointT - second_pointT).dot(pointT - second_pointT);
+            dist_vec = second_pointT - pointT;
           } else {
-            //dist = (pointT - first_pointT + t * (second_pointT - first_pointT)).norm();
             Vector2T proj = first_pointT + t * (diff_vec);
-            dist = (pointT - proj).dot(pointT - proj);
+            dist_vec = (pointT - proj);
           }
-          residuals[0] = /*(r / T(point_num)) +*/ dist;
+          residuals[0] = dist_vec.x();
+          residuals[1] = dist_vec.y();
           return true;
         }
 
@@ -155,13 +172,13 @@ namespace VectorMaps {
                 center_of_mass(center_of_mass),
                 point_num(point_num) {}
 
-        static AutoDiffCostFunction<FitLineResidual, 1, 2, 2>*
+        static AutoDiffCostFunction<FitLineResidual, 2, 2, 2>*
         create(const LineSegment& line_seg,
                const Vector2f point,
                const Vector2f center_of_mass,
                const size_t point_num) {
           FitLineResidual *line_res = new FitLineResidual(line_seg, point, center_of_mass, point_num);
-          return new AutoDiffCostFunction<FitLineResidual, 1, 2, 2>(line_res);
+          return new AutoDiffCostFunction<FitLineResidual, 2, 2, 2>(line_res);
         }
 
         const LineSegment line_seg;
@@ -169,6 +186,18 @@ namespace VectorMaps {
         const Vector2f center_of_mass;
         const size_t point_num;
     };
+
+    double FindMaxDistance(const vector<Vector2f>& points) {
+      double max_dist = 0.0;
+      for (const Vector2f& p1 : points) {
+        for (const Vector2f& p2 : points) {
+          if ((p1 - p2).norm() > max_dist) {
+            max_dist = (p1 - p2).norm();
+          }
+        }
+      }
+      return max_dist;
+    }
 
     LineSegment FitLine(LineSegment line, const vector<Vector2f> pointcloud) {
       ceres::Solver::Options options;
@@ -204,41 +233,76 @@ namespace VectorMaps {
       return points;
     }
 
+    vector<Vector2f> GetPointsOnLine(const LineSegment& line, const vector<Vector2f>& points) {
+      vector<Vector2f> points_on_line;
+      for (const Vector2f& p : points) {
+        if (line.PointOnLine(p, INLIER_THRESHOLD)) {
+          points_on_line.push_back(p);
+        }
+      }
+      return points_on_line;
+    }
+
+    Vector2f GetClosestPoint(const Vector2f vec, const vector<Vector2f>& points) {
+      CHECK_GT(points.size(), 0);
+      Vector2f closest = points[0];
+      for (const Vector2f& p : points) {
+        if ((vec - p).norm() > (vec - closest).norm()) {
+          closest = p;
+        }
+      }
+      return closest;
+    }
+
+    LineSegment ClipLineToPoints(const LineSegment& line, const vector<Vector2f>& points) {
+      const vector<Vector2f> points_on_line = GetPointsOnLine(line, points);
+      if (points_on_line.size() == 0) {
+        return line;
+      }
+      const Vector2f& closest_to_start = GetClosestPoint(line.start_point, points_on_line);
+      const Vector2f& closest_to_end = GetClosestPoint(line.end_point, points_on_line);
+      // Project onto the line.
+      Eigen::Hyperplane<float, 2> infinite_line = Eigen::Hyperplane<float, 2>::Through(line.start_point, line.end_point);
+      const Vector2f start_proj = infinite_line.projection(closest_to_start);
+      const Vector2f end_proj = infinite_line.projection(closest_to_end);
+      return LineSegment(start_proj, end_proj);
+    }
+
     vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
       if (pointcloud.size() <= 1) {
         return vector<LineSegment>();
       }
       vector<Vector2f> remaining_points = pointcloud;
       vector<LineSegment> lines;
-      while (remaining_points.size() > 100) {
-        std::cout << remaining_points.size() << "/" << pointcloud.size() << std::endl;
+      while (remaining_points.size() > POINT_NUM_ACCEPTANCE_THRESHOLD) {
+        std::cout << "Remaining Points : " << remaining_points.size() << std::endl;
         // Restrict the RANSAC implementation to using a small subset of the points.
         // This will speed it up.
         vector<Vector2f> neighborhood = GetNeighborhood(remaining_points);
-        if (neighborhood.size() <= 1) {
+        if (neighborhood.size() <= 0) {
           break;
         }
         LineSegment line = RANSACLineSegment(neighborhood);
         LineSegment new_line = FitLine(line, neighborhood);
-        vector<pair<int, Vector2f>> inliers = GetInliers(new_line, remaining_points);
-        if (inliers.size() < 2) {
-          continue;
-        }
+        vector<pair<int, Vector2f>> inliers;
+        // Continually grow the line until it no longer gains more inliers.
         do {
-          //inliers = GetInliers(new_line, remaining_points);
           line = new_line;
-          //new_line = FitLine(line, GetPointsFromInliers(inliers));
-          // Test if we get more inliers from increasing neighborhood
-          LineSegment test_line = FitLine(new_line, GetNeighborhoodAroundLine(new_line, remaining_points));
-          std::cout << "Increase from " << GetInliers(new_line, remaining_points).size() << " to " << GetNeighborhoodAroundLine(new_line, remaining_points).size() << std::endl;
-          std::cout << GetInliers(test_line, remaining_points).size() << " vs " << GetInliers(new_line, remaining_points).size() << std::endl;
+          std::vector<Vector2f> neighborhood_to_consider = GetNeighborhoodAroundLine(new_line, remaining_points);
+          LineSegment test_line = FitLine(new_line, neighborhood_to_consider);
+          // Make sure the line doesn't extend past the points it is fit too.
+          test_line = ClipLineToPoints(test_line, neighborhood_to_consider);
+          // Only grow if we gain points on the line.
           if (GetInliers(test_line, remaining_points).size() > GetInliers(new_line, remaining_points).size()) {
-            std::cout << "Growing" << std::endl;
             new_line = test_line;
           }
+          // Converge once the line doesn't move a lot.
         } while ((new_line.start_point - line.start_point).norm() +
                  (new_line.end_point - line.end_point).norm() > CONVERGANCE_THRESHOLD);
-        lines.push_back(new_line);
+        inliers = GetInliers(new_line, remaining_points);
+        if (inliers.size() >= POINT_NUM_ACCEPTANCE_THRESHOLD) {
+          lines.push_back(new_line);
+        }
         // We have to remove the points that were assigned to this line.
         // Sort the inliers by their index so we don't get weird index problems.
         inliers = GetInliers(new_line, remaining_points);
@@ -257,5 +321,4 @@ namespace VectorMaps {
       std::cout << "Lines size: " << lines.size() << std::endl;
       return lines;
     }
-
 }
