@@ -695,7 +695,7 @@ void Solver::Vectorize(const WriteMsgConstPtr& msg) {
   //std::cout << "points_width: " << points_width << std::endl;
   //cimg_library::CImg<double> lines_image(std::ceil(points_width * 10), std::ceil(points_height * 10), 1, 1, 0);
   visualization_msgs::Marker line_mark;
-  gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST, gui_helpers::Color4f::kWhite, 0.00, 0.00, 0.05, &line_mark);
+  gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST, gui_helpers::Color4f::kWhite, 0.05, 0.00, 0.00, &line_mark);
   ros::Publisher lines_pub = n_.advertise<visualization_msgs::Marker>("/debug_lines", 10);
   for (const LineSegment& line : lines) {
     Vector3f line_start(line.start_point.x(), line.start_point.y(), 0.0);

@@ -10,6 +10,8 @@
 #include "glog/logging.h"
 #include "Eigen/Dense"
 
+#define SAME_POINT_EPSILON 0.000001
+
 using std::vector;
 using Eigen::Vector2f;
 
@@ -25,17 +27,28 @@ namespace VectorMaps {
 
         LineSegment() {}
 
+        double Paramterize(Vector2f point) const {
+          typedef Eigen::Hyperplane<float, 2> Line2D;
+          const Line2D infinite_line = Line2D::Through(start_point, end_point);
+          Vector2f point_projection = infinite_line.projection(point);
+          Vector2f diff_vec = end_point - start_point;
+          if (abs(diff_vec.x()) > SAME_POINT_EPSILON) {
+            return (point_projection.x() - start_point.x()) / diff_vec.x();
+          } else if (abs(diff_vec.y()) > SAME_POINT_EPSILON) {
+            return (point_projection.y() - start_point.y()) / diff_vec.y();
+          } else {
+            // The start and endpoints are so close that we should treat them as one point.
+            // Return -1 so that the distance calculation will just return the distance
+            // to one of the endpoints, either one, doesn't matter.
+            return -1;
+          }
+        }
+
         double DistanceToLineSegment(Vector2f point) const {
           // Project the point onto the line.
           typedef Eigen::Hyperplane<float, 2> Line2D;
-          const Line2D infinite_line = Line2D::Through(start_point, end_point);
-          const Vector2f point_projection = infinite_line.projection(point);
           // Parameterize according to the projection.
-          Vector2f diff_vec = end_point - start_point;
-          // TODO: Make sure x diff isn't zero.
-          double t =
-                  (point_projection.x() - start_point.x()) / diff_vec.x();
-          //CHECK_DOUBLE_EQ((point_projection.y() - start_point.y()) / diff_vec.y(), t);
+          double t = Paramterize(point);
           if (t < 0) {
             // This point is closest to the start point.
             return (start_point - point).norm();
@@ -45,6 +58,8 @@ namespace VectorMaps {
           } else {
             // Otherwise, the point is closest to the line.
             // This is equivalent to the orthogonal projection.
+            const Line2D infinite_line = Line2D::Through(start_point, end_point);
+            const Vector2f point_projection = infinite_line.projection(point);
             return (point - point_projection).norm();
           }
         }
