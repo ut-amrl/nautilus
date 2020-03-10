@@ -27,7 +27,7 @@ namespace VectorMaps {
 
         LineSegment() {}
 
-        double Paramterize(Vector2f point) const {
+        double Parameterize(const Vector2f& point) const {
           typedef Eigen::Hyperplane<float, 2> Line2D;
           const Line2D infinite_line = Line2D::Through(start_point, end_point);
           Vector2f point_projection = infinite_line.projection(point);
@@ -44,11 +44,11 @@ namespace VectorMaps {
           }
         }
 
-        double DistanceToLineSegment(Vector2f point) const {
+        double DistanceToLineSegment(const Vector2f& point) const {
           // Project the point onto the line.
           typedef Eigen::Hyperplane<float, 2> Line2D;
           // Parameterize according to the projection.
-          double t = Paramterize(point);
+          double t = Parameterize(point);
           if (t < 0) {
             // This point is closest to the start point.
             return (start_point - point).norm();
@@ -64,25 +64,16 @@ namespace VectorMaps {
           }
         }
 
-        bool PointOnLine(Vector2f point, double threshold) const {
-          // Project the point onto the line.
-          typedef Eigen::Hyperplane<float, 2> Line2D;
-          const Line2D infinite_line = Line2D::Through(start_point, end_point);
-          const Vector2f point_projection = infinite_line.projection(point);
-          // Parameterize according to the projection.
-          double t =
-                  (point_projection - start_point).norm() /
-                  (end_point - start_point).norm();
+        bool PointOnLine(const Vector2f& point, double threshold) const {
+          // Parameterize the point.
+          double t = Parameterize(point);
           if (t < 0 || t > 1) {
             // This point is closest to the start point.
             // Or to the end point
             return false;
           }
           double dist_to_line = DistanceToLineSegment(point);
-          if (dist_to_line > threshold) {
-            return false;
-          }
-          return true;
+          return dist_to_line < threshold;
         }
     };
 

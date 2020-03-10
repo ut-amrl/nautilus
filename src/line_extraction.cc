@@ -22,11 +22,11 @@ using std::sort;
 using Eigen::Vector2f;
 using ceres::AutoDiffCostFunction;
 
-#define INLIER_THRESHOLD 0.025
+#define INLIER_THRESHOLD 0.05
 #define CONVERGANCE_THRESHOLD 0.01
 #define NEIGHBORHOOD_SIZE 0.25
 #define NEIGHBORHOOD_GROWTH_SIZE 0.15
-#define POINT_NUM_ACCEPTANCE_THRESHOLD 50
+#define POINT_NUM_ACCEPTANCE_THRESHOLD 150
 
 namespace VectorMaps {
 
@@ -36,7 +36,7 @@ vector<pair<int, Vector2f>> GetInliers(const LineSegment line,
                                        const vector<Vector2f> pointcloud) {
   vector<pair<int, Vector2f>> inliers;
   for (size_t i = 0; i < pointcloud.size(); i++) {
-    if (line.DistanceToLineSegment(pointcloud[i]) < INLIER_THRESHOLD) {
+    if (line.DistanceToLineSegment(pointcloud[i]) <= INLIER_THRESHOLD) {
       inliers.push_back(make_pair(i, pointcloud[i]));
     }
   }
@@ -151,7 +151,7 @@ struct FitLineResidual {
       if (abs(diff_vec.x()) > T(SAME_POINT_EPSILON)) {
         t = (point_projection.x() - first_pointT.x()) / diff_vec.x();
       } else if (abs(diff_vec.y()) > T(SAME_POINT_EPSILON)) {
-        t = (point_projection.y() - second_pointT.y()) / diff_vec.y();
+        t = (point_projection.y() - first_pointT.y()) / diff_vec.y();
       } else {
         // The start and endpoints are so close that we should treat them as one point.
         // Return -1 so that the distance calculation will just return the distance
@@ -269,7 +269,7 @@ Vector2f GetClosestPoint(const Vector2f vec, const vector<Vector2f>& points) {
   CHECK_GT(points.size(), 0);
   Vector2f closest = points[0];
   for (const Vector2f& p : points) {
-    if ((vec - p).norm() > (vec - closest).norm()) {
+    if ((vec - p).norm() < (vec - closest).norm()) {
       closest = p;
     }
   }
@@ -296,8 +296,10 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
   }
   vector<Vector2f> remaining_points = pointcloud;
   vector<LineSegment> lines;
-  while (remaining_points.size() >= POINT_NUM_ACCEPTANCE_THRESHOLD) {
-    std::cout << "Remaining Points : " << remaining_points.size() << std::endl;
+  size_t stopping_threshold = std::max(static_cast<size_t>(pointcloud.size() * 0.03),
+                                       static_cast<size_t>(POINT_NUM_ACCEPTANCE_THRESHOLD));
+  while (remaining_points.size() >= stopping_threshold) {
+    std::cout << "\r\e[KRemaining Points : " << remaining_points.size() << std::flush;
     // Restrict the RANSAC implementation to using a small subset of the points.
     // This will speed it up.
     vector<Vector2f> neighborhood = GetNeighborhood(remaining_points);
@@ -305,18 +307,21 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
       break;
     }
     LineSegment line = RANSACLineSegment(neighborhood);
-    LineSegment new_line;// = FitLine(line, neighborhood);
+    LineSegment new_line = FitLine(line, neighborhood);
+    new_line = ClipLineToPoints(new_line, neighborhood);
     vector<pair<int, Vector2f>> inliers;
     // Continually grow the line until it no longer gains more inliers.
     do {
       line = new_line;
       std::vector<Vector2f> neighborhood_to_consider = GetNeighborhoodAroundLine(new_line, remaining_points);
       LineSegment test_line = FitLine(new_line, neighborhood_to_consider);
-      // Make sure the line doesn't extend past the points it is fit too.
-      test_line = ClipLineToPoints(test_line, neighborhood_to_consider);
-      // Only grow if we gain points on the line.
-      if (GetInliers(test_line, neighborhood_to_consider).size() > GetInliers(new_line, neighborhood_to_consider).size()) {
-        new_line = test_line;
+      if (GetPointsOnLine(test_line, neighborhood).size() > 0) {
+        // Make sure the line doesn't extend past the points it is fit too.
+        test_line = ClipLineToPoints(test_line, neighborhood_to_consider);
+        // Only grow if we gain points on the line.
+        if (GetInliers(test_line, neighborhood_to_consider).size() > GetInliers(new_line, neighborhood_to_consider).size()) {
+          new_line = test_line;
+        }
       }
       // Converge once the line doesn't move a lot.
     } while ((new_line.start_point - line.start_point).norm() +
@@ -327,17 +332,16 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
     }
     // We have to remove the points that were assigned to this line.
     // Sort the inliers by their index so we don't get weird index problems.
+    // We should also remove the points that belong to small lines, so that we don't use them again.
     sort(inliers.begin(), inliers.end(), [](pair<int, Vector2f> p1,
                                             pair<int, Vector2f> p2) {
       return p1.first < p2.first;
     });
-    if (inliers.size() < 2) {
-      continue;
-    }
     for (int64_t i = inliers.size() - 1; i >= 0; i--) {
       remaining_points.erase(remaining_points.begin() + inliers[i].first);
     }
   }
+  std::cout << std::endl;
   std::cout << "Pointcloud size: " << pointcloud.size() << std::endl;
   std::cout << "Lines size: " << lines.size() << std::endl;
   return lines;
