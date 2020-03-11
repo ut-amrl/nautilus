@@ -19,6 +19,8 @@
 #include "CorrelativeScanMatcher.h"
 #include "./gui_helpers.h"
 #include "lidar_slam/WriteMsg.h"
+#include "./line_extraction.h"
+#include "CImg.h"
 
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
@@ -656,5 +658,41 @@ void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
     output_file << std::fixed << sol_node.timestamp << " " << sol_node.pose[0] << " " << sol_node.pose[1] << " " << sol_node.pose[2] << std::endl;
   }
   output_file.close();
+}
+
+vector<Vector2f> TransformPointcloud(double * pose, const vector<Vector2f> pointcloud) {
+  vector<Vector2f> pcloud;
+  Eigen::Affine2f trans = PoseArrayToAffine(&pose[2], &pose[0]).cast<float>();
+  for (const Vector2f& p : pointcloud) {
+    pcloud.push_back(trans * p);
+  }
+  return pcloud;
+}
+
+void Solver::Vectorize(const WriteMsgConstPtr& msg) {
+  std::cout << "Vectorizing" << std::endl;
+  using VectorMaps::LineSegment;
+  vector<Vector2f> whole_pointcloud;
+  for (const SLAMNode2D& n : problem_.nodes) {
+    vector<Vector2f> pc = n.lidar_factor.pointcloud;
+    pc = TransformPointcloud(solution_[n.node_idx].pose, pc);
+    whole_pointcloud.insert(whole_pointcloud.begin(), pc.begin(), pc.end());
+  }
+  vector<LineSegment> lines = VectorMaps::ExtractLines(whole_pointcloud);
+  // --- Visualize ---
+  visualization_msgs::Marker line_mark;
+  gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST, gui_helpers::Color4f::kWhite, 0.05, 0.00, 0.00, &line_mark);
+  ros::Publisher lines_pub = n_.advertise<visualization_msgs::Marker>("/debug_lines", 10);
+  for (const LineSegment& line : lines) {
+    Vector3f line_start(line.start_point.x(), line.start_point.y(), 0.0);
+    Vector3f line_end(line.end_point.x(), line.end_point.y(), 0.0);
+    gui_helpers::AddLine(line_start, line_end, gui_helpers::Color4f::kWhite, &line_mark);
+  }
+  std::cout << "Pointcloud size: " << whole_pointcloud.size() << std::endl;
+  std::cout << "Lines size: " << lines.size() << std::endl;
+  for (int i = 0; i < 5; i++) {
+    lines_pub.publish(line_mark);
+    sleep(1);
+  }
 }
 

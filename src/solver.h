@@ -432,6 +432,7 @@ class Solver {
                       double rot_weight);
   void HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr);
   void WriteCallback(const WriteMsgConstPtr& msg);
+  void Vectorize(const WriteMsgConstPtr& msg);
   vector<SLAMNodeSolution2D> GetSolution() {
     return solution_;
   }
