@@ -668,32 +668,8 @@ void Solver::Vectorize(const WriteMsgConstPtr& msg) {
     pc = TransformPointcloud(solution_[n.node_idx].pose, pc);
     whole_pointcloud.insert(whole_pointcloud.begin(), pc.begin(), pc.end());
   }
-  std::cout << "List Compiled" << std::endl;
   vector<LineSegment> lines = VectorMaps::ExtractLines(whole_pointcloud);
   // --- Visualize ---
-//  double min_x = INFINITY;
-//  double max_x = -INFINITY;
-//  double min_y = INFINITY;
-//  double max_y = -INFINITY;
-//  for (const Vector2f& point : whole_pointcloud) {
-//    min_x = std::min(min_x, static_cast<double>(point.x()));
-//    max_x = std::max(max_x, static_cast<double>(point.x()));
-//    min_y = std::min(min_y, static_cast<double>(point.y()));
-//    max_y = std::max(max_y, static_cast<double>(point.y()));
-//  }
-//  cimg_library::CImgDisplay display_1;
-//  double line_color[] = {1.0};
-//  Vector2f shift(0, 0);
-//  if (min_x < 0) {
-//    shift.x() = abs(min_x);
-//  }
-//  if (min_y < 0) {
-//    shift.y() = abs(min_y);
-//  }
-//  double points_width = max_x - min_x;
-//  double points_height = max_y - min_y;
-  //std::cout << "points_width: " << points_width << std::endl;
-  //cimg_library::CImg<double> lines_image(std::ceil(points_width * 10), std::ceil(points_height * 10), 1, 1, 0);
   visualization_msgs::Marker line_mark;
   gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST, gui_helpers::Color4f::kWhite, 0.05, 0.00, 0.00, &line_mark);
   ros::Publisher lines_pub = n_.advertise<visualization_msgs::Marker>("/debug_lines", 10);
@@ -701,15 +677,9 @@ void Solver::Vectorize(const WriteMsgConstPtr& msg) {
     Vector3f line_start(line.start_point.x(), line.start_point.y(), 0.0);
     Vector3f line_end(line.end_point.x(), line.end_point.y(), 0.0);
     gui_helpers::AddLine(line_start, line_end, gui_helpers::Color4f::kWhite, &line_mark);
-    //lines_image.draw_line(line_start.x() * 10, line_start.y() * 10,
-    //                      line_end.x() * 10, line_end.y() * 10, line_color);
   }
-  //display_1.display(lines_image.resize_doubleXY().resize_doubleXY());
   std::cout << "Pointcloud size: " << whole_pointcloud.size() << std::endl;
   std::cout << "Lines size: " << lines.size() << std::endl;
-//  while(!display_1.is_closed()) {
-//    display_1.wait();
-//  }
   for (int i = 0; i < 5; i++) {
     lines_pub.publish(line_mark);
     sleep(1);

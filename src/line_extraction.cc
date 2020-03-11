@@ -314,6 +314,9 @@ vector<LineSegment> ExtractLines(const vector <Vector2f>& pointcloud) {
     do {
       line = new_line;
       std::vector<Vector2f> neighborhood_to_consider = GetNeighborhoodAroundLine(new_line, remaining_points);
+      if (neighborhood_to_consider.size() <= neighborhood.size()) {
+        break;
+      }
       LineSegment test_line = FitLine(new_line, neighborhood_to_consider);
       if (GetPointsOnLine(test_line, neighborhood).size() > 0) {
         // Make sure the line doesn't extend past the points it is fit too.

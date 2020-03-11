@@ -185,7 +185,6 @@ int main(int argc, char** argv) {
                                            10,
                                            &Solver::Vectorize,
                                            &solver);
-  solver.Vectorize(nullptr);
   ros::spin();
   return 0;
 }
