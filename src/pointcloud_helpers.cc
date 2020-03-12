@@ -113,3 +113,17 @@ pointcloud_helpers::PublishPointcloud(const vector<Vector2f>& points,
   point_cloud.width = 0;
   point_cloud.data.clear();
 }
+
+PointCloud2
+pointcloud_helpers::EigenPointcloudToRos(const vector<Vector2f>& pointcloud) {
+  PointCloud2 point_msg;
+  for (uint64_t i = 0; i < pointcloud.size(); i++) {
+    Vector2f vec = pointcloud[i];
+    PushBackBytes(vec[0], point_msg);
+    PushBackBytes(vec[1], point_msg);
+    PushBackBytes(0.0f, point_msg);
+  }
+  point_msg.width = pointcloud.size();
+  return point_msg;
+}
+

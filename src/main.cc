@@ -146,6 +146,22 @@ void SignalHandler(int signum) {
   exit(0);
 }
 
+void LearnedLoopClosure(SLAMProblem2D& slam_problem,
+                        Solver& solver) {
+  // Iteratively add all the nodes and odometry factors.
+  for (uint64_t node_index = 0;
+       node_index < slam_problem.nodes.size();
+       node_index++) {
+    if (node_index == 0) {
+      solver.AddSlamNode(slam_problem.nodes[0]);
+    } else {
+      solver.AddSLAMNodeOdom(slam_problem.nodes[node_index],
+                             slam_problem.odometry_factors[node_index - 1]);
+    }
+  }
+  solver.SolveSLAM();
+}
+
 int main(int argc, char** argv) {
   google::InitGoogleLogging(*argv);
   google::ParseCommandLineFlags(&argc, &argv, false);
@@ -170,15 +186,7 @@ int main(int argc, char** argv) {
                 FLAGS_stopping_accuracy,
                 FLAGS_pose_output_file,
                 n);
-  // Iteratively add all the nodes and odometry factors.
-  for (uint64_t node_index = 0; node_index < slam_problem.nodes.size(); node_index++) {
-    if (node_index == 0) {
-      solver.AddSlamNode(slam_problem.nodes[0]);
-    } else {
-      solver.AddSLAMNodeOdom(slam_problem.nodes[node_index], slam_problem.odometry_factors[node_index - 1]);
-    }
-  }
-  solver.SolveSLAM();
+  LearnedLoopClosure(slam_problem, solver);
   std::cout << "Waiting for Loop Closure input" << std::endl;
   ros::Subscriber hitl_sub = n.subscribe(FLAGS_hitl_lc_topic,
                                          10,

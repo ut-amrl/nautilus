@@ -20,8 +20,9 @@
 #include "./gui_helpers.h"
 #include "lidar_slam/WriteMsg.h"
 #include "./line_extraction.h"
-#include "CImg.h"
+#include "point_cloud_embedder/GetPointCloudEmbedding.h"
 
+#define EMBEDDING_THRESHOLD 9
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
@@ -44,6 +45,7 @@ using lidar_slam::WriteMsgConstPtr;
 using slam_types::SLAMNode2D;
 using Eigen::Vector3f;
 using math_util::NormalsSimilar;
+using pointcloud_helpers::EigenPointcloudToRos;
 
 double DistBetween(double pose_a[3], double pose_b[3]) {
   Vector2f pose_a_pos(pose_a[0], pose_a[1]);
@@ -449,52 +451,13 @@ Solver::Solver(double translation_weight,
                stopping_accuracy_(stopping_accuracy),
                pose_output_file_(pose_output_file),
                n_(n) {
+  embedding_client =
+    n_.serviceClient<point_cloud_embedder::GetPointCloudEmbedding>("embed_point_cloud");
 }
 
 /*
  * Methods relevant to HITL loop closure.
  */
-
-struct PointToLineResidual {
-    template <typename T>
-    bool operator() (const T* pose, const T* line_pose, T* residuals) const {
-      typedef Eigen::Matrix<T, 2, 1> Vector2T;
-      typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
-      const Affine2T pose_to_world =
-        PoseArrayToAffine(&pose[2], &pose[0]);
-      const Affine2T line_to_world =
-        PoseArrayToAffine(&line_pose[2], &line_pose[0]);
-      Vector2T line_start = line_to_world * line_segment_.start.cast<T>();
-      Vector2T line_end = line_to_world * line_segment_.end.cast<T>();
-      const LineSegment<T> TransformedLineSegment(line_start, line_end);
-      #pragma omp parallel for default(none) shared(residuals)
-      for (size_t index = 0; index < points_.size(); index++) {
-        Vector2T pointT = points_[index].cast<T>();
-        // Transform source_point into the frame of the line
-        pointT = pose_to_world * pointT;
-        T dist_along_normal =
-          DistanceToLineSegment(pointT, TransformedLineSegment);
-        residuals[index] = dist_along_normal;
-      }
-      return true;
-    }
-
-    PointToLineResidual(const LineSegment<float>& line_segment,
-                        const vector<Vector2f> points) :
-                        line_segment_(line_segment),
-                        points_(points) {}
-
-    static AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC, 3, 3>*
-    create(const LineSegment<float>& line_segment, const vector<Vector2f> points) {
-      PointToLineResidual* res = new PointToLineResidual(line_segment, points);
-      return new AutoDiffCostFunction<PointToLineResidual,
-                                      ceres::DYNAMIC,
-                                      3, 3>(res, points.size());
-    }
-
-    const LineSegment<float> line_segment_;
-    const vector<Vector2f> points_;
-};
 
 vector<LineSegment<float>>
 LineSegmentsFromHitlMsg(const HitlSlamInputMsg& msg) {
@@ -645,7 +608,9 @@ void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
   std::ofstream output_file;
   output_file.open(pose_output_file_);
   for (const SLAMNodeSolution2D& sol_node : solution_) {
-    output_file << std::fixed << sol_node.timestamp << " " << sol_node.pose[0] << " " << sol_node.pose[1] << " " << sol_node.pose[2] << std::endl;
+    output_file << std::fixed << sol_node.timestamp << " " << sol_node.pose[0]
+                << " " << sol_node.pose[1] << " " << sol_node.pose[2]
+                << std::endl;
   }
   output_file.close();
 }
@@ -686,16 +651,207 @@ void Solver::Vectorize(const WriteMsgConstPtr& msg) {
   }
 }
 
-void Solver::AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node) {
+OdometryFactor2D Solver::GetTotalOdomChange(const uint64_t node_a,
+                                            const uint64_t node_b) {
+  Vector2f init_trans(0, 0);
+  OdometryFactor2D factor(node_a, node_b, init_trans, 0);
+  CHECK_EQ(problem_.odometry_factors[node_a].pose_i, node_a);
+  for (size_t odom_idx = node_a;
+       odom_idx < node_b && odom_idx < problem_.odometry_factors.size();
+       odom_idx++) {
+    OdometryFactor2D curr_factor = problem_.odometry_factors[odom_idx];
+    factor.translation += curr_factor.translation;
+    factor.rotation += curr_factor.rotation;
+    factor.rotation = math_util::AngleMod(factor.rotation);
+  }
+  return factor;
+}
+
+std::pair<Eigen::Vector3d, Eigen::Matrix3d>
+Solver::GetResidualsFromSolving(const uint64_t node_a,
+                                const uint64_t node_b) {
+  CHECK_LT(node_a, solution_.size());
+  CHECK_LT(node_b, solution_.size());
+  double * pose_a = solution_[node_a].pose;
+  // We don't want these to effect the original pose.
+  double local_pose_a[] = {pose_a[0], pose_a[1], pose_a[2]};
+  double * pose_b = solution_[node_b].pose;
+  double local_pose_b[] = {pose_b[0], pose_b[1], pose_b[2]};
+  OdometryFactor2D odom_factor = GetTotalOdomChange(node_a, node_b);
+  ceres::Solver::Options options;
+  ceres::Solver::Summary summary;
+  options.linear_solver_type = ceres::SPARSE_SCHUR;
+  options.minimizer_progress_to_stdout = false;
+  options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
+  ceres::Problem problem;
+  PointCorrespondences correspondence(local_pose_a,
+                                      local_pose_b,
+                                      node_a,
+                                      node_b);
+  GetPointCorrespondences(problem_, &solution_, &correspondence, node_b, node_a);
+  vector<ceres::ResidualBlockId> residual_ids;
+  problem.AddResidualBlock(LIDARPointBlobResidual::create(
+          correspondence.source_points,
+          correspondence.target_points,
+          correspondence.source_normals,
+          correspondence.target_normals),
+                           nullptr,
+                           local_pose_a,
+                           local_pose_b);
+  ceres::ResidualBlockId odom_res_id =
+          problem.AddResidualBlock(OdometryResidual::create(odom_factor,
+                                                            translation_weight_,
+                                                            rotation_weight_),
+                                   nullptr,
+                                   local_pose_a,
+                                   local_pose_b);
+  residual_ids.push_back(odom_res_id);
+  ceres::Solve(options, &problem, &summary);
+  ceres::Problem::EvaluateOptions eval_options;
+  eval_options.residual_blocks = residual_ids;
+  vector<double> residuals;
+  problem.Evaluate(eval_options, nullptr, &residuals, nullptr, nullptr);
+  ceres::Covariance::Options cov_options;
+  cov_options.algorithm_type = ceres::DENSE_SVD;
+  cov_options.null_space_rank = 2;
+  ceres::Covariance covariance(cov_options);
+  vector<pair<const double *, const double *>> cov_blocks;
+  cov_blocks.push_back(std::make_pair(local_pose_a,
+                                      local_pose_b));
+  CHECK(covariance.Compute(cov_blocks, &problem));
+  double covariance_ab[3 * 3];
+  covariance.GetCovarianceBlock(local_pose_a,
+                                local_pose_b,
+                                covariance_ab);
+  Eigen::Matrix3d cov(covariance_ab);
+  Eigen::Vector3d res(residuals.data());
+  pair<Eigen::Vector3d, Eigen::Matrix3d> res_and_cov =
+          std::make_pair(res, cov);
+  return res_and_cov;
+}
+
+bool Solver::SimilarScans(const uint64_t node_a,
+                          const uint64_t node_b,
+                          const double certainty) {
+  if (node_a == node_b) {
+    return false;
+  }
+  CHECK_LE(certainty, 1.0);
+  CHECK_GE(certainty, 0.0);
+  pair<Eigen::Vector3d, Eigen::Matrix3d> res_and_cov =
+          GetResidualsFromSolving(std::min(node_a, node_b), std::max(node_a, node_b));
+  Eigen::Vector3d residuals = res_and_cov.first;
+  Eigen::Matrix3d covariance = res_and_cov.second;
+  double chi_num = residuals.transpose() * covariance * residuals;
+  if (chi_num < 0) {
+    return false;
+  }
+  chi_squared dist(2);
+  if (boost::math::cdf(dist, chi_num) <= certainty) {
+    return true;
+  }
+  return false;
+}
+
+void Solver::AddSLAMNodeOdom(SLAMNode2D& node,
+                             OdometryFactor2D& odom_factor_to_node) {
   CHECK_EQ(node.node_idx, odom_factor_to_node.pose_j);
   problem_.nodes.push_back(node);
   problem_.odometry_factors.push_back(odom_factor_to_node);
+  initial_odometry_factors.push_back(odom_factor_to_node);
   SLAMNodeSolution2D sol_node(node);
   solution_.push_back(sol_node);
+  CheckForLearnedLC(node);
 }
 
 void Solver::AddSlamNode(SLAMNode2D& node) {
   problem_.nodes.push_back(node);
   SLAMNodeSolution2D sol_node(node);
   solution_.push_back(sol_node);
+  CheckForLearnedLC(node);
+}
+
+Eigen::Matrix<double, 16, 1> Solver::GetEmbedding(SLAMNode2D& node) {
+  point_cloud_embedder::GetPointCloudEmbeddingRequest srv;
+  srv.cloud = EigenPointcloudToRos(node.lidar_factor.pointcloud);
+  if (embedding_client.call(srv)) {
+    return Eigen::Matrix<float, 16, 1>(srv.embedding).cast<double>();
+  } else {
+    std::cerr << "Failed to call service embed_point_cloud" << std::endl;
+    exit(100);
+  }
+}
+
+void Solver::AddKeyframe(SLAMNode2D& node) {
+  Eigen::Matrix<double, 16, 1> embedding = GetEmbedding(node);
+  keyframes.emplace_back(embedding, node.node_idx);
+}
+
+void Solver::AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
+                                  LearnedKeyframe& key_frame_b) {
+  LCConstraint constraint;
+  LCPose pose_a(key_frame_a.node_idx, vector<Vector2f>());
+  LCPose pose_b(key_frame_b.node_idx, vector<Vector2f>());
+  constraint.line_a_poses.push_back(pose_a);
+  constraint.line_b_poses.push_back(pose_b);
+  AddCollinearConstraints(constraint);
+}
+
+void Solver::LCKeyframes(LearnedKeyframe& key_frame_a,
+                         LearnedKeyframe& key_frame_b) {
+  // Solve the problem with pseudo odometry.
+  problem_.odometry_factors = GetSolvedOdomFactors();
+  AddKeyframeResiduals(key_frame_a, key_frame_b);
+  SolveSLAM();
+  problem_.odometry_factors = initial_odometry_factors;
+  SolveSLAM();
+}
+
+int64_t Solver::GetMatchingKeyframeIndex(size_t keyframe_index) {
+  for (size_t i = 0; i < keyframes.size(); i++) {
+    if (i == keyframe_index) {
+      continue;
+    }
+    if (SimilarScans(keyframes[i].node_idx,
+                     keyframes[keyframe_index].node_idx,
+                     0.95)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+void Solver::CheckForLearnedLC(SLAMNode2D& node) {
+  // First node is always a keyframe for simplicity.
+  if (keyframes.size() == 0) {
+    AddKeyframe(node);
+    return;
+  }
+  // Step 1: Check if this is a valid keyframe using the ChiSquared test,
+  // basically is it different than the last keyframe.
+  if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
+                   node.node_idx,
+                   0.95)) {
+    return;
+  }
+  // Step 2: Check if this is a valid scan for loop closure by sub sampling from
+  // the scans close to it using local invariance.
+  // TODO : Local Invariance Check
+  // Step 3: If past both of these steps then save as keyframe. Send it to the
+  // embedding network and store that embedding as well.
+  AddKeyframe(node);
+  // Step 4: Compare against all previous keyframes and see if there is a match
+  // or is similar using Chi^2
+  int64_t match = GetMatchingKeyframeIndex(keyframes.size() - 1);
+  if (match < 0) {
+    return;
+  }
+  // Step 5: Compare the embeddings and see if there is a match as well.
+  LearnedKeyframe matched_keyframe = keyframes[match];
+  LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
+  if ((matched_keyframe.embedding - new_keyframe.embedding).norm() > EMBEDDING_THRESHOLD) {
+    return;
+  }
+  // Step 6: Perform loop closure between these poses if there is a LC.
+  LCKeyframes(matched_keyframe, new_keyframe);
 }

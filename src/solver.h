@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include <boost/math/distributions/chi_squared.hpp>
 #include "glog/logging.h"
 #include <ros/node_handle.h>
 #include "ros/package.h"
@@ -33,6 +34,9 @@ using lidar_slam::HitlSlamInputMsg;
 using lidar_slam::WriteMsgConstPtr;
 using Eigen::Affine2f;
 using Eigen::Vector3f;
+using boost::math::chi_squared;
+using boost::math::complement;
+using boost::math::quantile;
 
 template<typename T> Eigen::Transform<T, 2, Eigen::Affine>
 PoseArrayToAffine(const T* rotation, const T* translation) {
@@ -56,6 +60,9 @@ struct LineSegment {
     LineSegment(Eigen::Matrix<T, 2, 1>& start,
                 Eigen::Matrix<T, 2, 1>& endpoint) :
                 start(start), end(endpoint) {};
+
+    LineSegment() {}
+
     template <typename F>
     LineSegment<F> cast() const {
       typedef Eigen::Matrix<F, 2, 1> Vector2F;
@@ -67,6 +74,15 @@ struct LineSegment {
       CHECK(ceres::IsFinite(endF.y()));
       return LineSegment<F>(startF, endF);
     }
+};
+
+struct LearnedKeyframe {
+    Eigen::Matrix<double, 16, 1> embedding;
+    const size_t node_idx;
+    LearnedKeyframe(const Eigen::Matrix<double, 16, 1>& embedding,
+                    const size_t node_idx) :
+                        embedding(embedding),
+                        node_idx(node_idx) {}
 };
 
 // Returns if val is between a and b.
@@ -113,6 +129,7 @@ struct LCConstraint {
                  const LineSegment<float>& line_b) :
                  line_a(line_a),
                  line_b(line_b) {}
+    LCConstraint() {}
 };
 
 struct PointCorrespondences {
@@ -444,7 +461,23 @@ class Solver {
   vector<OdometryFactor2D> GetSolvedOdomFactors();
   void AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node);
   void AddSlamNode(SLAMNode2D& node);
+  void CheckForLearnedLC(SLAMNode2D& node);
  private:
+  void AddKeyframe(SLAMNode2D& node);
+  Eigen::Matrix<double, 16, 1> GetEmbedding(SLAMNode2D& node);
+  void AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
+                            LearnedKeyframe& key_frame_b);
+  void LCKeyframes(LearnedKeyframe& key_frame_a,
+                   LearnedKeyframe& key_frame_b);
+  OdometryFactor2D GetTotalOdomChange(const uint64_t node_a,
+                                      const uint64_t node_b);
+  std::pair<Eigen::Vector3d, Eigen::Matrix3d>
+  GetResidualsFromSolving(const uint64_t node_a,
+                          const uint64_t node_b);
+  bool SimilarScans(const uint64_t node_a,
+                    const uint64_t node_b,
+                    const double certainty);
+  int64_t GetMatchingKeyframeIndex(size_t keyframe_index);
   double translation_weight_;
   double rotation_weight_;
   double lc_translation_weight_;
@@ -452,10 +485,13 @@ class Solver {
   double stopping_accuracy_;
   std::string pose_output_file_;
   SLAMProblem2D problem_;
+  vector<OdometryFactor2D> initial_odometry_factors;
   vector<SLAMNodeSolution2D> solution_;
   ros::NodeHandle n_;
   vector<LCConstraint> loop_closure_constraints_;
   std::unique_ptr<VisualizationCallback> vis_callback_ = nullptr;
+  vector<LearnedKeyframe> keyframes;
+  ros::ServiceClient embedding_client;
 };
 
 #endif // SRC_SOLVER_H_
