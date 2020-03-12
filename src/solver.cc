@@ -441,7 +441,6 @@ Solver::Solver(double translation_weight,
                double lc_rotation_weight,
                double stopping_accuracy,
                std::string pose_output_file,
-               SLAMProblem2D& problem,
                ros::NodeHandle& n) :
                translation_weight_(translation_weight),
                rotation_weight_(rotation_weight),
@@ -449,16 +448,7 @@ Solver::Solver(double translation_weight,
                lc_rotation_weight_(lc_rotation_weight),
                stopping_accuracy_(stopping_accuracy),
                pose_output_file_(pose_output_file),
-               problem_(problem),
                n_(n) {
-  // Copy all the data to a list that we are going to modify as we optimize.
-  for (size_t i = 0; i < problem.nodes.size(); i++) {
-    // Make sure that we marked all the data correctly earlier.
-    CHECK_EQ(i, problem.nodes[i].node_idx);
-    SLAMNodeSolution2D sol_node(problem.nodes[i]);
-    solution_.push_back(sol_node);
-  }
-  CHECK_EQ(solution_.size(), problem.nodes.size());
 }
 
 /*
@@ -696,3 +686,16 @@ void Solver::Vectorize(const WriteMsgConstPtr& msg) {
   }
 }
 
+void Solver::AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node) {
+  CHECK_EQ(node.node_idx, odom_factor_to_node.pose_j);
+  problem_.nodes.push_back(node);
+  problem_.odometry_factors.push_back(odom_factor_to_node);
+  SLAMNodeSolution2D sol_node(node);
+  solution_.push_back(sol_node);
+}
+
+void Solver::AddSlamNode(SLAMNode2D& node) {
+  problem_.nodes.push_back(node);
+  SLAMNodeSolution2D sol_node(node);
+  solution_.push_back(sol_node);
+}

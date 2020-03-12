@@ -169,8 +169,15 @@ int main(int argc, char** argv) {
                 FLAGS_lc_rotation_weight,
                 FLAGS_stopping_accuracy,
                 FLAGS_pose_output_file,
-                slam_problem,
                 n);
+  // Iteratively add all the nodes and odometry factors.
+  for (uint64_t node_index = 0; node_index < slam_problem.nodes.size(); node_index++) {
+    if (node_index == 0) {
+      solver.AddSlamNode(slam_problem.nodes[0]);
+    } else {
+      solver.AddSLAMNodeOdom(slam_problem.nodes[node_index], slam_problem.odometry_factors[node_index - 1]);
+    }
+  }
   solver.SolveSLAM();
   std::cout << "Waiting for Loop Closure input" << std::endl;
   ros::Subscriber hitl_sub = n.subscribe(FLAGS_hitl_lc_topic,

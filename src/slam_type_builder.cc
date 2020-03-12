@@ -61,11 +61,6 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
     if (pose_id_ > 0) {
       AddOdomFactor(odom_factors_);
     }
-
-    // TODO: Remove after Correlative Scan Matching is fixed.
-    if (pose_id_ == 330 || pose_id_ == 76) {
-      std::cout << "Pose " << pose_id_ << " Timestamp: " << laser_scan.header.stamp.sec << " s " << laser_scan.header.stamp.nsec << " n " << std::endl;
-    }
     pose_id_++;
     lidar_callback_count_++;
   }

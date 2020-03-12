@@ -417,7 +417,6 @@ class Solver {
          double lc_rotation_weight,
          double stopping_accuracy,
          std::string pose_output_file,
-         SLAMProblem2D& problem,
          ros::NodeHandle& n);
   vector<SLAMNodeSolution2D> SolveSLAM();
   double GetPointCorrespondences(const SLAMProblem2D& problem,
@@ -443,6 +442,8 @@ class Solver {
   double AddLidarResidualsForLC(ceres::Problem& problem);
   void AddPointCloudResiduals(ceres::Problem* problem);
   vector<OdometryFactor2D> GetSolvedOdomFactors();
+  void AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node);
+  void AddSlamNode(SLAMNode2D& node);
  private:
   double translation_weight_;
   double rotation_weight_;
