@@ -23,9 +23,11 @@ INCLUDE_DIRECTORIES(${CERES_INCLUDE_DIRS})
 FIND_PACKAGE(OpenCV REQUIRED)
 INCLUDE_DIRECTORIES(${OpenCV_INCLUDE_DIRS})
 FIND_PACKAGE(OpenMP REQUIRED)
+find_package(PCL 1.3 REQUIRED)
 
 INCLUDE($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
 INCLUDE_DIRECTORIES(third_party/learning-loop-closure/point_cloud_embedder/srv_gen/cpp/include)
+INCLUDE_DIRECTORIES(${PCL_INCLUDE_DIRS})
 
 rosbuild_init()
 
@@ -40,7 +42,7 @@ SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
 
 rosbuild_genmsg()
 
-SET(libs roslib roscpp rosbag console_bridge cv_bridge gflags glog boost_system m OpenMP::OpenMP_CXX X11)
+SET(libs roslib roscpp rosbag console_bridge cv_bridge gflags glog boost_system m OpenMP::OpenMP_CXX X11 ${PCL_LIBRARY_DIRS})
 
 ROSBUILD_ADD_EXECUTABLE(lidar_slam
                         src/main.cc

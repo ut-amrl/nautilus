@@ -11,6 +11,8 @@
 
 #include "./kdtree.h"
 #include "./math_util.h"
+#include <pcl/pcl_base.h>
+#include "pcl_conversions/pcl_conversions.h"
 
 using Eigen::Vector2f;
 using Eigen::Matrix2f;
@@ -117,13 +119,17 @@ pointcloud_helpers::PublishPointcloud(const vector<Vector2f>& points,
 PointCloud2
 pointcloud_helpers::EigenPointcloudToRos(const vector<Vector2f>& pointcloud) {
   PointCloud2 point_msg;
+  pcl::PointCloud<pcl::PointXYZ> pcl_cloud;
   for (uint64_t i = 0; i < pointcloud.size(); i++) {
-    Vector2f vec = pointcloud[i];
-    PushBackBytes(vec[0], point_msg);
-    PushBackBytes(vec[1], point_msg);
-    PushBackBytes(0.0f, point_msg);
+    pcl::PointXYZ point;
+    point.x = pointcloud[i][0];
+    point.y = pointcloud[i][1];
+    point.z = 0.0f;
+    pcl_cloud.points.push_back(point);
   }
-  point_msg.width = pointcloud.size();
+  pcl_cloud.height = 1;
+  pcl_cloud.width = pointcloud.size();
+  pcl::toROSMsg(pcl_cloud, point_msg);
   return point_msg;
 }
 
