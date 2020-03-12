@@ -13,8 +13,6 @@
 
 #include "line_extraction.h"
 
-#include <DEBUG.h>
-
 using std::vector;
 using std::pair;
 using std::make_pair;

@@ -772,10 +772,12 @@ void Solver::AddSlamNode(SLAMNode2D& node) {
 }
 
 Eigen::Matrix<double, 16, 1> Solver::GetEmbedding(SLAMNode2D& node) {
-  point_cloud_embedder::GetPointCloudEmbeddingRequest srv;
-  srv.cloud = EigenPointcloudToRos(node.lidar_factor.pointcloud);
+  point_cloud_embedder::GetPointCloudEmbedding srv;
+  srv.request.cloud = EigenPointcloudToRos(node.lidar_factor.pointcloud);
   if (embedding_client.call(srv)) {
-    return Eigen::Matrix<float, 16, 1>(srv.embedding).cast<double>();
+    vector<float> embedding = srv.response.embedding;
+    Eigen::Matrix<float, 16, 1> mat(embedding.data());
+    return mat.cast<double>();
   } else {
     std::cerr << "Failed to call service embed_point_cloud" << std::endl;
     exit(100);
