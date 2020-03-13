@@ -813,7 +813,8 @@ void Solver::LCKeyframes(LearnedKeyframe& key_frame_a,
   SolveSLAM();
 }
 
-int64_t Solver::GetMatchingKeyframeIndex(size_t keyframe_index) {
+vector<size_t> Solver::GetMatchingKeyframeIndices(size_t keyframe_index) {
+  vector<size_t> matches;
   for (size_t i = 0; i < keyframes.size(); i++) {
     if (i == keyframe_index) {
       continue;
@@ -821,10 +822,10 @@ int64_t Solver::GetMatchingKeyframeIndex(size_t keyframe_index) {
     if (SimilarScans(keyframes[i].node_idx,
                      keyframes[keyframe_index].node_idx,
                      0.95)) {
-      return i;
+      matches.push_back(i);
     }
   }
-  return -1;
+  return matches;
 }
 
 void Solver::CheckForLearnedLC(SLAMNode2D& node) {
@@ -849,23 +850,38 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   AddKeyframe(node);
   // Step 4: Compare against all previous keyframes and see if there is a match
   // or is similar using Chi^2
-  int64_t match = GetMatchingKeyframeIndex(keyframes.size() - 1);
-  if (match < 0) {
+  vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
+  if (matches.size() == 0) {
     printf("No match from chi^2\n");
     return;
   }
   // Step 5: Compare the embeddings and see if there is a match as well.
-  LearnedKeyframe matched_keyframe = keyframes[match];
+  // Find the closest embedding in all the matches to our new keyframe.
   LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
-  printf("EMBEDDINGS\n");
-  std::cout << matched_keyframe.embedding.transpose() << std::endl;
-  std::cout << new_keyframe.embedding.transpose() << std::endl;
-  double distance = (matched_keyframe.embedding - new_keyframe.embedding).norm();
-  if (distance > EMBEDDING_THRESHOLD) {
-    printf("Not a match by embedding distance %f\n", distance);
+  int64_t closest_index = -1;
+  double closest_distance = INFINITY;
+  for (size_t match_index : matches) {
+    LearnedKeyframe matched_keyframe = keyframes[match_index];
+    printf("EMBEDDINGS\n");
+    std::cout << matched_keyframe.embedding.transpose() << std::endl;
+    std::cout << new_keyframe.embedding.transpose() << std::endl;
+    double distance = (matched_keyframe.embedding - new_keyframe.embedding).norm();
+    if (distance < closest_distance) {
+      printf("New minimum embedding distance found: %f\n", distance);
+      closest_distance = distance;
+      closest_index = match_index;
+    }
+  }
+  if (closest_index == -1) {
+    printf("Out of %lu keyframes, none were sufficient for LC\n",
+            matches.size());
     return;
   }
+  printf("Found match of pose %lu to %lu\n",
+          keyframes[closest_index].node_idx,
+          new_keyframe.node_idx);
   printf("This is a LC by embedding distance!\n\n\n\n");
   // Step 6: Perform loop closure between these poses if there is a LC.
-  LCKeyframes(matched_keyframe, new_keyframe);
+  LearnedKeyframe best_match_keyframe = keyframes[closest_index];
+  LCKeyframes(best_match_keyframe, new_keyframe);
 }

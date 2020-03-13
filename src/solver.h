@@ -478,7 +478,7 @@ class Solver {
   bool SimilarScans(const uint64_t node_a,
                     const uint64_t node_b,
                     const double certainty);
-  int64_t GetMatchingKeyframeIndex(size_t keyframe_index);
+  vector<size_t> GetMatchingKeyframeIndices(size_t keyframe_index);
   double translation_weight_;
   double rotation_weight_;
   double lc_translation_weight_;
