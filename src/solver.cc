@@ -22,7 +22,9 @@
 #include "./line_extraction.h"
 #include "point_cloud_embedder/GetPointCloudEmbedding.h"
 
-#define EMBEDDING_THRESHOLD 10
+#include <DEBUG.h>
+
+#define EMBEDDING_THRESHOLD 7
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
@@ -828,6 +830,28 @@ vector<size_t> Solver::GetMatchingKeyframeIndices(size_t keyframe_index) {
   return matches;
 }
 
+// --- Temp Visualization Function ---
+
+//void ReVizKeyframeScans(SLAMProblem2D& problem,
+//                        vector<SLAMNodeSolution2D> solution,
+//                        vector<LearnedKeyframe> keyframes) {
+//  std::cout << "Publishing keyframes" << std::endl;
+//  vector<Vector2f> pointclouds;
+//  for (const LearnedKeyframe& keyframe : keyframes) {
+//    vector<Vector2f> transformed_pointcloud =
+//      TransformPointcloud(solution[keyframe.node_idx].pose,
+//                          problem.nodes[keyframe.node_idx].lidar_factor.pointcloud);
+//    pointclouds.insert(pointclouds.end(),
+//                       transformed_pointcloud.begin(),
+//                       transformed_pointcloud.end());
+//  }
+//  for (int i = 0; i < 5; i++) {
+//    PubPoints("/keyframes", pointclouds);
+//  }
+//}
+
+// --- End Visualization ---
+
 void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // First node is always a keyframe for simplicity.
   if (keyframes.size() == 0) {
@@ -872,7 +896,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
       closest_index = match_index;
     }
   }
-  if (closest_index == -1) {
+  if (closest_index == -1 || closest_distance > EMBEDDING_THRESHOLD) {
     printf("Out of %lu keyframes, none were sufficient for LC\n",
             matches.size());
     return;
@@ -882,6 +906,8 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
           new_keyframe.node_idx);
   printf("This is a LC by embedding distance!\n\n\n\n");
   // Step 6: Perform loop closure between these poses if there is a LC.
+  WaitForClose(PubPoints("New Scan", problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud));
+  WaitForClose(PubPoints("Old Scan", problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud));
   LearnedKeyframe best_match_keyframe = keyframes[closest_index];
   LCKeyframes(best_match_keyframe, new_keyframe);
 }
