@@ -104,6 +104,8 @@ struct OdometryFactor2D {
 struct SLAMNode2D {
     // Pose index for this node in the nodes vector for the slam problem.
     uint64_t node_idx{};
+    // Is keyframe?
+    bool is_keyframe;
     // Timestamp.
     double timestamp{};
     // 3DOF parameters.
@@ -118,6 +120,7 @@ struct SLAMNode2D {
              const RobotPose2D& pose,
              const LidarFactor& lidar_factor) :
             node_idx(idx),
+            is_keyframe(false),
             timestamp(timestamp),
             pose(pose),
             lidar_factor(lidar_factor) {}
@@ -140,6 +143,9 @@ struct SLAMProblem2D {
 struct SLAMNodeSolution2D {
     // Pose ID.
     uint64_t node_idx{};
+    // Is Keyframe
+    bool is_keyframe;
+
     // Timestamp.
     double timestamp{};
     // 3DOF parameters: tx, ty, angle. Note that
@@ -148,6 +154,7 @@ struct SLAMNodeSolution2D {
     // Convenience constructor, initialize all values.
     explicit SLAMNodeSolution2D(const SLAMNode2D& n) :
                        node_idx(n.node_idx),
+                       is_keyframe(n.is_keyframe),
                        timestamp(n.timestamp),
                        pose{n.pose.loc.x(), n.pose.loc.y(), n.pose.angle} {}
 

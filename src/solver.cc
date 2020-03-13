@@ -792,6 +792,7 @@ Eigen::Matrix<double, 16, 1> Solver::GetEmbedding(SLAMNode2D& node) {
 
 void Solver::AddKeyframe(SLAMNode2D& node) {
   Eigen::Matrix<double, 16, 1> embedding = GetEmbedding(node);
+  node.is_keyframe = true;
   keyframes.emplace_back(embedding, node.node_idx);
 }
 
