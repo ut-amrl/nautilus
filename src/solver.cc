@@ -24,7 +24,7 @@
 
 #include <DEBUG.h>
 
-#define EMBEDDING_THRESHOLD 7
+#define EMBEDDING_THRESHOLD 2
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
@@ -906,8 +906,8 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
           new_keyframe.node_idx);
   printf("This is a LC by embedding distance!\n\n\n\n");
   // Step 6: Perform loop closure between these poses if there is a LC.
-  WaitForClose(PubPoints("New Scan", problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud));
-  WaitForClose(PubPoints("Old Scan", problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud));
+  WaitForClose(DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud));
+  WaitForClose(DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud));
   LearnedKeyframe best_match_keyframe = keyframes[closest_index];
   LCKeyframes(best_match_keyframe, new_keyframe);
 }
