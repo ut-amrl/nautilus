@@ -22,7 +22,7 @@
 #include "./line_extraction.h"
 #include "point_cloud_embedder/GetPointCloudEmbedding.h"
 
-#define EMBEDDING_THRESHOLD 20
+#define EMBEDDING_THRESHOLD 10
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
@@ -442,6 +442,7 @@ Solver::Solver(double translation_weight,
                double lc_translation_weight,
                double lc_rotation_weight,
                double stopping_accuracy,
+               double max_lidar_range,
                std::string pose_output_file,
                ros::NodeHandle& n) :
                translation_weight_(translation_weight),
@@ -449,6 +450,7 @@ Solver::Solver(double translation_weight,
                lc_translation_weight_(lc_translation_weight),
                lc_rotation_weight_(lc_rotation_weight),
                stopping_accuracy_(stopping_accuracy),
+               max_lidar_range_(max_lidar_range),
                pose_output_file_(pose_output_file),
                n_(n) {
   embedding_client =
@@ -774,7 +776,7 @@ void Solver::AddSlamNode(SLAMNode2D& node) {
 Eigen::Matrix<double, 16, 1> Solver::GetEmbedding(SLAMNode2D& node) {
   point_cloud_embedder::GetPointCloudEmbedding srv;
   // TODO actually pass the range down here
-  std::vector<Eigen::Vector2f> normalized = pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud, 10.0f); 
+  std::vector<Eigen::Vector2f> normalized = pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud, max_lidar_range_); 
   srv.request.cloud = EigenPointcloudToRos(normalized);
   if (embedding_client.call(srv)) {
     vector<float> embedding = srv.response.embedding;

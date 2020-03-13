@@ -433,6 +433,7 @@ class Solver {
          double lc_translation_weight,
          double lc_rotation_weight,
          double stopping_accuracy,
+         double max_lidar_range,
          std::string pose_output_file,
          ros::NodeHandle& n);
   vector<SLAMNodeSolution2D> SolveSLAM();
@@ -483,6 +484,7 @@ class Solver {
   double lc_translation_weight_;
   double lc_rotation_weight_;
   double stopping_accuracy_;
+  double max_lidar_range_;
   std::string pose_output_file_;
   SLAMProblem2D problem_;
   vector<OdometryFactor2D> initial_odometry_factors;

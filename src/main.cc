@@ -184,6 +184,7 @@ int main(int argc, char** argv) {
                 FLAGS_lc_translation_weight,
                 FLAGS_lc_rotation_weight,
                 FLAGS_stopping_accuracy,
+                FLAGS_max_lidar_range,
                 FLAGS_pose_output_file,
                 n);
   LearnedLoopClosure(slam_problem, solver);
