@@ -24,6 +24,7 @@ namespace pointcloud_helpers {
   void PublishPointcloud(const std::vector<Vector2f>& points,
                          PointCloud2& point_cloud,
                          Publisher& pub);
+  std::vector<Vector2f> normalizePointCloud(const std::vector<Vector2f>& pointcloud, double range);
   PointCloud2 EigenPointcloudToRos(const vector<Vector2f>& pointcloud);
   std::vector<Vector2f>
   LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan, double max_range);

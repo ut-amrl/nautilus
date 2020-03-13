@@ -22,7 +22,7 @@
 #include "./line_extraction.h"
 #include "point_cloud_embedder/GetPointCloudEmbedding.h"
 
-#define EMBEDDING_THRESHOLD 9
+#define EMBEDDING_THRESHOLD 20
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
@@ -682,7 +682,7 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::SPARSE_SCHUR;
   options.minimizer_progress_to_stdout = false;
-  options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
+  options.num_threads = 1;//static_cast<int>(std::thread::hardware_concurrency());
   ceres::Problem problem;
   PointCorrespondences correspondence(local_pose_a,
                                       local_pose_b,
@@ -773,7 +773,9 @@ void Solver::AddSlamNode(SLAMNode2D& node) {
 
 Eigen::Matrix<double, 16, 1> Solver::GetEmbedding(SLAMNode2D& node) {
   point_cloud_embedder::GetPointCloudEmbedding srv;
-  srv.request.cloud = EigenPointcloudToRos(node.lidar_factor.pointcloud);
+  // TODO actually pass the range down here
+  std::vector<Eigen::Vector2f> normalized = pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud, 10.0f); 
+  srv.request.cloud = EigenPointcloudToRos(normalized);
   if (embedding_client.call(srv)) {
     vector<float> embedding = srv.response.embedding;
     Eigen::Matrix<float, 16, 1> mat(embedding.data());
@@ -834,6 +836,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
                    node.node_idx,
                    0.95)) {
+    printf("Not a keyframe from chi^2\n");
     return;
   }
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
@@ -846,14 +849,21 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // or is similar using Chi^2
   int64_t match = GetMatchingKeyframeIndex(keyframes.size() - 1);
   if (match < 0) {
+    printf("No match from chi^2\n");
     return;
   }
   // Step 5: Compare the embeddings and see if there is a match as well.
   LearnedKeyframe matched_keyframe = keyframes[match];
   LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
-  if ((matched_keyframe.embedding - new_keyframe.embedding).norm() > EMBEDDING_THRESHOLD) {
+  printf("EMBEDDINGS\n");
+  std::cout << matched_keyframe.embedding.transpose() << std::endl;
+  std::cout << new_keyframe.embedding.transpose() << std::endl;
+  double distance = (matched_keyframe.embedding - new_keyframe.embedding).norm();
+  if (distance > EMBEDDING_THRESHOLD) {
+    printf("Not a match by embedding distance %f\n", distance);
     return;
   }
+  printf("This is a LC by embedding distance!\n\n\n\n");
   // Step 6: Perform loop closure between these poses if there is a LC.
   LCKeyframes(matched_keyframe, new_keyframe);
 }

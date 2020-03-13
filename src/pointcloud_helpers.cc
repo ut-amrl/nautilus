@@ -4,6 +4,7 @@
 
 #include <glog/logging.h>
 #include "./pointcloud_helpers.h"
+#include <numeric>
 
 #include "ros/package.h"
 #include "eigen3/Eigen/Dense"
@@ -131,5 +132,16 @@ pointcloud_helpers::EigenPointcloudToRos(const vector<Vector2f>& pointcloud) {
   pcl_cloud.width = pointcloud.size();
   pcl::toROSMsg(pcl_cloud, point_msg);
   return point_msg;
+}
+
+std::vector<Vector2f>
+pointcloud_helpers::normalizePointCloud(const vector<Vector2f>& pointcloud, double range) {
+  std::vector<Vector2f> normalized(pointcloud.size());
+  Vector2f mean = std::accumulate(pointcloud.begin(), pointcloud.end(), Vector2f(0.0f, 0.0f)) / pointcloud.size();
+  for (uint64_t i = 0; i < pointcloud.size(); i++) {
+    normalized[i] = (pointcloud[i] - mean) / range;
+  }
+
+  return normalized;
 }
 
