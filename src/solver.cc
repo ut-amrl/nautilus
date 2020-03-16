@@ -16,7 +16,6 @@
 #include "./math_util.h"
 #include "timer.h"
 #include "lidar_slam/HitlSlamInputMsg.h"
-#include "CorrelativeScanMatcher.h"
 #include "./gui_helpers.h"
 #include "lidar_slam/WriteMsg.h"
 #include "./line_extraction.h"
@@ -29,6 +28,7 @@
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
 #define HITL_POSE_POINT_THRESHOLD 10
+#define LOCAL_UNCERTAINTY_PREV_SCANS 2
 #define DEBUG false
 
 using std::vector;
@@ -454,7 +454,8 @@ Solver::Solver(double translation_weight,
                stopping_accuracy_(stopping_accuracy),
                max_lidar_range_(max_lidar_range),
                pose_output_file_(pose_output_file),
-               n_(n) {
+               n_(n),
+               scan_matcher(10, 2, 0.3, 0.03) {
   embedding_client =
     n_.serviceClient<point_cloud_embedder::GetPointCloudEmbedding>("embed_point_cloud");
 }
@@ -515,7 +516,6 @@ void Solver::AddCollinearConstraints(const LCConstraint& constraint) {
       constraint.line_b_poses.size() == 0) {
     return;
   }
-  CorrelativeScanMatcher scan_matcher(4, 0.3, 0.03);
   
   // Find the closest pose to each pose on a on the b line.
   #pragma omp parallel for
@@ -734,6 +734,18 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
   return res_and_cov;
 }
 
+std::pair<double, double> Solver::GetLocalUncertainty(const uint64_t node_idx) {
+  if (node_idx < LOCAL_UNCERTAINTY_PREV_SCANS) {
+    return std::make_pair(0, 0);
+  }
+  std::vector<std::vector<Vector2f>> prevScans;
+  for(uint64_t idx = node_idx - 1; idx > node_idx - LOCAL_UNCERTAINTY_PREV_SCANS; idx--) {
+    prevScans.push_back(problem_.nodes[idx].lidar_factor.pointcloud);
+  }
+
+  return scan_matcher.GetLocalUncertaintyStats(prevScans, problem_.nodes[node_idx].lidar_factor.pointcloud);
+}
+
 bool Solver::SimilarScans(const uint64_t node_a,
                           const uint64_t node_b,
                           const double certainty) {
@@ -871,6 +883,9 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // the scans close to it using local invariance.
   // TODO : Local Invariance Check
 
+  auto uncertainty = GetLocalUncertainty(node.node_idx);
+  printf("Computed Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
+  WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
 
   // Step 3: If past both of these steps then save as keyframe. Send it to the
   // embedding network and store that embedding as well.

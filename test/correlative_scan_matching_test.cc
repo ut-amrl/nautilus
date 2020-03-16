@@ -13,7 +13,7 @@ using Eigen::Vector2f;
 using slam_types::RobotPose2D;
 
 TEST(CorrelativeScanMatcherTest, GetTransformationBasicTest) {
-  CorrelativeScanMatcher scan_matcher(4, 0.3, 0.03);
+  CorrelativeScanMatcher scan_matcher(10, 2, 0.3, 0.03);
   vector<Vector2f> pointcloud_a;
   for (double i = -3; i < 3; i += 0.03) {
     // Draw two lines in the scan, like a perfect hallway.

@@ -15,6 +15,8 @@
 #include "ceres/ceres.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "visualization_msgs/Marker.h"
+#include "CorrelativeScanMatcher.h"
+
 
 #include "./kdtree.h"
 #include "./slam_types.h"
@@ -480,6 +482,7 @@ class Solver {
   void AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node);
   void AddSlamNode(SLAMNode2D& node);
   void CheckForLearnedLC(SLAMNode2D& node);
+
  private:
   void AddKeyframe(SLAMNode2D& node);
   Eigen::Matrix<double, 16, 1> GetEmbedding(SLAMNode2D& node);
@@ -495,6 +498,7 @@ class Solver {
   bool SimilarScans(const uint64_t node_a,
                     const uint64_t node_b,
                     const double certainty);
+  std::pair<double, double> GetLocalUncertainty(const uint64_t node_idx);
   vector<size_t> GetMatchingKeyframeIndices(size_t keyframe_index);
   double translation_weight_;
   double rotation_weight_;
@@ -511,6 +515,7 @@ class Solver {
   std::unique_ptr<VisualizationCallback> vis_callback_ = nullptr;
   vector<LearnedKeyframe> keyframes;
   ros::ServiceClient embedding_client;
+  CorrelativeScanMatcher scan_matcher;
 };
 
 #endif // SRC_SOLVER_H_
