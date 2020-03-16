@@ -28,6 +28,8 @@
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
 #define HITL_POSE_POINT_THRESHOLD 10
+#define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 5
+#define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .15
 #define LOCAL_UNCERTAINTY_PREV_SCANS 2
 #define DEBUG false
 
@@ -879,17 +881,19 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     // printf("Not a keyframe from chi^2\n");
     return;
   }
+  
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
-  // TODO : Local Invariance Check
-
   auto uncertainty = GetLocalUncertainty(node.node_idx);
-  printf("Computed Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
-  WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
+  if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD || uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
+    printf("Not a keyframe due to lack of local invariance...Computed Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
+    return;
+  }
 
-  // Step 3: If past both of these steps then save as keyframe. Send it to the
+  // Step 3: If past both of these steps then save as keyframe. Send it to the  
   // embedding network and store that embedding as well.
   printf("Adding Keyframe\n");
+  WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
   AddKeyframe(node);
   // Step 4: Compare against all previous keyframes and see if there is a match
   // or is similar using Chi^2
