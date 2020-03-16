@@ -24,7 +24,7 @@
 
 #include <DEBUG.h>
 
-#define EMBEDDING_THRESHOLD 2
+#define EMBEDDING_THRESHOLD 8
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
@@ -686,7 +686,7 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::SPARSE_SCHUR;
   options.minimizer_progress_to_stdout = false;
-  options.num_threads = 1;//static_cast<int>(std::thread::hardware_concurrency());
+  options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
   ceres::Problem problem;
   PointCorrespondences correspondence(local_pose_a,
                                       local_pose_b,
@@ -778,8 +778,8 @@ void Solver::AddSlamNode(SLAMNode2D& node) {
 Eigen::Matrix<double, 16, 1> Solver::GetEmbedding(SLAMNode2D& node) {
   point_cloud_embedder::GetPointCloudEmbedding srv;
   // TODO actually pass the range down here
-  std::vector<Eigen::Vector2f> normalized = pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud, max_lidar_range_); 
-  srv.request.cloud = EigenPointcloudToRos(normalized);
+  // std::vector<Eigen::Vector2f> normalized = pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud, max_lidar_range_); 
+  srv.request.cloud = EigenPointcloudToRos(node.lidar_factor.pointcloud);
   if (embedding_client.call(srv)) {
     vector<float> embedding = srv.response.embedding;
     Eigen::Matrix<float, 16, 1> mat(embedding.data());
@@ -864,14 +864,17 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
                    node.node_idx,
                    0.95)) {
-    printf("Not a keyframe from chi^2\n");
+    // printf("Not a keyframe from chi^2\n");
     return;
   }
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
   // TODO : Local Invariance Check
+
+
   // Step 3: If past both of these steps then save as keyframe. Send it to the
   // embedding network and store that embedding as well.
+  printf("Adding Keyframe\n");
   AddKeyframe(node);
   // Step 4: Compare against all previous keyframes and see if there is a match
   // or is similar using Chi^2
@@ -900,6 +903,8 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   if (closest_index == -1 || closest_distance > EMBEDDING_THRESHOLD) {
     printf("Out of %lu keyframes, none were sufficient for LC\n",
             matches.size());
+    WaitForClose(DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud));
+    WaitForClose(DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud));
     return;
   }
   printf("Found match of pose %lu to %lu\n",
