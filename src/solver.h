@@ -194,7 +194,7 @@ class VisualizationCallback : public ceres::IterationCallback {
                                   0.003,
                                   0.0,
                                   0.0,
-                                  & );
+                                  &key_pose_array);
     constraint_pose_pub = n.advertise<PointCloud2>("/hitl_poses", 10);
     hitl_pointclouds = n.advertise<PointCloud2>("/hitl_pointclouds", 10);
     point_a_pub = n.advertise<PointCloud2>("/hitl_a_points",100);
@@ -273,9 +273,7 @@ class VisualizationCallback : public ceres::IterationCallback {
       pose_pub.publish(pose_array);
       match_pub.publish(match_line_list);
       normals_pub.publish(normals_marker);
-      if (key_pose_array.) {
-        keyframe_poses_pub.publish(key_pose_array);
-      }
+      keyframe_poses_pub.publish(key_pose_array);
     }
 
     all_points.clear();
