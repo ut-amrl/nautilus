@@ -28,8 +28,8 @@
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
 #define HITL_POSE_POINT_THRESHOLD 10
-#define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 5
-#define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .15
+#define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 9.5
+#define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .35
 #define LOCAL_UNCERTAINTY_PREV_SCANS 2
 #define DEBUG false
 
@@ -878,7 +878,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
                    node.node_idx,
                    0.95)) {
-    // printf("Not a keyframe from chi^2\n");
+    printf("Not a keyframe from chi^2\n");
     return;
   }
   
@@ -922,8 +922,6 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   if (closest_index == -1 || closest_distance > EMBEDDING_THRESHOLD) {
     printf("Out of %lu keyframes, none were sufficient for LC\n",
             matches.size());
-    WaitForClose(DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud));
-    WaitForClose(DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud));
     return;
   }
   printf("Found match of pose %lu to %lu\n",
