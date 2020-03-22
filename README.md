@@ -2,6 +2,14 @@
 
 This project aims to be a professional point-to-point slam implementation.
 
+### Downloading:
+
+Because this project uses submodules for external libraries please clone using the following command.
+
+```
+git clone --recurse-submodules <git project URL>
+```
+
 ### Compiling:
 
 You will need to install GTest for testing. This can be done by first installing gtest through apt.
