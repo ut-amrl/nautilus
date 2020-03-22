@@ -871,9 +871,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // Step 3: If past both of these steps then save as keyframe. Send it to the  
   // embedding network and store that embedding as well.
   printf("Adding Keyframe\n");
-  WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
   AddKeyframe(node);
-  return;
   // Step 4: Compare against all previous keyframes and see if there is a match
   // or is similar using Chi^2
   vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
@@ -909,9 +907,6 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   printf("timestamps: %f, %f\n\n", problem_.nodes[keyframes[closest_index].node_idx].timestamp, problem_.nodes[new_keyframe.node_idx].timestamp);
   printf("This is a LC by embedding distance!\n\n\n\n");
   // Step 6: Perform loop closure between these poses if there is a LC.
-  WaitForClose(DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud));
-  WaitForClose(DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud));
-
   LearnedKeyframe best_match_keyframe = keyframes[closest_index];
   LCKeyframes(best_match_keyframe, new_keyframe);
 }
