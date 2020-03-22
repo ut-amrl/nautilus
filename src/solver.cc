@@ -372,7 +372,7 @@ Solver::SolveSLAM() {
   options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
   vis_callback_ =
     std::unique_ptr<VisualizationCallback>(
-      new VisualizationCallback(problem_, &solution_, n_));
+      new VisualizationCallback(problem_, &solution_, keyframes, n_));
   options.callbacks.push_back(vis_callback_.get());
   double difference = 0;
   double last_difference = 0;
@@ -830,28 +830,6 @@ vector<size_t> Solver::GetMatchingKeyframeIndices(size_t keyframe_index) {
   return matches;
 }
 
-// --- Temp Visualization Function ---
-
-//void ReVizKeyframeScans(SLAMProblem2D& problem,
-//                        vector<SLAMNodeSolution2D> solution,
-//                        vector<LearnedKeyframe> keyframes) {
-//  std::cout << "Publishing keyframes" << std::endl;
-//  vector<Vector2f> pointclouds;
-//  for (const LearnedKeyframe& keyframe : keyframes) {
-//    vector<Vector2f> transformed_pointcloud =
-//      TransformPointcloud(solution[keyframe.node_idx].pose,
-//                          problem.nodes[keyframe.node_idx].lidar_factor.pointcloud);
-//    pointclouds.insert(pointclouds.end(),
-//                       transformed_pointcloud.begin(),
-//                       transformed_pointcloud.end());
-//  }
-//  for (int i = 0; i < 5; i++) {
-//    PubPoints("/keyframes", pointclouds);
-//  }
-//}
-
-// --- End Visualization ---
-
 void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // First node is always a keyframe for simplicity.
   if (keyframes.size() == 0) {
@@ -872,6 +850,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // Step 3: If past both of these steps then save as keyframe. Send it to the
   // embedding network and store that embedding as well.
   AddKeyframe(node);
+  return;
   // Step 4: Compare against all previous keyframes and see if there is a match
   // or is similar using Chi^2
   vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
