@@ -127,17 +127,15 @@ struct LookupTable {
 class CorrelativeScanMatcher {
  public:
     CorrelativeScanMatcher(double scanner_range,
+                           double trans_range,
                            double low_res,
                            double high_res)
-    : range_(scanner_range), low_res_(low_res), high_res_(high_res) {}
+    : range_(scanner_range), trans_range_(trans_range), low_res_(low_res), high_res_(high_res) {}
     pair<double, pair<Eigen::Vector2f, float>>
     GetTransformation(const vector<Vector2f>& pointcloud_a,
                       const vector<Vector2f>& pointcloud_b,
                       const double rotation_min = 0,
                       const double rotation_max = 2 * M_PI);
-    // Rotation a and b are the rotations of pointcloud a and b respectively.
-    // Rotation restriction will restrict to check only that total amount of rotation around the tip of scan a.
-    // For example if you set restriction to 180 then 90 degrees at either side of the scan will be checked.
     pair<double, pair<Eigen::Vector2f, float>>
     GetTransformation(const vector<Vector2f>& pointcloud_a,
                       const vector<Vector2f>& pointcloud_b,
@@ -146,10 +144,11 @@ class CorrelativeScanMatcher {
                       const double rotation_restriction);
     Eigen::Matrix3f GetUncertaintyMatrix(const vector<Vector2f>& pointcloud_a,
                                          const vector<Vector2f>& pointcloud_b);
-    Eigen::Matrix3f GetUncertaintyMatrix(const vector<Vector2f>& pointcloud_a,
+    Eigen::Matrix2f GetUncertaintyMatrix(const vector<Vector2f>& pointcloud_a,
                                          const vector<Vector2f>& pointcloud_b,
-                                         double rotation_a,
-                                         double rotation_b);
+                                         const double rotation);
+    // Computes the local uncertainty of the *last* scan in the provided vector of point clouds, relative to the previous ones
+    std::pair<double, double> GetLocalUncertaintyStats(const vector<vector<Vector2f>>& comparisonClouds, const vector<Vector2f>& targetCloud);
     LookupTable GetLookupTableHighRes(const vector<Vector2f>& pointcloud);
     LookupTable GetLookupTableLowRes(const LookupTable& high_res_table);
 
@@ -166,6 +165,7 @@ class CorrelativeScanMatcher {
                                double y_max,
                                double rotation);
     double range_;
+    double trans_range_;
     double low_res_;
     double high_res_;
 };

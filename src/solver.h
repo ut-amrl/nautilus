@@ -15,6 +15,8 @@
 #include "ceres/ceres.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "visualization_msgs/Marker.h"
+#include "CorrelativeScanMatcher.h"
+
 
 #include "./kdtree.h"
 #include "./slam_types.h"
@@ -171,6 +173,7 @@ class VisualizationCallback : public ceres::IterationCallback {
     point_pub = n.advertise<sensor_msgs::PointCloud2>("/all_points", 10);
     new_point_pub = n.advertise<sensor_msgs::PointCloud2>("/new_points", 10);
     pose_pub = n.advertise<visualization_msgs::Marker>("/poses", 10);
+    keyframe_poses_pub = n.advertise<visualization_msgs::Marker>("/keyframe_poses", 10);
     match_pub = n.advertise<visualization_msgs::Marker>("/matches", 10);
     normals_pub = n.advertise<visualization_msgs::Marker>("/normals", 10);
     keyframe_pub = n.advertise<sensor_msgs::PointCloud2>("/keyframes", 10);
@@ -192,6 +195,12 @@ class VisualizationCallback : public ceres::IterationCallback {
                                   0.0,
                                   0.0,
                                   &normals_marker);
+    gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
+                                  gui_helpers::Color4f::kRed,
+                                  0.003,
+                                  0.0,
+                                  0.0,
+                                  &key_pose_array);
     constraint_pose_pub = n.advertise<PointCloud2>("/hitl_poses", 10);
     hitl_pointclouds = n.advertise<PointCloud2>("/hitl_pointclouds", 10);
     point_a_pub = n.advertise<PointCloud2>("/hitl_a_points",100);
@@ -213,6 +222,7 @@ class VisualizationCallback : public ceres::IterationCallback {
     const vector<SLAMNodeSolution2D>& solution_c = *solution;
     vector<Vector2f> new_points;
     gui_helpers::ClearMarker(&pose_array);
+    gui_helpers::ClearMarker(&key_pose_array);
     for (size_t i = 0; i < solution_c.size(); i++) {
       if (new_points.size() > 0) {
         all_points.insert(all_points.end(),
@@ -226,6 +236,10 @@ class VisualizationCallback : public ceres::IterationCallback {
                                 &(solution_c[i].pose[0])).cast<float>();
       Eigen::Vector3f pose(solution_c[i].pose[0], solution_c[i].pose[1], 0.0);
       gui_helpers::AddPoint(pose, gui_helpers::Color4f::kGreen, &pose_array);
+      if(solution_c[i].is_keyframe) {
+        gui_helpers::AddPoint(pose, gui_helpers::Color4f::kRed, &key_pose_array);
+      }
+
       gui_helpers::ClearMarker(&normals_marker);
       for (const Vector2f& point : pointcloud) {
         new_points.push_back(robot_to_world * point);
@@ -265,7 +279,9 @@ class VisualizationCallback : public ceres::IterationCallback {
       pose_pub.publish(pose_array);
       match_pub.publish(match_line_list);
       normals_pub.publish(normals_marker);
+      keyframe_poses_pub.publish(key_pose_array);
     }
+
     all_points.clear();
     PubConstraintVisualization();
   }
@@ -424,12 +440,15 @@ class VisualizationCallback : public ceres::IterationCallback {
   ros::Publisher new_point_pub;
   ros::Publisher normals_pub;
   ros::Publisher constraint_pose_pub;
+  ros::Publisher keyframe_poses_pub;
+
   ros::Publisher point_a_pub;
   ros::Publisher point_b_pub;
   ros::Publisher line_pub;
   ros::Publisher hitl_pointclouds;
   ros::Publisher keyframe_pub;
   visualization_msgs::Marker pose_array;
+  visualization_msgs::Marker key_pose_array;
   visualization_msgs::Marker match_line_list;
   visualization_msgs::Marker normals_marker;
   PointCloud2 pose_point_marker;
@@ -481,6 +500,7 @@ class Solver {
   void AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node);
   void AddSlamNode(SLAMNode2D& node);
   void CheckForLearnedLC(SLAMNode2D& node);
+
  private:
   void AddKeyframe(SLAMNode2D& node);
   Eigen::Matrix<double, 16, 1> GetEmbedding(SLAMNode2D& node);
@@ -496,6 +516,7 @@ class Solver {
   bool SimilarScans(const uint64_t node_a,
                     const uint64_t node_b,
                     const double certainty);
+  std::pair<double, double> GetLocalUncertainty(const uint64_t node_idx);
   vector<size_t> GetMatchingKeyframeIndices(size_t keyframe_index);
   double translation_weight_;
   double rotation_weight_;
@@ -512,6 +533,7 @@ class Solver {
   std::unique_ptr<VisualizationCallback> vis_callback_ = nullptr;
   vector<LearnedKeyframe> keyframes;
   ros::ServiceClient embedding_client;
+  CorrelativeScanMatcher scan_matcher;
 };
 
 #endif // SRC_SOLVER_H_

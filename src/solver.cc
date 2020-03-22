@@ -16,7 +16,6 @@
 #include "./math_util.h"
 #include "timer.h"
 #include "lidar_slam/HitlSlamInputMsg.h"
-#include "CorrelativeScanMatcher.h"
 #include "./gui_helpers.h"
 #include "lidar_slam/WriteMsg.h"
 #include "./line_extraction.h"
@@ -24,11 +23,14 @@
 
 #include <DEBUG.h>
 
-#define EMBEDDING_THRESHOLD 7
+#define EMBEDDING_THRESHOLD 8
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
 #define HITL_POSE_POINT_THRESHOLD 10
+#define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 9.5
+#define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .35
+#define LOCAL_UNCERTAINTY_PREV_SCANS 2
 #define DEBUG false
 
 using std::vector;
@@ -454,7 +456,8 @@ Solver::Solver(double translation_weight,
                stopping_accuracy_(stopping_accuracy),
                max_lidar_range_(max_lidar_range),
                pose_output_file_(pose_output_file),
-               n_(n) {
+               n_(n),
+               scan_matcher(10, 2, 0.3, 0.03) {
   embedding_client =
     n_.serviceClient<point_cloud_embedder::GetPointCloudEmbedding>("embed_point_cloud");
 }
@@ -515,7 +518,6 @@ void Solver::AddCollinearConstraints(const LCConstraint& constraint) {
       constraint.line_b_poses.size() == 0) {
     return;
   }
-  CorrelativeScanMatcher scan_matcher(4, 0.3, 0.03);
   
   // Find the closest pose to each pose on a on the b line.
   #pragma omp parallel for
@@ -686,7 +688,7 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::SPARSE_SCHUR;
   options.minimizer_progress_to_stdout = false;
-  options.num_threads = 1;//static_cast<int>(std::thread::hardware_concurrency());
+  options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
   ceres::Problem problem;
   PointCorrespondences correspondence(local_pose_a,
                                       local_pose_b,
@@ -734,6 +736,18 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
   return res_and_cov;
 }
 
+std::pair<double, double> Solver::GetLocalUncertainty(const uint64_t node_idx) {
+  if (node_idx < LOCAL_UNCERTAINTY_PREV_SCANS) {
+    return std::make_pair(0, 0);
+  }
+  std::vector<std::vector<Vector2f>> prevScans;
+  for(uint64_t idx = node_idx - 1; idx > node_idx - LOCAL_UNCERTAINTY_PREV_SCANS; idx--) {
+    prevScans.push_back(problem_.nodes[idx].lidar_factor.pointcloud);
+  }
+
+  return scan_matcher.GetLocalUncertaintyStats(prevScans, problem_.nodes[node_idx].lidar_factor.pointcloud);
+}
+
 bool Solver::SimilarScans(const uint64_t node_a,
                           const uint64_t node_b,
                           const double certainty) {
@@ -778,8 +792,8 @@ void Solver::AddSlamNode(SLAMNode2D& node) {
 Eigen::Matrix<double, 16, 1> Solver::GetEmbedding(SLAMNode2D& node) {
   point_cloud_embedder::GetPointCloudEmbedding srv;
   // TODO actually pass the range down here
-  std::vector<Eigen::Vector2f> normalized = pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud, max_lidar_range_); 
-  srv.request.cloud = EigenPointcloudToRos(normalized);
+  // std::vector<Eigen::Vector2f> normalized = pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud, max_lidar_range_); 
+  srv.request.cloud = EigenPointcloudToRos(node.lidar_factor.pointcloud);
   if (embedding_client.call(srv)) {
     vector<float> embedding = srv.response.embedding;
     Eigen::Matrix<float, 16, 1> mat(embedding.data());
@@ -792,6 +806,7 @@ Eigen::Matrix<double, 16, 1> Solver::GetEmbedding(SLAMNode2D& node) {
 
 void Solver::AddKeyframe(SLAMNode2D& node) {
   Eigen::Matrix<double, 16, 1> embedding = GetEmbedding(node);
+  node.is_keyframe = true;
   keyframes.emplace_back(embedding, node.node_idx);
 }
 
@@ -844,11 +859,19 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     printf("Not a keyframe from chi^2\n");
     return;
   }
+  
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
-  // TODO : Local Invariance Check
-  // Step 3: If past both of these steps then save as keyframe. Send it to the
+  auto uncertainty = GetLocalUncertainty(node.node_idx);
+  if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD || uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
+    printf("Not a keyframe due to lack of local invariance...Computed Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
+    return;
+  }
+
+  // Step 3: If past both of these steps then save as keyframe. Send it to the  
   // embedding network and store that embedding as well.
+  printf("Adding Keyframe\n");
+  WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
   AddKeyframe(node);
   return;
   // Step 4: Compare against all previous keyframes and see if there is a match
@@ -883,10 +906,12 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   printf("Found match of pose %lu to %lu\n",
           keyframes[closest_index].node_idx,
           new_keyframe.node_idx);
+  printf("timestamps: %f, %f\n\n", problem_.nodes[keyframes[closest_index].node_idx].timestamp, problem_.nodes[new_keyframe.node_idx].timestamp);
   printf("This is a LC by embedding distance!\n\n\n\n");
   // Step 6: Perform loop closure between these poses if there is a LC.
-  WaitForClose(PubPoints("New Scan", problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud));
-  WaitForClose(PubPoints("Old Scan", problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud));
+  WaitForClose(DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud));
+  WaitForClose(DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud));
+
   LearnedKeyframe best_match_keyframe = keyframes[closest_index];
   LCKeyframes(best_match_keyframe, new_keyframe);
 }
