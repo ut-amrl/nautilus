@@ -859,6 +859,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     printf("Not a keyframe from chi^2\n");
     return;
   }
+  return;
   
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
