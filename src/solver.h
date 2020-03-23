@@ -79,9 +79,9 @@ struct LineSegment {
 };
 
 struct LearnedKeyframe {
-    Eigen::Matrix<double, 16, 1> embedding;
+    Eigen::Matrix<double, 32, 1> embedding;
     const size_t node_idx;
-    LearnedKeyframe(const Eigen::Matrix<double, 16, 1>& embedding,
+    LearnedKeyframe(const Eigen::Matrix<double, 32, 1>& embedding,
                     const size_t node_idx) :
                         embedding(embedding),
                         node_idx(node_idx) {}
@@ -473,7 +473,7 @@ class Solver {
     return solution_;
   }
   LCConstraint GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg);
-  void AddCollinearConstraints(const LCConstraint& constraint);
+  bool AddCollinearConstraints(const LCConstraint& constraint);
   void SolveForLC();
   void AddCollinearResiduals(ceres::Problem* problem);
   double AddLidarResidualsForLC(ceres::Problem& problem);
@@ -485,8 +485,8 @@ class Solver {
 
  private:
   void AddKeyframe(SLAMNode2D& node);
-  Eigen::Matrix<double, 16, 1> GetEmbedding(SLAMNode2D& node);
-  void AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
+  Eigen::Matrix<double, 32, 1> GetEmbedding(SLAMNode2D& node);
+  bool AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
                             LearnedKeyframe& key_frame_b);
   void LCKeyframes(LearnedKeyframe& key_frame_a,
                    LearnedKeyframe& key_frame_b);

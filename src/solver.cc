@@ -31,7 +31,8 @@
 #define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 9.5
 #define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .35
 #define LOCAL_UNCERTAINTY_PREV_SCANS 2
-#define DEBUG false
+#define CSM_SCORE_THRESHOLD -2
+#define DEBUG true
 
 using std::vector;
 using slam_types::OdometryFactor2D;
@@ -457,7 +458,7 @@ Solver::Solver(double translation_weight,
                max_lidar_range_(max_lidar_range),
                pose_output_file_(pose_output_file),
                n_(n),
-               scan_matcher(10, 2, 0.3, 0.03) {
+               scan_matcher(10, 3, 0.3, 0.03) {
   embedding_client =
     n_.serviceClient<point_cloud_embedder::GetPointCloudEmbedding>("embed_point_cloud");
 }
@@ -513,14 +514,14 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
  * Applies the CSM transformation to each of the closest poses in A to those in B.
  *
  */
-void Solver::AddCollinearConstraints(const LCConstraint& constraint) {
+bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
   if (constraint.line_a_poses.size() == 0 ||
       constraint.line_b_poses.size() == 0) {
-    return;
+    return false;
   }
   
   // Find the closest pose to each pose on a on the b line.
-  #pragma omp parallel for
+  // TODO @Jack why are we using this loop for learned LC? We should already know the specific pose we want to be tied to.
   for (unsigned int i = 0; i < constraint.line_a_poses.size(); i++) {
     const LCPose& pose_a = constraint.line_a_poses[i];
     #if DEBUG
@@ -555,6 +556,15 @@ void Solver::AddCollinearConstraints(const LCConstraint& constraint) {
     std::cout << "Found trans with prob: " << trans_prob_pair.first << std::endl;
     std::cout << "Transformation: " << std::endl << trans.first << std::endl << trans.second << std::endl;
     #endif
+    // Then this was a badly chosen LC, let's not continue with it
+    // TODO figure out if short circuiting in the middle of this loop is OK
+    if (trans_prob_pair.first < CSM_SCORE_THRESHOLD) {
+      #if DEBUG
+      std::cout << "Failed to find valid transformation for pose, got score: " << trans_prob_pair.first << std::endl;
+      #endif
+      return false;
+    }
+
     auto closest_pose_arr = solution_[closest_pose].pose;
     solution_[pose_a.node_idx].pose[0] +=
       (closest_pose_arr[0] - pose_a_sol_pose[0]) + trans.first.x();
@@ -563,6 +573,7 @@ void Solver::AddCollinearConstraints(const LCConstraint& constraint) {
     solution_[pose_a.node_idx].pose[2] += trans.second;
   }
   loop_closure_constraints_.push_back(constraint);
+  return true;
 }
 
 vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
@@ -789,14 +800,14 @@ void Solver::AddSlamNode(SLAMNode2D& node) {
   CheckForLearnedLC(node);
 }
 
-Eigen::Matrix<double, 16, 1> Solver::GetEmbedding(SLAMNode2D& node) {
+Eigen::Matrix<double, 32, 1> Solver::GetEmbedding(SLAMNode2D& node) {
   point_cloud_embedder::GetPointCloudEmbedding srv;
   // TODO actually pass the range down here
   // std::vector<Eigen::Vector2f> normalized = pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud, max_lidar_range_); 
   srv.request.cloud = EigenPointcloudToRos(node.lidar_factor.pointcloud);
   if (embedding_client.call(srv)) {
     vector<float> embedding = srv.response.embedding;
-    Eigen::Matrix<float, 16, 1> mat(embedding.data());
+    Eigen::Matrix<float, 32, 1> mat(embedding.data());
     return mat.cast<double>();
   } else {
     std::cerr << "Failed to call service embed_point_cloud" << std::endl;
@@ -805,29 +816,30 @@ Eigen::Matrix<double, 16, 1> Solver::GetEmbedding(SLAMNode2D& node) {
 }
 
 void Solver::AddKeyframe(SLAMNode2D& node) {
-  Eigen::Matrix<double, 16, 1> embedding = GetEmbedding(node);
+  Eigen::Matrix<double, 32, 1> embedding = GetEmbedding(node);
   node.is_keyframe = true;
   keyframes.emplace_back(embedding, node.node_idx);
 }
 
-void Solver::AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
+bool Solver::AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
                                   LearnedKeyframe& key_frame_b) {
   LCConstraint constraint;
   LCPose pose_a(key_frame_a.node_idx, vector<Vector2f>());
   LCPose pose_b(key_frame_b.node_idx, vector<Vector2f>());
   constraint.line_a_poses.push_back(pose_a);
   constraint.line_b_poses.push_back(pose_b);
-  AddCollinearConstraints(constraint);
+  return AddCollinearConstraints(constraint);
 }
 
 void Solver::LCKeyframes(LearnedKeyframe& key_frame_a,
                          LearnedKeyframe& key_frame_b) {
   // Solve the problem with pseudo odometry.
   problem_.odometry_factors = GetSolvedOdomFactors();
-  AddKeyframeResiduals(key_frame_a, key_frame_b);
-  SolveSLAM();
-  problem_.odometry_factors = initial_odometry_factors;
-  SolveSLAM();
+  if (AddKeyframeResiduals(key_frame_a, key_frame_b)) {
+    SolveSLAM();
+    problem_.odometry_factors = initial_odometry_factors;
+    SolveSLAM();
+  }
 }
 
 vector<size_t> Solver::GetMatchingKeyframeIndices(size_t keyframe_index) {
@@ -878,7 +890,9 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
                    node.node_idx,
                    0.95)) {
+    #if DEBUG
     printf("Not a keyframe from chi^2\n");
+    #endif
     return;
   }
   
@@ -886,20 +900,26 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // the scans close to it using local invariance.
   auto uncertainty = GetLocalUncertainty(node.node_idx);
   if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD || uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
+    #if DEBUG
     printf("Not a keyframe due to lack of local invariance...Computed Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
+    #endif
     return;
   }
 
   // Step 3: If past both of these steps then save as keyframe. Send it to the  
   // embedding network and store that embedding as well.
+  #if DEBUG
   printf("Adding Keyframe\n");
-  WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
+  // WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
+  #endif
   AddKeyframe(node);
   // Step 4: Compare against all previous keyframes and see if there is a match
   // or is similar using Chi^2
   vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
   if (matches.size() == 0) {
+    #if DEBUG
     printf("No match from chi^2\n");
+    #endif
     return;
   }
   // Step 5: Compare the embeddings and see if there is a match as well.
@@ -909,29 +929,42 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   double closest_distance = INFINITY;
   for (size_t match_index : matches) {
     LearnedKeyframe matched_keyframe = keyframes[match_index];
+    #if DEBUG
     printf("EMBEDDINGS\n");
     std::cout << matched_keyframe.embedding.transpose() << std::endl;
     std::cout << new_keyframe.embedding.transpose() << std::endl;
+    #endif
     double distance = (matched_keyframe.embedding - new_keyframe.embedding).norm();
     if (distance < closest_distance) {
+      #if DEBUG
       printf("New minimum embedding distance found: %f\n", distance);
+      #endif
       closest_distance = distance;
       closest_index = match_index;
     }
   }
   if (closest_index == -1 || closest_distance > EMBEDDING_THRESHOLD) {
+    #if DEBUG
     printf("Out of %lu keyframes, none were sufficient for LC\n",
             matches.size());
+    #endif
     return;
   }
+  #if DEBUG
   printf("Found match of pose %lu to %lu\n",
           keyframes[closest_index].node_idx,
           new_keyframe.node_idx);
   printf("timestamps: %f, %f\n\n", problem_.nodes[keyframes[closest_index].node_idx].timestamp, problem_.nodes[new_keyframe.node_idx].timestamp);
   printf("This is a LC by embedding distance!\n\n\n\n");
   // Step 6: Perform loop closure between these poses if there is a LC.
-  WaitForClose(DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud));
-  WaitForClose(DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud));
+  std::vector<WrappedImage> images = {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud), DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
+  WaitForClose(images);
+
+  double width = furthest_point(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud).norm();
+  SaveImage("LC_1", GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud, width, 0.03));
+  width = furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
+  SaveImage("LC_2", GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud, width, 0.03));
+  #endif
 
   LearnedKeyframe best_match_keyframe = keyframes[closest_index];
   LCKeyframes(best_match_keyframe, new_keyframe);
