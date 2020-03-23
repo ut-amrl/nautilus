@@ -161,11 +161,14 @@ class VisualizationCallback : public ceres::IterationCallback {
  public:
   VisualizationCallback(const SLAMProblem2D& problem,
                         const vector<SLAMNodeSolution2D>* solution,
+                        const vector<LearnedKeyframe>& keyframes,
                         ros::NodeHandle& n) :
           problem(problem),
-          solution(solution) {
+          solution(solution),
+          keyframes(keyframes) {
     pointcloud_helpers::InitPointcloud(&all_points_marker);
     pointcloud_helpers::InitPointcloud(&new_points_marker);
+    pointcloud_helpers::InitPointcloud(&keyframe_marker);
     all_points.clear();
     point_pub = n.advertise<sensor_msgs::PointCloud2>("/all_points", 10);
     new_point_pub = n.advertise<sensor_msgs::PointCloud2>("/new_points", 10);
@@ -173,6 +176,7 @@ class VisualizationCallback : public ceres::IterationCallback {
     keyframe_poses_pub = n.advertise<visualization_msgs::Marker>("/keyframe_poses", 10);
     match_pub = n.advertise<visualization_msgs::Marker>("/matches", 10);
     normals_pub = n.advertise<visualization_msgs::Marker>("/normals", 10);
+    keyframe_pub = n.advertise<sensor_msgs::PointCloud2>("/keyframes", 10);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_STRIP,
                                   gui_helpers::Color4f::kGreen,
                                   0.002,
@@ -326,10 +330,21 @@ class VisualizationCallback : public ceres::IterationCallback {
         pointcloud_helpers::PublishPointcloud(b_points, b_points_marker,
                                               point_b_pub);
         line_pub.publish(line_marker);
-        sleep(1);
       }
     }
     PubConstraintPointclouds();
+    PubKeyframes();
+  }
+
+  void PubKeyframes() {
+    vector<Vector2f> poses;
+    for (LearnedKeyframe frame : keyframes) {
+      std::cout << "Frame #: " << frame.node_idx << std::endl;
+      const double *pose_arr = (*solution)[frame.node_idx].pose;
+      Vector2f pose_point(pose_arr[0], pose_arr[1]);
+      poses.push_back(pose_point);
+    }
+    pointcloud_helpers::PublishPointcloud(poses, keyframe_marker, keyframe_pub);
   }
 
   void AddPosePointcloud(vector<Vector2f>& pointcloud,
@@ -418,6 +433,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   std::vector<Vector2f> all_points;
   const SLAMProblem2D& problem;
   const vector<SLAMNodeSolution2D>* solution;
+  const vector<LearnedKeyframe>& keyframes;
   ros::Publisher point_pub;
   ros::Publisher pose_pub;
   ros::Publisher match_pub;
@@ -430,6 +446,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   ros::Publisher point_b_pub;
   ros::Publisher line_pub;
   ros::Publisher hitl_pointclouds;
+  ros::Publisher keyframe_pub;
   visualization_msgs::Marker pose_array;
   visualization_msgs::Marker key_pose_array;
   visualization_msgs::Marker match_line_list;
@@ -438,6 +455,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   PointCloud2 a_points_marker;
   PointCloud2 b_points_marker;
   PointCloud2 hitl_points_marker;
+  PointCloud2 keyframe_marker;
   visualization_msgs::Marker line_marker;
   // All the correspondences were the source is the same
   // (will be the last pointcloud aligned and all of its targets).

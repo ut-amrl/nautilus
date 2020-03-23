@@ -1,3 +1,9 @@
 [submodule "third_party/learning-loop-closure"]
 	path = third_party/learning-loop-closure
 	url = git@github.com:ut-amrl/learning-loop-closure.git
+[submodule "third_party/csm"]
+	path = third_party/csm
+	url = git@github.com:ut-amrl/correlative-scan-matching.git
+[submodule "third_party/vector_maps"]
+	path = third_party/vector_maps
+	url = git@github.com:ut-amrl/CuratingLongTermVectorMaps.git
