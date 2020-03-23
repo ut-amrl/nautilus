@@ -448,6 +448,7 @@ Solver::Solver(double translation_weight,
                double lc_rotation_weight,
                double stopping_accuracy,
                double max_lidar_range,
+               bool auto_lc_enabled,
                std::string pose_output_file,
                ros::NodeHandle& n) :
                translation_weight_(translation_weight),
@@ -456,6 +457,7 @@ Solver::Solver(double translation_weight,
                lc_rotation_weight_(lc_rotation_weight),
                stopping_accuracy_(stopping_accuracy),
                max_lidar_range_(max_lidar_range),
+               auto_lc_enabled_(auto_lc_enabled),
                pose_output_file_(pose_output_file),
                n_(n),
                scan_matcher(10, 3, 0.3, 0.03) {
@@ -790,14 +792,20 @@ void Solver::AddSLAMNodeOdom(SLAMNode2D& node,
   initial_odometry_factors.push_back(odom_factor_to_node);
   SLAMNodeSolution2D sol_node(node);
   solution_.push_back(sol_node);
-  CheckForLearnedLC(node);
+  if (auto_lc_enabled_) {
+    std::cout << "Auto LC Enabled" << std::endl;
+    CheckForLearnedLC(node);
+  }
 }
 
 void Solver::AddSlamNode(SLAMNode2D& node) {
   problem_.nodes.push_back(node);
   SLAMNodeSolution2D sol_node(node);
   solution_.push_back(sol_node);
-  CheckForLearnedLC(node);
+  if (auto_lc_enabled_) {
+    std::cout << "Auto LC Enabled" << std::endl;
+    CheckForLearnedLC(node);
+  }
 }
 
 Eigen::Matrix<double, 32, 1> Solver::GetEmbedding(SLAMNode2D& node) {
@@ -873,8 +881,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     #endif
     return;
   }
-  return;
-  
+
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
   auto uncertainty = GetLocalUncertainty(node.node_idx);

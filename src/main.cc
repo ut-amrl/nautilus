@@ -72,6 +72,10 @@ DEFINE_double(
    max_lidar_range,
   0,
   "The user specified range cutoff for lidar range data, if not used will be the sensor default specified in the bag (meters)");
+DEFINE_bool(
+   auto_lc,
+   true,
+   "Automatically detect and try to close loops (true by default)?");
 DEFINE_string(
     pose_output_file,
     "poses.txt",
@@ -102,17 +106,11 @@ SLAMProblem2D ProcessBagFile(const char* bag_path,
   SLAMTypeBuilder slam_builder(FLAGS_pose_num,
                                FLAGS_diff_odom,
                                FLAGS_max_lidar_range);
-  bool bag_start_time_printed = false;
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
        ros::ok() && it != view.end() && !slam_builder.Done();
        ++it) {
     const rosbag::MessageInstance &message = *it;
-    if (!bag_start_time_printed) {
-      bag_start_time_printed = true;
-      ros::Time current_time = message.getTime();
-      std::cout << "Start Time: " << current_time.sec << " s " << current_time.nsec << " n " << std::endl;
-    }
     {
       // Load all the point clouds into memory.
       sensor_msgs::LaserScanPtr laser_scan =
@@ -185,6 +183,7 @@ int main(int argc, char** argv) {
                 FLAGS_lc_rotation_weight,
                 FLAGS_stopping_accuracy,
                 FLAGS_max_lidar_range,
+                FLAGS_auto_lc,
                 FLAGS_pose_output_file,
                 n);
   LearnedLoopClosure(slam_problem, solver);
