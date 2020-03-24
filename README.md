@@ -36,6 +36,17 @@ Do not run cmake directly.
 
 ### How to run:
 
+If you are using auto loop closure detection and solving (on by default) you will have to use the following command to start the embedding generation node.
+```
+<Starting in the root of the project>
+cd third_party/learning-loop-closure/point_cloud_embedder
+source build/devel/setup.sh
+rosrun point_cloud_embedder point_cloud_embedder.py <model filename>
+```
+
+Then in another terminal window continue the following instructions.
+
+
 On linux:
 ```./bin/lidar_slam --bag_path <bags>```
 

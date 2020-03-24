@@ -28,7 +28,9 @@ void SLAMTypeBuilder::AddOdomFactor(
   auto node_j = nodes_[nodes_.size() - 2];
   double angle = node_i.pose.angle - node_j.pose.angle;
   Vector2f translation = node_i.pose.loc - node_j.pose.loc;
-  OdometryFactor2D odom_factor(nodes_.size() - 2, nodes_.size() - 1, translation, angle);
+  OdometryFactor2D odom_factor(nodes_.size() - 2,
+                               nodes_.size() - 1,
+                               translation, angle);
   odom_factors.emplace_back(odom_factor);
 }
 

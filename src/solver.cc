@@ -31,7 +31,7 @@
 #define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 9.5
 #define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .35
 #define LOCAL_UNCERTAINTY_PREV_SCANS 2
-#define CSM_SCORE_THRESHOLD -2
+#define CSM_SCORE_THRESHOLD -2.5
 #define DEBUG true
 
 using std::vector;
@@ -559,13 +559,13 @@ bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
     std::cout << "Transformation: " << std::endl << trans.first << std::endl << trans.second << std::endl;
     #endif
     // Then this was a badly chosen LC, let's not continue with it
-    // TODO figure out if short circuiting in the middle of this loop is OK
-    if (trans_prob_pair.first < CSM_SCORE_THRESHOLD) {
-      #if DEBUG
-      std::cout << "Failed to find valid transformation for pose, got score: " << trans_prob_pair.first << std::endl;
-      #endif
-      return false;
-    }
+//    // TODO figure out if short circuiting in the middle of this loop is OK
+//    if (trans_prob_pair.first < CSM_SCORE_THRESHOLD) {
+//      #if DEBUG
+//      std::cout << "Failed to find valid transformation for pose, got score: " << trans_prob_pair.first << std::endl;
+//      #endif
+//      return false;
+//    }
 
     auto closest_pose_arr = solution_[closest_pose].pose;
     solution_[pose_a.node_idx].pose[0] +=
@@ -778,10 +778,7 @@ bool Solver::SimilarScans(const uint64_t node_a,
     return false;
   }
   chi_squared dist(2);
-  if (boost::math::cdf(dist, chi_num) <= certainty) {
-    return true;
-  }
-  return false;
+  return boost::math::cdf(dist, chi_num) <= certainty;
 }
 
 void Solver::AddSLAMNodeOdom(SLAMNode2D& node,
