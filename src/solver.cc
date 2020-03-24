@@ -389,9 +389,9 @@ Solver::SolveSLAM() {
       vis_callback_->ClearNormals();
       last_difference = difference;
       difference = 0;
-      ceres::Problem ceres_problem;
+      ceres::Problem *ceres_problem = new ceres::Problem();
       // Add all the odometry constraints between our poses.
-      AddOdomFactors(&ceres_problem,
+      AddOdomFactors(ceres_problem,
                      problem_.odometry_factors,
                      translation_weight_,
                      rotation_weight_);
@@ -419,7 +419,7 @@ Solver::SolveSLAM() {
           difference /=
             problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
           // Add the correspondences as constraints in the optimization problem.
-          ceres_problem.AddResidualBlock(
+          ceres_problem->AddResidualBlock(
                   LIDARPointBlobResidual::create(correspondence.source_points,
                                                  correspondence.target_points,
                                                  correspondence.source_normals,
@@ -429,9 +429,13 @@ Solver::SolveSLAM() {
                   correspondence.target_pose);
         }
       }
-      difference += AddLidarResidualsForLC(ceres_problem);
+      difference += AddLidarResidualsForLC(*ceres_problem);
       //AddCollinearResiduals(&ceres_problem);
-      ceres::Solve(options, &ceres_problem, &summary);
+      ceres::Solve(options, ceres_problem, &summary);
+      if (last_solved_problem_ != nullptr) {
+        delete last_solved_problem_;
+      }
+      last_solved_problem_ = ceres_problem;
     } while (abs(difference - last_difference) > stopping_accuracy_);
   }
   // Call the visualization once more to see the finished optimization.
@@ -691,52 +695,37 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
   CHECK_LT(node_a, solution_.size());
   CHECK_LT(node_b, solution_.size());
   double * pose_a = solution_[node_a].pose;
-  // We don't want these to effect the original pose.
   double local_pose_a[] = {pose_a[0], pose_a[1], pose_a[2]};
   double * pose_b = solution_[node_b].pose;
   double local_pose_b[] = {pose_b[0], pose_b[1], pose_b[2]};
-  OdometryFactor2D odom_factor = GetTotalOdomChange(node_a, node_b);
-  ceres::Solver::Options options;
-  ceres::Solver::Summary summary;
-  options.linear_solver_type = ceres::SPARSE_SCHUR;
-  options.minimizer_progress_to_stdout = false;
-  options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
-  ceres::Problem problem;
-  PointCorrespondences correspondence(local_pose_a,
-                                      local_pose_b,
-                                      node_a,
-                                      node_b);
-  GetPointCorrespondences(problem_, &solution_, &correspondence, node_b, node_a);
-  vector<ceres::ResidualBlockId> residual_ids;
-  problem.AddResidualBlock(LIDARPointBlobResidual::create(
-          correspondence.source_points,
-          correspondence.target_points,
-          correspondence.source_normals,
-          correspondence.target_normals),
-                           nullptr,
-                           local_pose_a,
-                           local_pose_b);
-  ceres::ResidualBlockId odom_res_id =
-          problem.AddResidualBlock(OdometryResidual::create(odom_factor,
-                                                            translation_weight_,
-                                                            rotation_weight_),
-                                   nullptr,
-                                   local_pose_a,
-                                   local_pose_b);
-  residual_ids.push_back(odom_res_id);
-  ceres::Solve(options, &problem, &summary);
+  OdometryFactor2D odom_factor =  GetTotalOdomChange(node_a, node_b);
+  ceres::Problem two_pose_problem;
+  vector<ceres::ResidualBlockId> res_ids;
+  ceres::ResidualBlockId odom_id =
+      two_pose_problem.AddResidualBlock(OdometryResidual::create(
+            odom_factor,
+            translation_weight_,
+            rotation_weight_),
+      nullptr,
+      local_pose_a,
+      local_pose_b);
+  res_ids.push_back(odom_id);
   ceres::Problem::EvaluateOptions eval_options;
-  eval_options.residual_blocks = residual_ids;
+  eval_options.residual_blocks = res_ids;
   vector<double> residuals;
-  problem.Evaluate(eval_options, nullptr, &residuals, nullptr, nullptr);
+  two_pose_problem.Evaluate(eval_options,
+                                nullptr,
+                                &residuals,
+                                nullptr,
+                                nullptr);
   ceres::Covariance::Options cov_options;
   cov_options.algorithm_type = ceres::DENSE_SVD;
-  cov_options.null_space_rank = 2;
+  //cov_options.null_space_rank = 2;
   ceres::Covariance covariance(cov_options);
   vector<pair<const double *, const double *>> cov_blocks;
   cov_blocks.push_back(std::make_pair(local_pose_a,
                                       local_pose_b));
-  CHECK(covariance.Compute(cov_blocks, &problem));
+  CHECK(covariance.Compute(cov_blocks, last_solved_problem_));
   double covariance_ab[3 * 3];
   covariance.GetCovarianceBlock(local_pose_a,
                                 local_pose_b,
@@ -756,7 +745,6 @@ std::pair<double, double> Solver::GetLocalUncertainty(const uint64_t node_idx) {
   for(uint64_t idx = node_idx - 1; idx > node_idx - LOCAL_UNCERTAINTY_PREV_SCANS; idx--) {
     prevScans.push_back(problem_.nodes[idx].lidar_factor.pointcloud);
   }
-
   return scan_matcher.GetLocalUncertaintyStats(prevScans, problem_.nodes[node_idx].lidar_factor.pointcloud);
 }
 
@@ -772,6 +760,8 @@ bool Solver::SimilarScans(const uint64_t node_a,
           GetResidualsFromSolving(std::min(node_a, node_b), std::max(node_a, node_b));
   Eigen::Vector3d residuals = res_and_cov.first;
   Eigen::Matrix3d covariance = res_and_cov.second;
+  std::cout << "Residuals\n" << residuals << std::endl;
+  std::cout << "Covariance:\n" << covariance << std::endl;
   double chi_num = residuals.transpose() * covariance * residuals;
   if (chi_num < 0) {
     return false;
@@ -830,8 +820,8 @@ bool Solver::AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
 void Solver::LCKeyframes(LearnedKeyframe& key_frame_a,
                          LearnedKeyframe& key_frame_b) {
   // Solve the problem with pseudo odometry.
-  problem_.odometry_factors = GetSolvedOdomFactors();
   if (AddKeyframeResiduals(key_frame_a, key_frame_b)) {
+    problem_.odometry_factors = GetSolvedOdomFactors();
     SolveSLAM();
     problem_.odometry_factors = initial_odometry_factors;
     SolveSLAM();
