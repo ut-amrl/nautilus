@@ -501,7 +501,6 @@ class Solver {
   void AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node);
   void AddSlamNode(SLAMNode2D& node);
   void CheckForLearnedLC(SLAMNode2D& node);
-
  private:
   void AddKeyframe(SLAMNode2D& node);
   Eigen::Matrix<double, 32, 1> GetEmbedding(SLAMNode2D& node);

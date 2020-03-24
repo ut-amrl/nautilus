@@ -523,7 +523,6 @@ bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
   }
   
   // Find the closest pose to each pose on a on the b line.
-  // TODO @Jack why are we using this loop for learned LC? We should already know the specific pose we want to be tied to.
   for (unsigned int i = 0; i < constraint.line_a_poses.size(); i++) {
     const LCPose& pose_a = constraint.line_a_poses[i];
     #if DEBUG
@@ -559,13 +558,13 @@ bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
     std::cout << "Transformation: " << std::endl << trans.first << std::endl << trans.second << std::endl;
     #endif
     // Then this was a badly chosen LC, let's not continue with it
-//    // TODO figure out if short circuiting in the middle of this loop is OK
-//    if (trans_prob_pair.first < CSM_SCORE_THRESHOLD) {
-//      #if DEBUG
-//      std::cout << "Failed to find valid transformation for pose, got score: " << trans_prob_pair.first << std::endl;
-//      #endif
-//      return false;
-//    }
+    // TODO figure out if short circuiting in the middle of this loop is OK
+    if (trans_prob_pair.first < CSM_SCORE_THRESHOLD) {
+      #if DEBUG
+      std::cout << "Failed to find valid transformation for pose, got score: " << trans_prob_pair.first << std::endl;
+      #endif
+      return false;
+    }
 
     auto closest_pose_arr = solution_[closest_pose].pose;
     solution_[pose_a.node_idx].pose[0] +=
@@ -789,20 +788,12 @@ void Solver::AddSLAMNodeOdom(SLAMNode2D& node,
   initial_odometry_factors.push_back(odom_factor_to_node);
   SLAMNodeSolution2D sol_node(node);
   solution_.push_back(sol_node);
-  if (auto_lc_enabled_) {
-    std::cout << "Auto LC Enabled" << std::endl;
-    CheckForLearnedLC(node);
-  }
 }
 
 void Solver::AddSlamNode(SLAMNode2D& node) {
   problem_.nodes.push_back(node);
   SLAMNodeSolution2D sol_node(node);
   solution_.push_back(sol_node);
-  if (auto_lc_enabled_) {
-    std::cout << "Auto LC Enabled" << std::endl;
-    CheckForLearnedLC(node);
-  }
 }
 
 Eigen::Matrix<double, 32, 1> Solver::GetEmbedding(SLAMNode2D& node) {
@@ -878,6 +869,8 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     #endif
     return;
   }
+  AddKeyframe(node);
+  return; // TODO: Remove, using for testing ChiSquared
 
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.

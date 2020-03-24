@@ -158,6 +158,14 @@ void LearnedLoopClosure(SLAMProblem2D& slam_problem,
     }
   }
   solver.SolveSLAM();
+  // Do a final pass through and check for any LC nodes.
+  // But only if automatic loop closure is enabled.
+  if (FLAGS_auto_lc) {
+    for (SLAMNode2D node : slam_problem.nodes) {
+      solver.CheckForLearnedLC(node);
+    }
+    solver.SolveSLAM();
+  }
 }
 
 int main(int argc, char** argv) {
