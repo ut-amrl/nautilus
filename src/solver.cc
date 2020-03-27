@@ -51,6 +51,7 @@ using slam_types::SLAMNode2D;
 using Eigen::Vector3f;
 using math_util::NormalsSimilar;
 using pointcloud_helpers::EigenPointcloudToRos;
+using point_cloud_embedder::GetPointCloudEmbedding;
 
 double DistBetween(double pose_a[3], double pose_b[3]) {
   Vector2f pose_a_pos(pose_a[0], pose_a[1]);
@@ -466,7 +467,7 @@ Solver::Solver(double translation_weight,
                n_(n),
                scan_matcher(10, 3, 0.3, 0.03) {
   embedding_client =
-    n_.serviceClient<point_cloud_embedder::GetPointCloudEmbedding>("embed_point_cloud");
+    n_.serviceClient<GetPointCloudEmbedding>("embed_point_cloud");
 }
 
 /*
@@ -497,7 +498,8 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
     double *pose_ptr = solution_[node_idx].pose;
     Affine2f node_to_world =
             PoseArrayToAffine(&pose_ptr[2], &pose_ptr[0]).cast<float>();
-    for (const Vector2f& point : problem_.nodes[node_idx].lidar_factor.pointcloud) {
+    for (const Vector2f& point :
+         problem_.nodes[node_idx].lidar_factor.pointcloud) {
       Vector2f point_transformed = node_to_world * point;
       if (DistanceToLineSegment(point_transformed, lines[0]) <=
           HITL_LINE_WIDTH) {
@@ -517,8 +519,8 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
 }
 
 /*
- * Applies the CSM transformation to each of the closest poses in A to those in B.
- *
+ * Applies the CSM transformation to each
+ * of the closest poses in A to those in B.
  */
 bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
   if (constraint.line_a_poses.size() == 0 ||
@@ -534,8 +536,9 @@ bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
     #endif
     auto pose_a_sol_pose = solution_[pose_a.node_idx].pose;
     size_t closest_pose = constraint.line_b_poses[0].node_idx;
-    double closest_dist = DistBetween(pose_a_sol_pose,
-                                      solution_[constraint.line_b_poses[0].node_idx].pose);
+    double closest_dist =
+      DistBetween(pose_a_sol_pose,
+                  solution_[constraint.line_b_poses[0].node_idx].pose);
     for (const LCPose& pose_b : constraint.line_b_poses) {
       auto pose_b_sol_pose = solution_[pose_b.node_idx].pose;
       if (DistBetween(pose_a_sol_pose, pose_b_sol_pose) < closest_dist) {
@@ -558,14 +561,17 @@ bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
         math_util::DegToRad(180));
     auto trans = trans_prob_pair.second;
     #if DEBUG
-    std::cout << "Found trans with prob: " << trans_prob_pair.first << std::endl;
-    std::cout << "Transformation: " << std::endl << trans.first << std::endl << trans.second << std::endl;
+    std::cout << "Found trans with prob: " << trans_prob_pair.first
+              << std::endl;
+    std::cout << "Transformation: " << std::endl << trans.first << std::endl
+              << trans.second << std::endl;
     #endif
     // Then this was a badly chosen LC, let's not continue with it
     // TODO figure out if short circuiting in the middle of this loop is OK
     if (trans_prob_pair.first < CSM_SCORE_THRESHOLD) {
       #if DEBUG
-      std::cout << "Failed to find valid transformation for pose, got score: " << trans_prob_pair.first << std::endl;
+      std::cout << "Failed to find valid transformation for pose, got score: "
+                << trans_prob_pair.first << std::endl;
       #endif
       return false;
     }
@@ -637,7 +643,8 @@ void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
   output_file.close();
 }
 
-vector<Vector2f> TransformPointcloud(double * pose, const vector<Vector2f> pointcloud) {
+vector<Vector2f> TransformPointcloud(double * pose,
+                                     const vector<Vector2f> pointcloud) {
   vector<Vector2f> pcloud;
   Eigen::Affine2f trans = PoseArrayToAffine(&pose[2], &pose[0]).cast<float>();
   for (const Vector2f& p : pointcloud) {
@@ -658,12 +665,21 @@ void Solver::Vectorize(const WriteMsgConstPtr& msg) {
   vector<LineSegment> lines = VectorMaps::ExtractLines(whole_pointcloud);
   // --- Visualize ---
   visualization_msgs::Marker line_mark;
-  gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST, gui_helpers::Color4f::kWhite, 0.05, 0.00, 0.00, &line_mark);
-  ros::Publisher lines_pub = n_.advertise<visualization_msgs::Marker>("/debug_lines", 10);
+  gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
+                                gui_helpers::Color4f::kWhite,
+                                0.05,
+                                0.00,
+                                0.00,
+                                &line_mark);
+  ros::Publisher lines_pub =
+    n_.advertise<visualization_msgs::Marker>("/debug_lines", 10);
   for (const LineSegment& line : lines) {
     Vector3f line_start(line.start_point.x(), line.start_point.y(), 0.0);
     Vector3f line_end(line.end_point.x(), line.end_point.y(), 0.0);
-    gui_helpers::AddLine(line_start, line_end, gui_helpers::Color4f::kWhite, &line_mark);
+    gui_helpers::AddLine(line_start,
+                         line_end,
+                         gui_helpers::Color4f::kWhite,
+                         &line_mark);
   }
   std::cout << "Pointcloud size: " << whole_pointcloud.size() << std::endl;
   std::cout << "Lines size: " << lines.size() << std::endl;
@@ -692,17 +708,33 @@ OdometryFactor2D Solver::GetTotalOdomChange(const uint64_t node_a,
 std::pair<Eigen::Vector3d, Eigen::Matrix3d>
 Solver::GetResidualsFromSolving(const uint64_t node_a,
                                 const uint64_t node_b) {
+  if (last_solved_problem_ == nullptr) {
+    throw std::runtime_error("Problem not solved yet.");
+  }
+  // TODO: Ask about the static covariance problem.
+  // I have tried using the original problem as I don't know if just evaluating
+  // will give you the covariance. I don't think it will.
+  // But I get a memory leak error when not doing it this way. Don't know
+  // exactly what is causing that but, how many evaluate residuals won't affect the covariance,
+  // will they?
+
+  // Make sure these are valid nodes.
   CHECK_LT(node_a, solution_.size());
   CHECK_LT(node_b, solution_.size());
+
+  // Copy the poses over to the stack so that we can't change the actual values.
   double * pose_a = solution_[node_a].pose;
   double local_pose_a[] = {pose_a[0], pose_a[1], pose_a[2]};
   double * pose_b = solution_[node_b].pose;
   double local_pose_b[] = {pose_b[0], pose_b[1], pose_b[2]};
+
+  // Construct an Odometry factor from node_a to node_b so we can get just
+  // the error between these two nodes.
   OdometryFactor2D odom_factor =  GetTotalOdomChange(node_a, node_b);
-  ceres::Problem two_pose_problem;
+  //ceres::Problem two_pose_problem;
   vector<ceres::ResidualBlockId> res_ids;
   ceres::ResidualBlockId odom_id =
-      two_pose_problem.AddResidualBlock(OdometryResidual::create(
+      last_solved_problem_->AddResidualBlock(OdometryResidual::create(
             odom_factor,
             translation_weight_,
             rotation_weight_),
@@ -710,17 +742,20 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
       local_pose_a,
       local_pose_b);
   res_ids.push_back(odom_id);
+
+  // Evaluate the cost functions for this one odometry residual.
   ceres::Problem::EvaluateOptions eval_options;
   eval_options.residual_blocks = res_ids;
   vector<double> residuals;
-  two_pose_problem.Evaluate(eval_options,
-                                nullptr,
-                                &residuals,
-                                nullptr,
-                                nullptr);
+  last_solved_problem_->Evaluate(eval_options,
+                            nullptr,
+                            &residuals,
+                            nullptr,
+                            nullptr);
+
+  // Get the covariance from this problem.
   ceres::Covariance::Options cov_options;
   cov_options.algorithm_type = ceres::DENSE_SVD;
-  //cov_options.null_space_rank = 2;
   ceres::Covariance covariance(cov_options);
   vector<pair<const double *, const double *>> cov_blocks;
   cov_blocks.push_back(std::make_pair(local_pose_a,
@@ -851,23 +886,26 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   }
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
   // basically is it different than the last keyframe.
-  if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
-                   node.node_idx,
-                   0.95)) {
-    #if DEBUG
-    printf("Not a keyframe from chi^2\n");
-    #endif
-    return;
-  }
-  AddKeyframe(node);
+//  if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
+//                   node.node_idx,
+//                   0.95)) {
+//    #if DEBUG
+//    printf("Not a keyframe from chi^2\n");
+//    #endif
+//    return;
+//  }
+//  AddKeyframe(node);
   return; // TODO: Remove, using for testing ChiSquared
 
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
   auto uncertainty = GetLocalUncertainty(node.node_idx);
-  if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD || uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
+  if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD ||
+      uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
     #if DEBUG
-    printf("Not a keyframe due to lack of local invariance...Computed Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
+    printf("Not a keyframe due to lack of local invariance... Computed Uncertainty: %f, %f\n",
+            uncertainty.first,
+            uncertainty.second);
     #endif
     return;
   }
@@ -900,7 +938,8 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     std::cout << matched_keyframe.embedding.transpose() << std::endl;
     std::cout << new_keyframe.embedding.transpose() << std::endl;
     #endif
-    double distance = (matched_keyframe.embedding - new_keyframe.embedding).norm();
+    double distance =
+      (matched_keyframe.embedding - new_keyframe.embedding).norm();
     if (distance < closest_distance) {
       #if DEBUG
       printf("New minimum embedding distance found: %f\n", distance);
@@ -920,10 +959,14 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   printf("Found match of pose %lu to %lu\n",
           keyframes[closest_index].node_idx,
           new_keyframe.node_idx);
-  printf("timestamps: %f, %f\n\n", problem_.nodes[keyframes[closest_index].node_idx].timestamp, problem_.nodes[new_keyframe.node_idx].timestamp);
+  printf("timestamps: %f, %f\n\n",
+          problem_.nodes[keyframes[closest_index].node_idx].timestamp,
+          problem_.nodes[new_keyframe.node_idx].timestamp);
   printf("This is a LC by embedding distance!\n\n\n\n");
   // Step 6: Perform loop closure between these poses if there is a LC.
-  std::vector<WrappedImage> images = {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud), DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
+  std::vector<WrappedImage> images =
+    {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud),
+     DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
   WaitForClose(images);
 
   double width = furthest_point(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud).norm();
