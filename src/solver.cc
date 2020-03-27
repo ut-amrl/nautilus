@@ -31,7 +31,7 @@
 #define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 9.5
 #define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .35
 #define LOCAL_UNCERTAINTY_PREV_SCANS 2
-#define CSM_SCORE_THRESHOLD -2.5
+#define CSM_SCORE_THRESHOLD -5
 #define DEBUG true
 
 using std::vector;
@@ -703,20 +703,7 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
   options.minimizer_progress_to_stdout = false;
   options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
   ceres::Problem problem;
-  PointCorrespondences correspondence(local_pose_a,
-                                      local_pose_b,
-                                      node_a,
-                                      node_b);
-  GetPointCorrespondences(problem_, &solution_, &correspondence, node_b, node_a);
   vector<ceres::ResidualBlockId> residual_ids;
-  problem.AddResidualBlock(LIDARPointBlobResidual::create(
-          correspondence.source_points,
-          correspondence.target_points,
-          correspondence.source_normals,
-          correspondence.target_normals),
-                           nullptr,
-                           local_pose_a,
-                           local_pose_b);
   ceres::ResidualBlockId odom_res_id =
           problem.AddResidualBlock(OdometryResidual::create(odom_factor,
                                                             translation_weight_,
