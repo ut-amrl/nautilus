@@ -156,11 +156,14 @@ void LearnedLoopClosure(SLAMProblem2D& slam_problem,
       solver.AddSLAMNodeOdom(slam_problem.nodes[node_index],
                              slam_problem.odometry_factors[node_index - 1]);
     }
+    std::cout << "Nodes added: " << node_index + 1 << std::endl;
   }
+  std::cout << "Solving initial" << std::endl;
   solver.SolveSLAM();
   // Do a final pass through and check for any LC nodes.
   // But only if automatic loop closure is enabled.
   if (FLAGS_auto_lc) {
+    std::cout << "Automatically loop closing" << std::endl;
     for (SLAMNode2D node : slam_problem.nodes) {
       solver.CheckForLearnedLC(node);
     }

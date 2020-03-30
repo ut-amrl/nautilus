@@ -390,9 +390,9 @@ Solver::SolveSLAM() {
       vis_callback_->ClearNormals();
       last_difference = difference;
       difference = 0;
-      ceres::Problem *ceres_problem = new ceres::Problem();
+      std::shared_ptr<ceres::Problem> ceres_problem(new ceres::Problem());
       // Add all the odometry constraints between our poses.
-      AddOdomFactors(ceres_problem,
+      AddOdomFactors(ceres_problem.get(),
                      problem_.odometry_factors,
                      translation_weight_,
                      rotation_weight_);
@@ -432,11 +432,8 @@ Solver::SolveSLAM() {
       }
       difference += AddLidarResidualsForLC(*ceres_problem);
       //AddCollinearResiduals(&ceres_problem);
-      ceres::Solve(options, ceres_problem, &summary);
-      if (last_solved_problem_ != nullptr) {
-        delete last_solved_problem_;
-      }
-      last_solved_problem_ = ceres_problem;
+      ceres::Solve(options, ceres_problem.get(), &summary);
+      last_solved_problem_.swap(ceres_problem);
     } while (abs(difference - last_difference) > stopping_accuracy_);
   }
   // Call the visualization once more to see the finished optimization.
@@ -711,13 +708,7 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
   if (last_solved_problem_ == nullptr) {
     throw std::runtime_error("Problem not solved yet.");
   }
-  // TODO: Ask about the static covariance problem.
-  // I have tried using the original problem as I don't know if just evaluating
-  // will give you the covariance. I don't think it will.
-  // But I get a memory leak error when not doing it this way. Don't know
-  // exactly what is causing that but, how many evaluate residuals won't affect the covariance,
-  // will they?
-
+  std::cout << "Solving residuals A: " << node_a << " B: " << node_b << std::endl;
   // Make sure these are valid nodes.
   CHECK_LT(node_a, solution_.size());
   CHECK_LT(node_b, solution_.size());
@@ -746,21 +737,26 @@ Solver::GetResidualsFromSolving(const uint64_t node_a,
   // Evaluate the cost functions for this one odometry residual.
   ceres::Problem::EvaluateOptions eval_options;
   eval_options.residual_blocks = res_ids;
+  vector<double *> param_blocks;
+  param_blocks.push_back(local_pose_a);
+  param_blocks.push_back(local_pose_b);
+  eval_options.parameter_blocks = param_blocks;
   vector<double> residuals;
   last_solved_problem_->Evaluate(eval_options,
                             nullptr,
                             &residuals,
                             nullptr,
                             nullptr);
-
+  std::cout << "Evaluated" << std::endl;
   // Get the covariance from this problem.
   ceres::Covariance::Options cov_options;
-  cov_options.algorithm_type = ceres::DENSE_SVD;
+  cov_options.algorithm_type = ceres::SPARSE_QR;
+  cov_options.sparse_linear_algebra_library_type = ceres::SUITE_SPARSE;
   ceres::Covariance covariance(cov_options);
   vector<pair<const double *, const double *>> cov_blocks;
   cov_blocks.push_back(std::make_pair(local_pose_a,
                                       local_pose_b));
-  CHECK(covariance.Compute(cov_blocks, last_solved_problem_));
+  CHECK(covariance.Compute(cov_blocks, last_solved_problem_.get()));
   double covariance_ab[3 * 3];
   covariance.GetCovarianceBlock(local_pose_a,
                                 local_pose_b,
@@ -783,12 +779,15 @@ std::pair<double, double> Solver::GetLocalUncertainty(const uint64_t node_idx) {
   return scan_matcher.GetLocalUncertaintyStats(prevScans, problem_.nodes[node_idx].lidar_factor.pointcloud);
 }
 
+static int similar_scan_run_num = 0;
 bool Solver::SimilarScans(const uint64_t node_a,
                           const uint64_t node_b,
                           const double certainty) {
   if (node_a == node_b) {
     return false;
   }
+  similar_scan_run_num++;
+  std::cout << "SS Run Num: " << similar_scan_run_num << std::endl;
   CHECK_LE(certainty, 1.0);
   CHECK_GE(certainty, 0.0);
   pair<Eigen::Vector3d, Eigen::Matrix3d> res_and_cov =
@@ -886,95 +885,95 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   }
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
   // basically is it different than the last keyframe.
-//  if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
-//                   node.node_idx,
-//                   0.95)) {
-//    #if DEBUG
-//    printf("Not a keyframe from chi^2\n");
-//    #endif
-//    return;
-//  }
-//  AddKeyframe(node);
+  if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
+                   node.node_idx,
+                   0.95)) {
+    #if DEBUG
+    printf("Not a keyframe from chi^2\n");
+    #endif
+    return;
+  }
+  AddKeyframe(node);
   return; // TODO: Remove, using for testing ChiSquared
 
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
-  auto uncertainty = GetLocalUncertainty(node.node_idx);
-  if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD ||
-      uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
-    #if DEBUG
-    printf("Not a keyframe due to lack of local invariance... Computed Uncertainty: %f, %f\n",
-            uncertainty.first,
-            uncertainty.second);
-    #endif
-    return;
-  }
-
-  // Step 3: If past both of these steps then save as keyframe. Send it to the  
-  // embedding network and store that embedding as well.
-  #if DEBUG
-  printf("Adding Keyframe\n");
-  // WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
-  #endif
-  AddKeyframe(node);
-  // Step 4: Compare against all previous keyframes and see if there is a match
-  // or is similar using Chi^2
-  vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
-  if (matches.size() == 0) {
-    #if DEBUG
-    printf("No match from chi^2\n");
-    #endif
-    return;
-  }
-  // Step 5: Compare the embeddings and see if there is a match as well.
-  // Find the closest embedding in all the matches to our new keyframe.
-  LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
-  int64_t closest_index = -1;
-  double closest_distance = INFINITY;
-  for (size_t match_index : matches) {
-    LearnedKeyframe matched_keyframe = keyframes[match_index];
-    #if DEBUG
-    printf("EMBEDDINGS\n");
-    std::cout << matched_keyframe.embedding.transpose() << std::endl;
-    std::cout << new_keyframe.embedding.transpose() << std::endl;
-    #endif
-    double distance =
-      (matched_keyframe.embedding - new_keyframe.embedding).norm();
-    if (distance < closest_distance) {
-      #if DEBUG
-      printf("New minimum embedding distance found: %f\n", distance);
-      #endif
-      closest_distance = distance;
-      closest_index = match_index;
-    }
-  }
-  if (closest_index == -1 || closest_distance > EMBEDDING_THRESHOLD) {
-    #if DEBUG
-    printf("Out of %lu keyframes, none were sufficient for LC\n",
-            matches.size());
-    #endif
-    return;
-  }
-  #if DEBUG
-  printf("Found match of pose %lu to %lu\n",
-          keyframes[closest_index].node_idx,
-          new_keyframe.node_idx);
-  printf("timestamps: %f, %f\n\n",
-          problem_.nodes[keyframes[closest_index].node_idx].timestamp,
-          problem_.nodes[new_keyframe.node_idx].timestamp);
-  printf("This is a LC by embedding distance!\n\n\n\n");
-  // Step 6: Perform loop closure between these poses if there is a LC.
-  std::vector<WrappedImage> images =
-    {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud),
-     DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
-  WaitForClose(images);
-
-  double width = furthest_point(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud).norm();
-  SaveImage("LC_1", GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud, width, 0.03));
-  width = furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
-  SaveImage("LC_2", GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud, width, 0.03));
-  #endif
-
-  LearnedKeyframe best_match_keyframe = keyframes[closest_index];
-  LCKeyframes(best_match_keyframe, new_keyframe);
+//  auto uncertainty = GetLocalUncertainty(node.node_idx);
+//  if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD ||
+//      uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
+//    #if DEBUG
+//    printf("Not a keyframe due to lack of local invariance... Computed Uncertainty: %f, %f\n",
+//            uncertainty.first,
+//            uncertainty.second);
+//    #endif
+//    return;
+//  }
+//
+//  // Step 3: If past both of these steps then save as keyframe. Send it to the
+//  // embedding network and store that embedding as well.
+//  #if DEBUG
+//  printf("Adding Keyframe\n");
+//  // WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
+//  #endif
+//  AddKeyframe(node);
+//  // Step 4: Compare against all previous keyframes and see if there is a match
+//  // or is similar using Chi^2
+//  vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
+//  if (matches.size() == 0) {
+//    #if DEBUG
+//    printf("No match from chi^2\n");
+//    #endif
+//    return;
+//  }
+//  // Step 5: Compare the embeddings and see if there is a match as well.
+//  // Find the closest embedding in all the matches to our new keyframe.
+//  LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
+//  int64_t closest_index = -1;
+//  double closest_distance = INFINITY;
+//  for (size_t match_index : matches) {
+//    LearnedKeyframe matched_keyframe = keyframes[match_index];
+//    #if DEBUG
+//    printf("EMBEDDINGS\n");
+//    std::cout << matched_keyframe.embedding.transpose() << std::endl;
+//    std::cout << new_keyframe.embedding.transpose() << std::endl;
+//    #endif
+//    double distance =
+//      (matched_keyframe.embedding - new_keyframe.embedding).norm();
+//    if (distance < closest_distance) {
+//      #if DEBUG
+//      printf("New minimum embedding distance found: %f\n", distance);
+//      #endif
+//      closest_distance = distance;
+//      closest_index = match_index;
+//    }
+//  }
+//  if (closest_index == -1 || closest_distance > EMBEDDING_THRESHOLD) {
+//    #if DEBUG
+//    printf("Out of %lu keyframes, none were sufficient for LC\n",
+//            matches.size());
+//    #endif
+//    return;
+//  }
+//  #if DEBUG
+//  printf("Found match of pose %lu to %lu\n",
+//          keyframes[closest_index].node_idx,
+//          new_keyframe.node_idx);
+//  printf("timestamps: %f, %f\n\n",
+//          problem_.nodes[keyframes[closest_index].node_idx].timestamp,
+//          problem_.nodes[new_keyframe.node_idx].timestamp);
+//  printf("This is a LC by embedding distance!\n\n\n\n");
+//  // Step 6: Perform loop closure between these poses if there is a LC.
+//  std::vector<WrappedImage> images =
+//    {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud),
+//     DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
+//  WaitForClose(images);
+//
+//  double width = furthest_point(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud).norm();
+//  SaveImage("LC_1", GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud, width, 0.03));
+//  width = furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
+//  SaveImage("LC_2", GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud, width, 0.03));
+//  #endif
+//
+//  LearnedKeyframe best_match_keyframe = keyframes[closest_index];
+//  LCKeyframes(best_match_keyframe, new_keyframe);
 }

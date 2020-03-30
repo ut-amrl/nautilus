@@ -535,7 +535,7 @@ class Solver {
   vector<LearnedKeyframe> keyframes;
   ros::ServiceClient embedding_client;
   CorrelativeScanMatcher scan_matcher;
-  ceres::Problem *last_solved_problem_ = nullptr;
+  std::shared_ptr<ceres::Problem> last_solved_problem_;
 };
 
 #endif // SRC_SOLVER_H_
