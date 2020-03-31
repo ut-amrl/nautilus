@@ -339,7 +339,6 @@ class VisualizationCallback : public ceres::IterationCallback {
   void PubKeyframes() {
     vector<Vector2f> poses;
     for (LearnedKeyframe frame : keyframes) {
-      std::cout << "Frame #: " << frame.node_idx << std::endl;
       const double *pose_arr = (*solution)[frame.node_idx].pose;
       Vector2f pose_point(pose_arr[0], pose_arr[1]);
       poses.push_back(pose_point);

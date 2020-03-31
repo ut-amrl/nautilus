@@ -82,6 +82,7 @@ constexpr T DegToRad(T angle) {
 
 template <typename T>
 T AngleMod(T angle) {
+  angle += M_2PI;
   angle -= M_2PI * rint(angle / M_2PI);
   return angle;
 }

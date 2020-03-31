@@ -58,6 +58,15 @@ double DistBetween(double pose_a[3], double pose_b[3]) {
   return (pose_a_pos - pose_b_pos).norm();
 }
 
+vector<Vector2f> TransformPointcloud(double * pose, const vector<Vector2f> pointcloud) {
+  vector<Vector2f> pcloud;
+  Eigen::Affine2f trans = PoseArrayToAffine(&pose[2], &pose[0]).cast<float>();
+  for (const Vector2f& p : pointcloud) {
+    pcloud.push_back(trans * p);
+  }
+  return pcloud;
+}
+
 struct OdometryResidual {
   template <typename T>
   bool operator() (const T* pose_i,
@@ -544,15 +553,15 @@ bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
     CHECK_LT(closest_pose, problem_.nodes.size());
     CHECK_LT(pose_a.node_idx, problem_.nodes.size());
     #if DEBUG
-    std::cout << "Finding trans" << std::endl;
+    std::cout << "Finding trans, estamted rotations: " << pose_a_sol_pose[2] << " vs " << solution_[closest_pose].pose[2] << std::endl;
     #endif
     std::pair<double, std::pair<Vector2f, float>> trans_prob_pair =
       scan_matcher.GetTransformation(
         problem_.nodes[pose_a.node_idx].lidar_factor.pointcloud,
         problem_.nodes[closest_pose].lidar_factor.pointcloud,
-        solution_[pose_a.node_idx].pose[2],
+        pose_a_sol_pose[2],
         solution_[closest_pose].pose[2],
-        math_util::DegToRad(180));
+        math_util::DegToRad(90));
     auto trans = trans_prob_pair.second;
     #if DEBUG
     std::cout << "Found trans with prob: " << trans_prob_pair.first << std::endl;
@@ -572,7 +581,12 @@ bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
       (closest_pose_arr[0] - pose_a_sol_pose[0]) + trans.first.x();
     solution_[pose_a.node_idx].pose[1] +=
       (closest_pose_arr[1] - pose_a_sol_pose[1]) + trans.first.y();
-    solution_[pose_a.node_idx].pose[2] += trans.second;
+    solution_[pose_a.node_idx].pose[2] = solution_[closest_pose].pose[2] + trans.second;
+    #if DEBUG
+    std::cout << "Updating Pose: Closest (" <<  solution_[closest_pose].pose[2] <<  "). Relative: (" << trans.second << "). New: (" << solution_[pose_a.node_idx].pose[2] << ")." << std::endl;
+    #endif
+    // std::vector<WrappedImage> images = {DrawPoints(TransformPointcloud(solution_[pose_a.node_idx].pose, problem_.nodes[pose_a.node_idx].lidar_factor.pointcloud)), DrawPoints(TransformPointcloud(closest_pose_arr, problem_.nodes[closest_pose].lidar_factor.pointcloud))};
+    // WaitForClose(images);
   }
   loop_closure_constraints_.push_back(constraint);
   return true;
@@ -632,15 +646,6 @@ void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
                 << std::endl;
   }
   output_file.close();
-}
-
-vector<Vector2f> TransformPointcloud(double * pose, const vector<Vector2f> pointcloud) {
-  vector<Vector2f> pcloud;
-  Eigen::Affine2f trans = PoseArrayToAffine(&pose[2], &pose[0]).cast<float>();
-  for (const Vector2f& p : pointcloud) {
-    pcloud.push_back(trans * p);
-  }
-  return pcloud;
 }
 
 void Solver::Vectorize(const WriteMsgConstPtr& msg) {
@@ -857,24 +862,27 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   }
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
   // basically is it different than the last keyframe.
-  if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
-                   node.node_idx,
-                   0.95)) {
-    #if DEBUG
-    printf("Not a keyframe from chi^2\n");
-    #endif
-    return;
-  }
+  // if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
+  //                  node.node_idx,
+  //                  0.95)) {
+  //   #if DEBUG
+  //   printf("Not a keyframe from chi^2\n");
+  //   #endif
+  //   return;
+  // }
 
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
-  auto uncertainty = GetLocalUncertainty(node.node_idx);
-  if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD || uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
-    #if DEBUG
-    printf("Not a keyframe due to lack of local invariance...Computed Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
-    #endif
-    return;
-  }
+  // auto uncertainty = GetLocalUncertainty(node.node_idx);
+  // #if DEBUG
+  // printf("Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
+  // #endif
+  // if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD || uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
+  //   #if DEBUG
+  //   printf("Not a keyframe due to lack of local invariance...Computed Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
+  //   #endif
+  //   return;
+  // }
 
   // Step 3: If past both of these steps then save as keyframe. Send it to the  
   // embedding network and store that embedding as well.
