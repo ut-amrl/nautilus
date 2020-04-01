@@ -23,7 +23,7 @@
 
 #include <DEBUG.h>
 
-#define EMBEDDING_THRESHOLD 8
+#define EMBEDDING_THRESHOLD 4
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
@@ -31,7 +31,7 @@
 #define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 9.5
 #define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .35
 #define LOCAL_UNCERTAINTY_PREV_SCANS 2
-#define CSM_SCORE_THRESHOLD -5
+#define CSM_SCORE_THRESHOLD -3.5
 #define DEBUG true
 
 using std::vector;
@@ -569,12 +569,12 @@ bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
     #endif
     // Then this was a badly chosen LC, let's not continue with it
 //    // TODO figure out if short circuiting in the middle of this loop is OK
-//    if (trans_prob_pair.first < CSM_SCORE_THRESHOLD) {
-//      #if DEBUG
-//      std::cout << "Failed to find valid transformation for pose, got score: " << trans_prob_pair.first << std::endl;
-//      #endif
-//      return false;
-//    }
+    if (trans_prob_pair.first < CSM_SCORE_THRESHOLD) {
+      #if DEBUG
+      std::cout << "Failed to find valid transformation for pose, got score: " << trans_prob_pair.first << std::endl;
+      #endif
+      return false;
+    }
 
     auto closest_pose_arr = solution_[closest_pose].pose;
     solution_[pose_a.node_idx].pose[0] +=
@@ -855,34 +855,41 @@ vector<size_t> Solver::GetMatchingKeyframeIndices(size_t keyframe_index) {
 }
 
 void Solver::CheckForLearnedLC(SLAMNode2D& node) {
+  #if DEBUG
+  printf("Processing node %lu\n", node.node_idx);
+  #endif
   // First node is always a keyframe for simplicity.
   if (keyframes.size() == 0) {
     AddKeyframe(node);
     return;
-  }
+  } 
+
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
   // basically is it different than the last keyframe.
-  // if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
-  //                  node.node_idx,
-  //                  0.95)) {
-  //   #if DEBUG
-  //   printf("Not a keyframe from chi^2\n");
-  //   #endif
-  //   return;
-  // }
+  if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
+                   node.node_idx,
+                   0.95)) {
+    #if DEBUG
+    printf("Not a keyframe from chi^2\n");
+    #endif
+    return;
+  }
 
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
-  // auto uncertainty = GetLocalUncertainty(node.node_idx);
-  // #if DEBUG
-  // printf("Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
-  // #endif
-  // if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD || uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
-  //   #if DEBUG
-  //   printf("Not a keyframe due to lack of local invariance...Computed Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
-  //   #endif
-  //   return;
-  // }
+  #if DEBUG
+  printf("Computing local uncertainty...\n");
+  #endif
+  auto uncertainty = GetLocalUncertainty(node.node_idx);
+  #if DEBUG
+  printf("Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
+  #endif
+  if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD || uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
+    #if DEBUG
+    printf("Not a keyframe due to lack of local invariance...Computed Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
+    #endif
+    return;
+  }
 
   // Step 3: If past both of these steps then save as keyframe. Send it to the  
   // embedding network and store that embedding as well.
@@ -891,15 +898,20 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
   #endif
   AddKeyframe(node);
+
   // Step 4: Compare against all previous keyframes and see if there is a match
   // or is similar using Chi^2
-  vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
-  if (matches.size() == 0) {
-    #if DEBUG
-    printf("No match from chi^2\n");
-    #endif
-    return;
-  }
+  // vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
+  // if (matches.size() == 0) {
+  //   #if DEBUG
+  //   printf("No match from chi^2\n");
+  //   #endif
+  //   return;
+  // }
+  std::vector<int> matches(keyframes.size()-1);
+  std::iota(matches.begin(), matches.end(), 0);
+
+
   // Step 5: Compare the embeddings and see if there is a match as well.
   // Find the closest embedding in all the matches to our new keyframe.
   LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];

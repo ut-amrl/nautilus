@@ -26,8 +26,14 @@ namespace pointcloud_helpers {
                          Publisher& pub);
   std::vector<Vector2f> normalizePointCloud(const std::vector<Vector2f>& pointcloud, double range);
   PointCloud2 EigenPointcloudToRos(const vector<Vector2f>& pointcloud);
-  std::vector<Vector2f>
-  LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan, double max_range);
+  vector<Vector2f> LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan,
+                                            double max_range,
+                                            bool truncate_ends);
+  vector<Vector2f>  LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan,
+                                          double max_range,
+                                          bool truncate_ends,
+                                          Vector2f offset,
+                                          Eigen::Matrix2f rotation);
 
 };
 #endif // SRC_POINTCLOUD_HELPERS_H_

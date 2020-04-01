@@ -45,20 +45,32 @@ FilterGlancing(const float angle_min,
 
 vector<Vector2f>
 pointcloud_helpers::LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan,
-                                          double max_range) {
+                                          double max_range,
+                                          bool truncate_ends = false) {
+  return pointcloud_helpers::LaserScanToPointCloud(laser_scan, max_range, truncate_ends, Vector2f(0, 0), Matrix2f::Identity());            
+}
+
+vector<Vector2f>
+pointcloud_helpers::LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan,
+                                          double max_range,
+                                          bool truncate_ends,
+                                          Vector2f offset,
+                                          Matrix2f rotation) {
   vector<pair<size_t, Vector2f>> pointcloud;
-  float angle_offset = laser_scan.range_min;
+  float angle_offset = laser_scan.angle_min;
+  float angle_truncation = truncate_ends ? M_PI / 12.0 : 0;
   for (size_t index = 0; index < laser_scan.ranges.size(); index++) {
     float range = laser_scan.ranges[index];
-    if (range >= laser_scan.range_min && range <= max_range) {
+    if (range >= laser_scan.range_min && range <= max_range && angle_offset > laser_scan.angle_min + angle_truncation && angle_offset < laser_scan.angle_max - angle_truncation) {
       // Only accept valid ranges.
       // Then we must rotate the point by the specified angle at that distance.
       Vector2f point(range, 0.0);
       Matrix2f rot_matrix =
-        Rotation2D<float>(laser_scan.angle_min +
-                         (laser_scan.angle_increment * index))
+        Rotation2D<float>(angle_offset)
           .toRotationMatrix();
       point = rot_matrix * point;
+      point = rotation * point;
+      point += offset;
       pointcloud.emplace_back(index, point);
     }
     angle_offset += laser_scan.angle_increment;

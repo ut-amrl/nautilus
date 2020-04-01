@@ -4,6 +4,7 @@ Debug
 build
 data
 lib
+.vscode
 msg_gen
 msg_gen/*
 *.kdev4
