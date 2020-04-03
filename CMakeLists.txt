@@ -53,9 +53,9 @@ SET(libs roslib
          gflags
          glog
          boost_system
+         X11
          m
          OpenMP::OpenMP_CXX
-         X11
          csm
          vector_maps)
 

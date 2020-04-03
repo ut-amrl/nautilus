@@ -1,25 +1,27 @@
 // Created by jack on 9/25/19.
 //
 
-#include "./solver.h"
 #include <algorithm>
 #include <thread>
 #include <vector>
 #include <fstream>
 
-#include <sensor_msgs/Image.h>
+#include "eigen3/Eigen/Dense"
+#include "eigen3/Eigen/Geometry"
+#include "eigen3/Eigen/Sparse"
+#include "eigen3/Eigen/SparseQR"
 #include <visualization_msgs/Marker.h>
 #include "ceres/ceres.h"
-#include "eigen3/Eigen/Geometry"
 
 #include "./kdtree.h"
 #include "./math_util.h"
 #include "timer.h"
 #include "lidar_slam/HitlSlamInputMsg.h"
-#include "./gui_helpers.h"
 #include "lidar_slam/WriteMsg.h"
 #include "./line_extraction.h"
 #include "point_cloud_embedder/GetPointCloudEmbedding.h"
+
+#include "./solver.h"
 
 #include <DEBUG.h>
 
@@ -783,9 +785,10 @@ std::pair<double, double> Solver::GetLocalUncertainty(const uint64_t node_idx) {
 
 // Reference from:
 // https://github.com/SoylentGraham/libmv/blob/master/src/libmv/simple_pipeline/bundle.cc
-Eigen::MatrixXd CRSToEigen(const ceres::CRSMatrix& crs_matrix) {
-  Eigen::MatrixXd eigen_mat(crs_matrix.num_rows, crs_matrix.num_cols);
-  eigen_mat.setZero();
+Eigen::SparseMatrix<double> CRSToEigen(const ceres::CRSMatrix& crs_matrix) {
+  typedef Eigen::Triplet<double> Triplet;
+  typedef Eigen::SparseMatrix<double> SparseMat;
+  vector<Triplet> coefficients;
   // Row contains starting position of this row in the cols.
   for (int row = 0; row < crs_matrix.num_rows; row++) {
     int row_start = crs_matrix.rows[row];
@@ -795,13 +798,19 @@ Eigen::MatrixXd CRSToEigen(const ceres::CRSMatrix& crs_matrix) {
       int col_num = crs_matrix.cols[col];
       // Value is contained in the same index of the values array.
       double value = crs_matrix.values[col];
-      eigen_mat(row, col_num) = value;
+      CHECK_LT(col, crs_matrix.values.size());
+      CHECK_LT(col, crs_matrix.cols.size());
+      coefficients.emplace_back(row, col_num, value);
     }
   }
+  SparseMat eigen_mat(crs_matrix.num_rows, crs_matrix.num_cols);
+  eigen_mat.setZero();
+  eigen_mat.setFromTriplets(coefficients.begin(), coefficients.end());
   return eigen_mat;
 }
 
 std::tuple<double, size_t> Solver::GetChiSquareCost() {
+  typedef Eigen::SparseMatrix<double> SparseMat;
   // TODO: Making the assumption that this can be done with one matrix mult.
   ceres::CRSMatrix jacobian;
   ceres::Problem::EvaluateOptions eval_options;
@@ -814,9 +823,15 @@ std::tuple<double, size_t> Solver::GetChiSquareCost() {
   std::cout << "Residuals Dimensions R: 1 C: " << residuals.size() << std::endl;
   std::cout << "Jacobian Dimensions R: " << jacobian.num_rows << " C: " << jacobian.num_cols << std::endl;
   // Find the information matrix
-  Eigen::MatrixXd jacobian_eigen = CRSToEigen(jacobian);
-  Eigen::MatrixXd information_matrix =
-    (jacobian_eigen.transpose() * jacobian_eigen).inverse();
+  SparseMat jacobian_eigen = CRSToEigen(jacobian);
+  SparseMat inform_mat_before_inverse(jacobian.num_cols, jacobian.num_cols);
+  inform_mat_before_inverse = (jacobian_eigen.transpose() * jacobian_eigen);
+  // TODO: Assuming uses AMD ordering
+  Eigen::SparseQR<SparseMat, Eigen::AMDOrdering<int>> sparse_solver(inform_mat_before_inverse);
+  SparseMat identity(jacobian.num_rows, jacobian.num_cols);
+  identity.setIdentity();
+  SparseMat information_matrix =
+    sparse_solver.solve(identity);
   Eigen::VectorXd res_eigen =
     Eigen::Map<Eigen::VectorXd>(residuals.data(),
                                 1,
