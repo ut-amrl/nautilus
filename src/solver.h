@@ -502,6 +502,12 @@ class Solver {
   void AddSlamNode(SLAMNode2D& node);
   void CheckForLearnedLC(SLAMNode2D& node);
  private:
+  std::tuple<double, size_t> GetChiSquareCost();
+  OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
+                                     const uint64_t node_b);
+  vector<ceres::ResidualBlockId> AddLCResiduals(const uint64_t node_a,
+                                                const uint64_t node_b);
+  void RemoveResiduals(vector<ceres::ResidualBlockId> ids);
   void AddKeyframe(SLAMNode2D& node);
   Eigen::Matrix<double, 32, 1> GetEmbedding(SLAMNode2D& node);
   bool AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
@@ -535,6 +541,8 @@ class Solver {
   vector<LearnedKeyframe> keyframes;
   ros::ServiceClient embedding_client;
   CorrelativeScanMatcher scan_matcher;
+  vector<ceres::ResidualBlockId> lidar_ids;
+  vector<ceres::ResidualBlockId> odom_ids;
   std::shared_ptr<ceres::Problem> last_solved_problem_;
 };
 

@@ -179,15 +179,16 @@ void Solver::AddOdomFactors(ceres::Problem* ceres_problem,
                             vector<OdometryFactor2D> factors,
                             double trans_weight,
                             double rot_weight) {
+  odom_ids.clear();
   for (const OdometryFactor2D& odom_factor : factors) {
     CHECK_LT(odom_factor.pose_i, odom_factor.pose_j);
     CHECK_GT(solution_.size(), odom_factor.pose_i);
     CHECK_GT(solution_.size(), odom_factor.pose_j);
-    ceres_problem->AddResidualBlock(
+    odom_ids.push_back(ceres_problem->AddResidualBlock(
       OdometryResidual::create(odom_factor, trans_weight, rot_weight),
       NULL,
       solution_[odom_factor.pose_i].pose,
-      solution_[odom_factor.pose_j].pose);
+      solution_[odom_factor.pose_j].pose));
   }
   if (solution_.size() > 0) {
     ceres_problem->SetParameterBlockConstant(solution_[0].pose);
@@ -351,14 +352,14 @@ double Solver::AddLidarResidualsForLC(ceres::Problem& problem) {
                                                  a_pose.node_idx,
                                                  closest_b_pose_idx);
       // Add the correspondences as constraints in the optimization problem.
-      problem.AddResidualBlock(
+      lidar_ids.push_back(problem.AddResidualBlock(
               LIDARPointBlobResidual::create(correspondence.source_points,
                                              correspondence.target_points,
                                              correspondence.source_normals,
                                              correspondence.target_normals),
               NULL,
               correspondence.source_pose,
-              correspondence.target_pose);
+              correspondence.target_pose));
       difference =
         temp_diff / problem_.nodes[a_pose.node_idx].lidar_factor.pointcloud.size();
     }
@@ -390,6 +391,7 @@ Solver::SolveSLAM() {
       vis_callback_->ClearNormals();
       last_difference = difference;
       difference = 0;
+      lidar_ids.clear();
       std::shared_ptr<ceres::Problem> ceres_problem(new ceres::Problem());
       // Add all the odometry constraints between our poses.
       AddOdomFactors(ceres_problem.get(),
@@ -420,14 +422,14 @@ Solver::SolveSLAM() {
           difference /=
             problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
           // Add the correspondences as constraints in the optimization problem.
-          ceres_problem->AddResidualBlock(
+          lidar_ids.push_back(ceres_problem->AddResidualBlock(
                   LIDARPointBlobResidual::create(correspondence.source_points,
                                                  correspondence.target_points,
                                                  correspondence.source_normals,
                                                  correspondence.target_normals),
                   NULL,
                   correspondence.source_pose,
-                  correspondence.target_pose);
+                  correspondence.target_pose));
         }
       }
       difference += AddLidarResidualsForLC(*ceres_problem);
@@ -779,28 +781,124 @@ std::pair<double, double> Solver::GetLocalUncertainty(const uint64_t node_idx) {
   return scan_matcher.GetLocalUncertaintyStats(prevScans, problem_.nodes[node_idx].lidar_factor.pointcloud);
 }
 
-static int similar_scan_run_num = 0;
+// Reference from:
+// https://github.com/SoylentGraham/libmv/blob/master/src/libmv/simple_pipeline/bundle.cc
+Eigen::MatrixXd CRSToEigen(const ceres::CRSMatrix& crs_matrix) {
+  Eigen::MatrixXd eigen_mat(crs_matrix.num_rows, crs_matrix.num_cols);
+  eigen_mat.setZero();
+  // Row contains starting position of this row in the cols.
+  for (int row = 0; row < crs_matrix.num_rows; row++) {
+    int row_start = crs_matrix.rows[row];
+    int row_end = crs_matrix.rows[row + 1];
+    // Cols contains the non-zero elements column numbers.
+    for (int col = row_start; col < row_end; col++) {
+      int col_num = crs_matrix.cols[col];
+      // Value is contained in the same index of the values array.
+      double value = crs_matrix.values[col];
+      eigen_mat(row, col_num) = value;
+    }
+  }
+  return eigen_mat;
+}
+
+std::tuple<double, size_t> Solver::GetChiSquareCost() {
+  // TODO: Making the assumption that this can be done with one matrix mult.
+  ceres::CRSMatrix jacobian;
+  ceres::Problem::EvaluateOptions eval_options;
+  vector<double> residuals;
+  last_solved_problem_->Evaluate(eval_options,
+                                 nullptr,
+                                 &residuals,
+                                 nullptr,
+                                 &jacobian);
+  std::cout << "Residuals Dimensions R: 1 C: " << residuals.size() << std::endl;
+  std::cout << "Jacobian Dimensions R: " << jacobian.num_rows << " C: " << jacobian.num_cols << std::endl;
+  // Find the information matrix
+  Eigen::MatrixXd jacobian_eigen = CRSToEigen(jacobian);
+  Eigen::MatrixXd information_matrix =
+    (jacobian_eigen.transpose() * jacobian_eigen).inverse();
+  Eigen::VectorXd res_eigen =
+    Eigen::Map<Eigen::VectorXd>(residuals.data(),
+                                1,
+                                residuals.size());
+  double cost = res_eigen.transpose() * information_matrix * res_eigen;
+  return std::make_tuple(cost, residuals.size());
+}
+
+OdometryFactor2D Solver::GetDifferenceOdom(const uint64_t node_a,
+                                           const uint64_t node_b) {
+  double * pose_a = solution_[node_a].pose;
+  double * pose_b = solution_[node_b].pose;
+  Vector2f translation(pose_b[0] - pose_a[0], pose_b[1] - pose_a[1]);
+  float rotation = pose_b[2] - pose_a[2];
+  return OdometryFactor2D(node_a,
+                          node_b,
+                          translation,
+                          rotation);
+}
+
+vector<ceres::ResidualBlockId> Solver::AddLCResiduals(const uint64_t node_a,
+                                                      const uint64_t node_b) {
+  const uint64_t first_node = std::min(node_a, node_b);
+  const uint64_t second_node = std::max(node_a, node_b);
+  PointCorrespondences correspondence(solution_[first_node].pose,
+                                      solution_[second_node].pose,
+                                      first_node,
+                                      second_node);
+  // Get the correspondences between these two poses.
+  GetPointCorrespondences(problem_,
+                          &solution_,
+                          &correspondence,
+                          first_node,
+                          second_node);
+  // Add the correspondences as constraints in the optimization problem.
+  ceres::ResidualBlockId lidar_id;
+  lidar_id = last_solved_problem_->AddResidualBlock(
+          LIDARPointBlobResidual::create(correspondence.source_points,
+                                         correspondence.target_points,
+                                         correspondence.source_normals,
+                                         correspondence.target_normals),
+          NULL,
+          correspondence.source_pose,
+          correspondence.target_pose);
+  // TODO: Odom factor is difference between solution positions as we haven't
+  // solved using CSM yet and can't get the actual difference between them.
+  ceres::ResidualBlockId odom_id;
+  odom_id = last_solved_problem_->AddResidualBlock(
+    OdometryResidual::create(GetDifferenceOdom(first_node, second_node),
+                             lc_translation_weight_,
+                             lc_rotation_weight_),
+    NULL,
+    solution_[first_node].pose,
+    solution_[second_node].pose);
+  vector<ceres::ResidualBlockId> res_ids;
+  res_ids.push_back(lidar_id);
+  res_ids.push_back(odom_id);
+  return res_ids;
+}
+
+void Solver::RemoveResiduals(vector<ceres::ResidualBlockId> ids) {
+  for (ceres::ResidualBlockId id : ids) {
+    last_solved_problem_->RemoveResidualBlock(id);
+  }
+}
+
 bool Solver::SimilarScans(const uint64_t node_a,
                           const uint64_t node_b,
                           const double certainty) {
   if (node_a == node_b) {
     return false;
   }
-  similar_scan_run_num++;
-  std::cout << "SS Run Num: " << similar_scan_run_num << std::endl;
   CHECK_LE(certainty, 1.0);
   CHECK_GE(certainty, 0.0);
-  pair<Eigen::Vector3d, Eigen::Matrix3d> res_and_cov =
-          GetResidualsFromSolving(std::min(node_a, node_b), std::max(node_a, node_b));
-  Eigen::Vector3d residuals = res_and_cov.first;
-  Eigen::Matrix3d covariance = res_and_cov.second;
-  std::cout << "Residuals\n" << residuals << std::endl;
-  std::cout << "Covariance:\n" << covariance << std::endl;
-  double chi_num = residuals.transpose() * covariance * residuals;
+  // Add the LC residuals.
+  vector<ceres::ResidualBlockId> lc_ids = AddLCResiduals(node_a, node_b);
+  auto [chi_num, res_size] = GetChiSquareCost();
+  RemoveResiduals(lc_ids);
   if (chi_num < 0) {
     return false;
   }
-  chi_squared dist(2);
+  chi_squared dist(res_size - 1);
   return boost::math::cdf(dist, chi_num) <= certainty;
 }
 
