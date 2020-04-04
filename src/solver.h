@@ -157,6 +157,27 @@ struct PointCorrespondences {
                              target_index(0) {}
 };
 
+struct ResidualDesc {
+    size_t node_i;
+    size_t node_j;
+    ceres::ResidualBlockId id;
+    ResidualDesc(size_t node_i, size_t node_j, ceres::ResidualBlockId id) :
+      node_i(node_i), node_j(node_j), id(id) {}
+};
+
+struct CeresInformation {
+    void ResetProblem() {
+      problem.reset(new ceres::Problem());
+      res_descriptors.clear();
+      cost_valid = false;
+      cost = 0.0;
+    }
+    bool cost_valid = false;
+    double cost = 0.0;
+    std::shared_ptr<ceres::Problem> problem;
+    vector<ResidualDesc> res_descriptors;
+};
+
 class VisualizationCallback : public ceres::IterationCallback {
  public:
   VisualizationCallback(const SLAMProblem2D& problem,
@@ -502,12 +523,13 @@ class Solver {
   void AddSlamNode(SLAMNode2D& node);
   void CheckForLearnedLC(SLAMNode2D& node);
  private:
-  std::tuple<double, size_t> GetChiSquareCost();
+  double CostFromResidualDescriptor(const ResidualDesc& res_desc);
+  double GetChiSquareCost(vector<ResidualDesc> lc_res_desc);
   OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
                                      const uint64_t node_b);
-  vector<ceres::ResidualBlockId> AddLCResiduals(const uint64_t node_a,
-                                                const uint64_t node_b);
-  void RemoveResiduals(vector<ceres::ResidualBlockId> ids);
+  vector<ResidualDesc> AddLCResiduals(const uint64_t node_a,
+                                      const uint64_t node_b);
+  void RemoveResiduals(vector<ResidualDesc> descs);
   void AddKeyframe(SLAMNode2D& node);
   Eigen::Matrix<double, 32, 1> GetEmbedding(SLAMNode2D& node);
   bool AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
@@ -516,9 +538,6 @@ class Solver {
                    LearnedKeyframe& key_frame_b);
   OdometryFactor2D GetTotalOdomChange(const uint64_t node_a,
                                       const uint64_t node_b);
-  std::pair<Eigen::Vector3d, Eigen::Matrix3d>
-  GetResidualsFromSolving(const uint64_t node_a,
-                          const uint64_t node_b);
   bool SimilarScans(const uint64_t node_a,
                     const uint64_t node_b,
                     const double certainty);
@@ -538,12 +557,10 @@ class Solver {
   ros::NodeHandle n_;
   vector<LCConstraint> loop_closure_constraints_;
   std::unique_ptr<VisualizationCallback> vis_callback_ = nullptr;
-  vector<LearnedKeyframe> keyframes;
+  vector<LearnedKeyframe> keyframes_;
   ros::ServiceClient embedding_client;
   CorrelativeScanMatcher scan_matcher;
-  vector<ceres::ResidualBlockId> lidar_ids;
-  vector<ceres::ResidualBlockId> odom_ids;
-  std::shared_ptr<ceres::Problem> last_solved_problem_;
+  CeresInformation ceres_information;
 };
 
 #endif // SRC_SOLVER_H_
