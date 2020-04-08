@@ -13,7 +13,7 @@
 #include "./slam_types.h"
 #include "./solver.h"
 #include "lidar_slam/CobotOdometryMsg.h"
-#include "lidar_slam/WriteMsg.h"
+#include "config_reader/config_reader.h"
 
 using std::string;
 using std::vector;
@@ -24,63 +24,11 @@ using lidar_slam::CobotOdometryMsg;
 using lidar_slam::HitlSlamInputMsg;
 using lidar_slam::WriteMsg;
 
-DEFINE_string(
-  bag_path,
-  "",
-  "The location of the bag file to run SLAM on.");
-DEFINE_string(
-  odom_topic,
-  "/odometry/filtered",
-  "The topic that odometry messagse are published over.");
-DEFINE_string(
-  lidar_topic,
-  "/velodyne_2dscan_high_beams",
-  "The topic that lidar messages are published over.");
-DEFINE_double(
-  translation_weight,
-  1.0,
-  "Weight multiplier for changing the odometry predicted translation.");
-DEFINE_double(
-  rotation_weight,
-  1.0,
-  "Weight multiplier for changing the odometry predicted rotation.");
-DEFINE_double(
-  stopping_accuracy,
-  0.05,
-  "Threshold of accuracy for stopping.");
-DEFINE_int64(
-  pose_num,
-  30,
-  "The number of poses to process.");
-DEFINE_bool(
-  diff_odom,
-  false,
-  "Is the odometry differential (True for CobotOdometryMsgs)?");
-DEFINE_double(
-  lc_translation_weight,
-  2,
-  "The translation weight for loop closure.");
-DEFINE_double(
-  lc_rotation_weight,
-  2,
-  "The rotational weight for loop closure.");
-DEFINE_string(
-  hitl_lc_topic,
-  "/hitl_slam_input",
-  "The topic which the HITL line messages are published over.");
-DEFINE_double(
-   max_lidar_range,
-  0,
-  "The user specified range cutoff for lidar range data, if not used will be the sensor default specified in the bag (meters)");
-DEFINE_bool(
-   auto_lc,
-   true,
-   "Automatically detect and try to close loops (true by default)?");
-DEFINE_string(
-    pose_output_file,
-    "poses.txt",
-    "The file to output the finalized poses into");
-
+CONFIG_STRING(bag_path, "bag_path");
+CONFIG_BOOL(auto_lc, "auto_lc");
+CONFIG_STRING(lidar_topic, "lidar_topic");
+CONFIG_STRING(odom_topic, "odom_topic");
+CONFIG_STRING(hitl_lc_topic, "hitl_lc_topic");
 
 SLAMProblem2D ProcessBagFile(const char* bag_path,
                              const ros::NodeHandle& n) {
@@ -100,12 +48,10 @@ SLAMProblem2D ProcessBagFile(const char* bag_path,
   }
   // Get the topics we want
   vector<string> topics;
-  topics.emplace_back(FLAGS_odom_topic.c_str());
-  topics.emplace_back(FLAGS_lidar_topic.c_str());
+  topics.emplace_back(CONFIG_odom_topic.c_str());
+  topics.emplace_back(CONFIG_lidar_topic.c_str());
   rosbag::View view(bag, rosbag::TopicQuery(topics));
-  SLAMTypeBuilder slam_builder(FLAGS_pose_num,
-                               FLAGS_diff_odom,
-                               FLAGS_max_lidar_range);
+  SLAMTypeBuilder slam_builder;
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
        ros::ok() && it != view.end() && !slam_builder.Done();
@@ -162,7 +108,7 @@ void LearnedLoopClosure(SLAMProblem2D& slam_problem,
   solver.SolveSLAM();
   // Do a final pass through and check for any LC nodes.
   // But only if automatic loop closure is enabled.
-  if (FLAGS_auto_lc) {
+  if (CONFIG_auto_lc) {
     std::cout << "Automatically loop closing" << std::endl;
     for (SLAMNode2D node : slam_problem.nodes) {
       solver.CheckForLearnedLC(node);
@@ -174,7 +120,8 @@ void LearnedLoopClosure(SLAMProblem2D& slam_problem,
 int main(int argc, char** argv) {
   google::InitGoogleLogging(*argv);
   google::ParseCommandLineFlags(&argc, &argv, false);
-  if (FLAGS_bag_path.compare("") == 0) {
+  config_reader::ConfigReader reader({"config/lgrc_bag_config.lua"});
+  if (CONFIG_bag_path.compare("") == 0) {
     printf("Must specify an input bag!\n");
     exit(0);
   }
@@ -183,23 +130,15 @@ int main(int argc, char** argv) {
   signal(SIGINT, SignalHandler);
   // Load and pre-process the data.
   SLAMProblem2D slam_problem =
-          ProcessBagFile(FLAGS_bag_path.c_str(), n);
+          ProcessBagFile(CONFIG_bag_path.c_str(), n);
   CHECK_GT(slam_problem.nodes.size(), 1)
-    << "Not enough nodes were processed"
-    << "you probably didn't specify the correct topics!\n";
+    << " Not enough nodes were processed"
+    << " you probably didn't specify the correct topics!\n";
   // Load all the residuals into the problem and run to get initial solution.
-  Solver solver(FLAGS_translation_weight,
-                FLAGS_rotation_weight,
-                FLAGS_lc_translation_weight,
-                FLAGS_lc_rotation_weight,
-                FLAGS_stopping_accuracy,
-                FLAGS_max_lidar_range,
-                FLAGS_auto_lc,
-                FLAGS_pose_output_file,
-                n);
+  Solver solver(n);
   LearnedLoopClosure(slam_problem, solver);
   std::cout << "Waiting for Loop Closure input" << std::endl;
-  ros::Subscriber hitl_sub = n.subscribe(FLAGS_hitl_lc_topic,
+  ros::Subscriber hitl_sub = n.subscribe(CONFIG_hitl_lc_topic,
                                          10,
                                          &Solver::HitlCallback,
                                          &solver);

@@ -7,3 +7,6 @@
 [submodule "third_party/vector_maps"]
 	path = third_party/vector_maps
 	url = git@github.com:ut-amrl/CuratingLongTermVectorMaps.git
+[submodule "third_party/config-reader"]
+	path = third_party/config-reader
+	url = git@github.com:ut-amrl/config-reader.git

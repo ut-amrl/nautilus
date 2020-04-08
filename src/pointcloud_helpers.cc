@@ -20,8 +20,8 @@ using std::pair;
 using std::vector;
 using math_util::NormalsSimilar;
 
+// TODO: Throw out this method for stf filtering.
 #define GLANCING_THRESHOLD 0.10
-#define GLANCING_ANGLE_THRESHOLD 45
 
 vector<Vector2f>
 FilterGlancing(const float angle_min,

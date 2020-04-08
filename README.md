@@ -10,7 +10,7 @@ Because this project uses submodules for external libraries please clone using t
 git clone --recurse-submodules <git project URL>
 ```
 
-### Compiling:
+### Dependencies:
 
 You will need to install GTest for testing. This can be done by first installing gtest through apt.
 
@@ -18,6 +18,11 @@ On Ubuntu:
 
 ```sudo apt-get install libgtest-dev```
 
+You will also need Lua 5.1 and clang for the config-reader library. You can get these by running the InstallPackages script in ```third_party/config-reader```.
+
+```
+
+### Compiling
 And then navigate to the installed directory and make the project using the following code:
 
 ```

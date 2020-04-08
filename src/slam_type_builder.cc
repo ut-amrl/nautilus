@@ -34,28 +34,22 @@ void SLAMTypeBuilder::AddOdomFactor(
   odom_factors.emplace_back(odom_factor);
 }
 
-bool SLAMTypeBuilder::Done() {
-  return (lidar_callback_count_ >= pose_num_max_);
-}
-
 void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
-  if (lidar_callback_count_ >= pose_num_max_) {
-    return;
-  }
   // We only want one odometry between each lidar callback.
-  if ((differential_odom_ && diff_tracking.ReadyForLidar()) ||
-       odom_tracking.ReadyForLidar()) {
+  if (((config_.CONFIG_diff_odom && diff_tracking_.ReadyForLidar()) ||
+       odom_tracking_.ReadyForLidar()) && !Done()) {
     // Transform this laser scan into a point cloud.s
     double max_range =
-      (range_cutoff_ <= 0)? laser_scan.range_max : range_cutoff_;
+      (config_.CONFIG_max_lidar_range <= 0)? laser_scan.range_max :
+                                            config_.CONFIG_max_lidar_range;
     std::vector<Vector2f> pointcloud =
       LaserScanToPointCloud(laser_scan, max_range);
     LidarFactor lidar_factor(pose_id_, pointcloud);
     RobotPose2D pose;
-    if (differential_odom_) {
-      pose = diff_tracking.GetPose();
+    if (config_.CONFIG_diff_odom) {
+      pose = diff_tracking_.GetPose();
     } else {
-      pose = odom_tracking.GetPose();
+      pose = odom_tracking_.GetPose();
     }
     SLAMNode2D slam_node(pose_id_, laser_scan.header.stamp.toSec(), pose,
                          lidar_factor);
@@ -64,7 +58,6 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
       AddOdomFactor(odom_factors_);
     }
     pose_id_++;
-    lidar_callback_count_++;
   }
 }
 
@@ -82,25 +75,18 @@ float ZRadiansFromQuaterion(geometry_msgs::Quaternion& q) {
 }
 
 void SLAMTypeBuilder::OdometryCallback(nav_msgs::Odometry& odometry) {
-  odom_tracking.OdometryCallback(odometry);
+  odom_tracking_.OdometryCallback(odometry);
 }
 
 void
 SLAMTypeBuilder::OdometryCallback(CobotOdometryMsg& odometry) {
-  diff_tracking.OdometryCallback(odometry);
+  diff_tracking_.OdometryCallback(odometry);
 }
 
 slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
-    SLAMProblem2D slam_problem(nodes_, odom_factors_);
+  SLAMProblem2D slam_problem(nodes_, odom_factors_);
   return slam_problem;
 }
-
-SLAMTypeBuilder::SLAMTypeBuilder(uint64_t pose_num,
-                                 bool differential_odom,
-                                 double range_cutoff) :
-  pose_num_max_(pose_num),
-  differential_odom_(differential_odom),
-  range_cutoff_(range_cutoff) {}
 
 void DifferentialOdometryTracking::OdometryCallback(
         lidar_slam::CobotOdometryMsg &odometry) {
@@ -144,4 +130,8 @@ RobotPose2D AbsoluteOdometryTracking::GetPose() {
   last_odom_angle_ = odom_angle_;
   last_odom_translation_ = odom_translation_;
   return RobotPose2D(translation, angle);
+}
+
+bool SLAMTypeBuilder::Done() {
+  return pose_id_ >= static_cast<uint64_t>(config_.CONFIG_max_pose_num);
 }

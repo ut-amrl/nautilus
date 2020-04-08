@@ -25,15 +25,6 @@
 
 #include <DEBUG.h>
 
-#define EMBEDDING_THRESHOLD 8
-#define LIDAR_CONSTRAINT_AMOUNT 10
-#define OUTLIER_THRESHOLD 0.25
-#define HITL_LINE_WIDTH 0.05
-#define HITL_POSE_POINT_THRESHOLD 10
-#define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 9.5
-#define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .35
-#define LOCAL_UNCERTAINTY_PREV_SCANS 2
-#define CSM_SCORE_THRESHOLD -2.5
 #define DEBUG true
 
 using std::vector;
@@ -234,7 +225,7 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
     KDNodeValue<float, 2> closest_target;
     vector<KDNodeValue<float, 2>> neighbors;
     target_lidar.pointcloud_tree->FindNeighborPoints(source_point_transformed,
-                                                     OUTLIER_THRESHOLD / 6.0,
+                                                     config_.CONFIG_outlier_threshold / 6.0,
                                                      &neighbors);
     // Get the current source point's normal.
     KDNodeValue<float, 2> source_point_with_normal;
@@ -243,7 +234,7 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
                                                      0.1,
                                                      &source_point_with_normal);
     CHECK_EQ(found_dist, 0.0) << "Source point is not in KD Tree!\n";
-    float dist = OUTLIER_THRESHOLD;
+    float dist = config_.CONFIG_outlier_threshold;
     // Sort the target points by distance from the source point in the
     // target frame.
     std::sort(neighbors.begin(),
@@ -267,11 +258,11 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
     }
     // If we didn't find any matches in the first 1/6 of the threshold,
     // try all target points within the full threshold.
-    if (dist >= OUTLIER_THRESHOLD) {
+    if (dist >= config_.CONFIG_outlier_threshold) {
       // Re-find all the closest targets.
       neighbors.clear();
       target_lidar.pointcloud_tree->FindNeighborPoints(source_point_transformed,
-                                                       OUTLIER_THRESHOLD,
+                                                       config_.CONFIG_outlier_threshold,
                                                        &neighbors);
       // Sort them again, based on distance from the source point in the
       // target frame.
@@ -284,7 +275,7 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
                 });
       // Cut out the first 1/6 threshold that we already checked.
       vector<KDNodeValue<float, 2>>
-              unchecked_neighbors(neighbors.begin() + (OUTLIER_THRESHOLD / 6),
+              unchecked_neighbors(neighbors.begin() + (config_.CONFIG_outlier_threshold / 6),
                                   neighbors.end());
       // See if any of these points have a normal within our threshold.
       for (KDNodeValue<float, 2> current_target : unchecked_neighbors) {
@@ -298,7 +289,7 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
       }
       // If no target point was found to correspond to our source point then
       // don't match this source point to anything.
-      if (dist >= OUTLIER_THRESHOLD) {
+      if (dist >= config_.CONFIG_outlier_threshold) {
         continue;
       }
     }
@@ -391,7 +382,7 @@ Solver::SolveSLAM() {
   // While our solution moves more than the stopping_accuracy,
   // continue to optimize.
   for (int64_t window_size = 1;
-       window_size <= LIDAR_CONSTRAINT_AMOUNT;
+       window_size <= config_.CONFIG_lidar_constraint_amount;
        window_size++) {
     LOG(INFO) << "Using window size: " << window_size << std::endl;
     do {
@@ -402,10 +393,10 @@ Solver::SolveSLAM() {
       // Add all the odometry constraints between our poses.
       AddOdomFactors(ceres_information.problem.get(),
                      problem_.odometry_factors,
-                     translation_weight_,
-                     rotation_weight_);
+                     config_.CONFIG_translation_weight,
+                     config_.CONFIG_rotation_weight);
       // For every SLAM node we want to optimize it against the past
-      // LIDAR_CONSTRAINT_AMOUNT nodes.
+      // lidar constraint amount nodes.
       for (size_t node_i_index = 0;
            node_i_index < problem_.nodes.size();
            node_i_index++) {
@@ -445,7 +436,8 @@ Solver::SolveSLAM() {
       difference += AddLidarResidualsForLC(*ceres_information.problem);
       //AddCollinearResiduals(&ceres_problem);
       ceres::Solve(options, ceres_information.problem.get(), &summary);
-    } while (abs(difference - last_difference) > stopping_accuracy_);
+    } while (abs(difference - last_difference) >
+             config_.CONFIG_stopping_accuracy);
   }
   // Call the visualization once more to see the finished optimization.
   for (int i = 0; i < 5; i++) {
@@ -455,23 +447,7 @@ Solver::SolveSLAM() {
   return solution_;
 }
 
-Solver::Solver(double translation_weight,
-               double rotation_weight,
-               double lc_translation_weight,
-               double lc_rotation_weight,
-               double stopping_accuracy,
-               double max_lidar_range,
-               bool auto_lc_enabled,
-               std::string pose_output_file,
-               ros::NodeHandle& n) :
-               translation_weight_(translation_weight),
-               rotation_weight_(rotation_weight),
-               lc_translation_weight_(lc_translation_weight),
-               lc_rotation_weight_(lc_rotation_weight),
-               stopping_accuracy_(stopping_accuracy),
-               max_lidar_range_(max_lidar_range),
-               auto_lc_enabled_(auto_lc_enabled),
-               pose_output_file_(pose_output_file),
+Solver::Solver(ros::NodeHandle& n) :
                n_(n),
                scan_matcher(10, 3, 0.3, 0.03) {
   embedding_client =
@@ -510,16 +486,18 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
          problem_.nodes[node_idx].lidar_factor.pointcloud) {
       Vector2f point_transformed = node_to_world * point;
       if (DistanceToLineSegment(point_transformed, lines[0]) <=
-          HITL_LINE_WIDTH) {
+          config_.CONFIG_hitl_line_width) {
         points_on_a.push_back(point);
       } else if (DistanceToLineSegment(point_transformed, lines[1]) <=
-                 HITL_LINE_WIDTH) {
+                 config_.CONFIG_hitl_line_width) {
         points_on_b.push_back(point);
       }
     }
-    if (points_on_a.size() >= HITL_POSE_POINT_THRESHOLD) {
+    if (points_on_a.size() >=
+        static_cast<size_t>(config_.CONFIG_hitl_pose_point_threshold)) {
       hitl_constraint.line_a_poses.emplace_back(node_idx, points_on_a);
-    } else if (points_on_b.size() >= HITL_POSE_POINT_THRESHOLD) {
+    } else if (points_on_b.size() >=
+               static_cast<size_t>(config_.CONFIG_hitl_pose_point_threshold)) {
       hitl_constraint.line_b_poses.emplace_back(node_idx, points_on_b);
     }
   }
@@ -576,7 +554,7 @@ bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
     #endif
     // Then this was a badly chosen LC, let's not continue with it
     // TODO figure out if short circuiting in the middle of this loop is OK
-    if (trans_prob_pair.first < CSM_SCORE_THRESHOLD) {
+    if (trans_prob_pair.first < config_.CONFIG_csm_score_threshold) {
       #if DEBUG
       std::cout << "Failed to find valid transformation for pose, got score: "
                 << trans_prob_pair.first << std::endl;
@@ -628,21 +606,22 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   vis_callback_->PubConstraintVisualization();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
-  translation_weight_ = lc_translation_weight_;
-  rotation_weight_ = lc_rotation_weight_;
+  // TODO: Find a better way to set these up.
+//  translation_weight_ = lc_translation_weight_;
+//  rotation_weight_ = lc_rotation_weight_;
   SolveSLAM();
   std::cout << "Waiting for Loop Closure input." << std::endl;
 }
 
 
 void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
-  if (pose_output_file_.compare("") == 0) {
+  if (config_.CONFIG_pose_output_file.compare("") == 0) {
     std::cout << "No output file specified, not writing!" << std::endl;
     return;
   }
   std::cout << "Writing Poses" << std::endl;
   std::ofstream output_file;
-  output_file.open(pose_output_file_);
+  output_file.open(config_.CONFIG_pose_output_file);
   for (const SLAMNodeSolution2D& sol_node : solution_) {
     output_file << std::fixed << sol_node.timestamp << " " << sol_node.pose[0]
                 << " " << sol_node.pose[1] << " " << sol_node.pose[2]
@@ -714,11 +693,13 @@ OdometryFactor2D Solver::GetTotalOdomChange(const uint64_t node_a,
 }
 
 std::pair<double, double> Solver::GetLocalUncertainty(const uint64_t node_idx) {
-  if (node_idx < LOCAL_UNCERTAINTY_PREV_SCANS) {
+  if (node_idx < static_cast<uint64_t>(config_.CONFIG_local_uncertainty_prev_scans)) {
     return std::make_pair(0, 0);
   }
   std::vector<std::vector<Vector2f>> prevScans;
-  for(uint64_t idx = node_idx - 1; idx > node_idx - LOCAL_UNCERTAINTY_PREV_SCANS; idx--) {
+  for(uint64_t idx = node_idx - 1;
+      idx > node_idx - static_cast<uint64_t>(config_.CONFIG_local_uncertainty_prev_scans);
+      idx--) {
     prevScans.push_back(problem_.nodes[idx].lidar_factor.pointcloud);
   }
   return scan_matcher.GetLocalUncertaintyStats(prevScans, problem_.nodes[node_idx].lidar_factor.pointcloud);
@@ -745,7 +726,6 @@ Eigen::MatrixXd CRSToEigen(const ceres::CRSMatrix& crs_matrix) {
 }
 
 double Solver::CostFromResidualDescriptor(const ResidualDesc& res_desc) {
-  std::cout << "Solving for Residual Cost" << std::endl;
   // Get the associated parameter blocks.
   double * param_i = solution_[res_desc.node_i].pose;
   double * param_j = solution_[res_desc.node_j].pose;
@@ -778,20 +758,34 @@ double Solver::CostFromResidualDescriptor(const ResidualDesc& res_desc) {
   double cost = eigen_residual.transpose() *
                 information_matrix *
                 eigen_residual;
-  std::cout << "Finished Solving for Residual Cost" << std::endl;
+  if (cost < 0 || !ceres::IsFinite(cost)) {
+    std::cout << "--- Invalid ---" << std::endl;
+    std::cout << "From " << res_desc.node_i << " to " << res_desc.node_j << std::endl;
+    std::cout << "Original Information Matrix: " << jacobian.num_rows << "x" << jacobian.num_cols << std::endl;
+    std::cout << "Information Matrix: " << information_matrix.rows() << "x" << information_matrix.cols() << std::endl;
+    std::cout << "Residual: " << residuals.size() << std::endl;
+  }
   return cost;
 }
 
 double Solver::GetChiSquareCost(vector<ResidualDesc> lc_res_desc) {
-//  typedef Eigen::SparseMatrix<double> SparseMat;
-  //s TODO: Making the assumption that this can be done with one matrix mult.
-//  ceres::CRSMatrix jacobian;
   double cost = 0.0;
   if (ceres_information.cost_valid) {
     cost = ceres_information.cost;
   } else {
+    std::cout << "Calculating base problem costs, res num: "
+              << ceres_information.res_descriptors.size() << std::endl;
+    int residuals_finished = 0;
     for (const ResidualDesc& res_desc : ceres_information.res_descriptors) {
-      cost += CostFromResidualDescriptor(res_desc);
+      double temp_cost = CostFromResidualDescriptor(res_desc);
+      if (temp_cost < 0 || !ceres::IsFinite(temp_cost)) {
+        std::cout << "Invalid Cost!" << std::endl;
+      } else {
+        std::cout << "Cost: << " << cost << std::endl;
+        cost += temp_cost;
+      }
+      std::cout << "Res Finished: "<< residuals_finished++ << "/"
+                << ceres_information.res_descriptors.size() << std::endl;
     }
   }
   // Get the cost from the LC Residuals.
@@ -800,34 +794,6 @@ double Solver::GetChiSquareCost(vector<ResidualDesc> lc_res_desc) {
     cost += CostFromResidualDescriptor(res_desc);
   }
   return cost;
-//  ceres::Problem::EvaluateOptions eval_options;
-//  vector<double> residuals;
-//  ceres_information.problem->Evaluate(eval_options,
-//                                 nullptr,
-//                                 &residuals,
-//                                 nullptr,
-//                                 &jacobian);
-//  std::cout << "Residuals Dimensions R: 1 C: " << residuals.size() << std::endl;
-//  std::cout << "Jacobian Dimensions R: " << jacobian.num_rows << " C: " << jacobian.num_cols << std::endl;
-//  // Find the information matrix
-//  SparseMat jacobian_eigen = CRSToEigen(jacobian);
-//  SparseMat inform_mat_before_inverse(jacobian.num_cols, jacobian.num_cols);
-//  inform_mat_before_inverse = (jacobian_eigen * jacobian_eigen.transpose());
-//  // TODO: Assuming uses AMD ordering
-//  Eigen::SparseQR<SparseMat, Eigen::AMDOrdering<int>> sparse_solver(inform_mat_before_inverse);
-//  SparseMat identity(jacobian.num_cols, jacobian.num_cols);
-//  identity.setIdentity();
-//  SparseMat information_matrix =
-//    sparse_solver.solve(identity);
-//  Eigen::VectorXd res_eigen =
-//    Eigen::Map<Eigen::VectorXd>(residuals.data(),
-//                                residuals.size(),
-//                                1);
-//  std::cout << "Residual size: " << res_eigen.rows() << "x" << res_eigen.cols() << std::endl;
-//  std::cout << "Information matrix size: " << information_matrix.rows() << "x" << information_matrix.cols() << std::endl;
-//  double cost = res_eigen.transpose() * information_matrix * res_eigen;
-//  // TODO: Assuming here that our DoF for ChiSquare is number of variables / parameters.
-//  return std::make_tuple(cost, jacobian.num_cols);
 }
 
 OdometryFactor2D Solver::GetDifferenceOdom(const uint64_t node_a,
@@ -873,8 +839,8 @@ vector<ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
   ceres::ResidualBlockId odom_id;
   odom_id = ceres_information.problem->AddResidualBlock(
     OdometryResidual::create(GetDifferenceOdom(first_node, second_node),
-                             lc_translation_weight_,
-                             lc_rotation_weight_),
+                             config_.CONFIG_lc_translation_weight,
+                             config_.CONFIG_lc_rotation_weight),
     NULL,
     solution_[first_node].pose,
     solution_[second_node].pose);
@@ -905,6 +871,7 @@ bool Solver::SimilarScans(const uint64_t node_a,
   }
   // TODO: Assumes that there the DoF of the graph refers to the number of nodes * 3
   chi_squared dist(problem_.nodes.size() * 3);
+  std::cout << "chinum: " << chi_num << std::endl;
   return boost::math::cdf(dist, chi_num) <= certainty;
 }
 
@@ -927,7 +894,8 @@ void Solver::AddSlamNode(SLAMNode2D& node) {
 Eigen::Matrix<double, 32, 1> Solver::GetEmbedding(SLAMNode2D& node) {
   point_cloud_embedder::GetPointCloudEmbedding srv;
   // TODO actually pass the range down here
-  // std::vector<Eigen::Vector2f> normalized = pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud, max_lidar_range_); 
+  // std::vector<Eigen::Vector2f> normalized =
+  //   pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud, config_.CONFIG_max_lidar_range);
   srv.request.cloud = EigenPointcloudToRos(node.lidar_factor.pointcloud);
   if (embedding_client.call(srv)) {
     vector<float> embedding = srv.response.embedding;
@@ -1004,8 +972,8 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
 //  auto uncertainty = GetLocalUncertainty(node.node_idx);
-//  if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD ||
-//      uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
+//  if (uncertainty.first > config_.CONFIG_local_uncertainty_condition_threshold ||
+//      uncertainty.second > config_.CONFIG_local_uncertainty_scale_threshold) {
 //    #if DEBUG
 //    printf("Not a keyframe due to lack of local invariance... Computed Uncertainty: %f, %f\n",
 //            uncertainty.first,
@@ -1052,7 +1020,8 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
 //      closest_index = match_index;
 //    }
 //  }
-//  if (closest_index == -1 || closest_distance > EMBEDDING_THRESHOLD) {
+//  if (closest_index == -1 ||
+//      closest_distance > config_.CONFIG_embedding_threshold) {
 //    #if DEBUG
 //    printf("Out of %lu keyframes, none were sufficient for LC\n",
 //            matches.size());

@@ -25,12 +25,13 @@ INCLUDE_DIRECTORIES(${OpenCV_INCLUDE_DIRS})
 FIND_PACKAGE(OpenMP REQUIRED)
 
 INCLUDE($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
-INCLUDE_DIRECTORIES(third_party/learning-loop-closure/point_cloud_embedder/srv_gen/cpp/include)
 
 add_subdirectory(third_party)
 
 INCLUDE_DIRECTORIES(third_party/csm/src)
 INCLUDE_DIRECTORIES(third_party/vector_maps/src)
+INCLUDE_DIRECTORIES(third_party/learning-loop-closure/point_cloud_embedder/srv_gen/cpp/include)
+INCLUDE_DIRECTORIES(third_party/config-reader/include)
 
 rosbuild_init()
 
@@ -57,7 +58,9 @@ SET(libs roslib
          m
          OpenMP::OpenMP_CXX
          csm
-         vector_maps)
+         vector_maps
+         lua5.1
+         pthread)
 
 ROSBUILD_ADD_EXECUTABLE(lidar_slam
                         src/main.cc

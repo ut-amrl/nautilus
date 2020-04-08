@@ -6,11 +6,22 @@
 #include "Eigen/Dense"
 
 #include "./math_util.h"
-
+#include "config_reader/config_reader.h"
 
 using std::vector;
 using Eigen::Vector2f;
 using math_util::angle_mod;
+
+struct NormalComputationConfig {
+    CONFIG_DOUBLE(neighborhood_size, "nc_neighborhood_size");
+    CONFIG_DOUBLE(neighborhood_step_size, "nc_neighborhood_step_size");
+    CONFIG_DOUBLE(mean_distance, "nc_mean_distance");
+    CONFIG_INT(bin_number, "nc_bin_number");
+
+    NormalComputationConfig() {
+      while (!config_reader::VariablesReady()) {}
+    }
+};
 
 namespace NormalComputation {
   struct CircularHoughAccumulator {

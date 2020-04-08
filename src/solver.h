@@ -24,6 +24,7 @@
 #include "./pointcloud_helpers.h"
 #include "./gui_helpers.h"
 #include "lidar_slam/WriteMsg.h"
+#include "config_reader/config_reader.h"
 
 using std::vector;
 using Eigen::Vector2f;
@@ -484,17 +485,32 @@ class VisualizationCallback : public ceres::IterationCallback {
   vector<LCConstraint> constraints;
 };
 
+struct SolverConfig {
+    CONFIG_DOUBLE(translation_weight, "translation_weight");
+    CONFIG_DOUBLE(rotation_weight, "rotation_weight");
+    CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
+    CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
+    CONFIG_STRING(pose_output_file, "pose_output_file");
+    CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
+    CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
+    CONFIG_DOUBLE(embedding_threshold, "embedding_threshold");
+    CONFIG_INT(lidar_constraint_amount, "lidar_constraint_amount");
+    CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
+    CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
+    CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
+    CONFIG_DOUBLE(local_uncertainty_condition_threshold, "local_uncertainty_condition_threshold");
+    CONFIG_DOUBLE(local_uncertainty_scale_threshold, "local_uncertainty_scale_threshold");
+    CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
+    CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
+
+    SolverConfig() {
+      while(!config_reader::VariablesReady());
+    }
+};
+
 class Solver {
  public:
-  Solver(double translation_weight,
-         double rotation_weight,
-         double lc_translation_weight,
-         double lc_rotation_weight,
-         double stopping_accuracy,
-         double max_lidar_range,
-         bool auto_lc_enabled,
-         std::string pose_output_file,
-         ros::NodeHandle& n);
+  Solver(ros::NodeHandle& n);
   vector<SLAMNodeSolution2D> SolveSLAM();
   double GetPointCorrespondences(const SLAMProblem2D& problem,
                                  vector<SLAMNodeSolution2D>*
@@ -543,13 +559,6 @@ class Solver {
                     const double certainty);
   std::pair<double, double> GetLocalUncertainty(const uint64_t node_idx);
   vector<size_t> GetMatchingKeyframeIndices(size_t keyframe_index);
-  double translation_weight_;
-  double rotation_weight_;
-  double lc_translation_weight_;
-  double lc_rotation_weight_;
-  double stopping_accuracy_;
-  double max_lidar_range_;
-  bool auto_lc_enabled_;
   std::string pose_output_file_;
   SLAMProblem2D problem_;
   vector<OdometryFactor2D> initial_odometry_factors;
@@ -561,6 +570,7 @@ class Solver {
   ros::ServiceClient embedding_client;
   CorrelativeScanMatcher scan_matcher;
   CeresInformation ceres_information;
+  SolverConfig config_;
 };
 
 #endif // SRC_SOLVER_H_
