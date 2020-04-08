@@ -2,31 +2,30 @@
 // Created by jack on 9/15/19.
 //
 
-#include <glog/logging.h>
 #include "./pointcloud_helpers.h"
+#include <glog/logging.h>
 #include <numeric>
 
-#include "ros/package.h"
 #include "eigen3/Eigen/Dense"
+#include "ros/package.h"
 #include "sensor_msgs/PointCloud2.h"
 
 #include "./kdtree.h"
 #include "./math_util.h"
 
-using Eigen::Vector2f;
 using Eigen::Matrix2f;
 using Eigen::Rotation2D;
+using Eigen::Vector2f;
+using math_util::NormalsSimilar;
 using std::pair;
 using std::vector;
-using math_util::NormalsSimilar;
 
 // TODO: Throw out this method for stf filtering.
 #define GLANCING_THRESHOLD 0.10
 
-vector<Vector2f>
-FilterGlancing(const float angle_min,
-               const float angle_step,
-               const vector<pair<size_t, Vector2f>> indexed_pointcloud) {
+vector<Vector2f> FilterGlancing(
+    const float angle_min, const float angle_step,
+    const vector<pair<size_t, Vector2f>> indexed_pointcloud) {
   vector<Vector2f> pointcloud;
   CHECK_GE(indexed_pointcloud.size(), 1);
   Vector2f last_point = indexed_pointcloud[0].second;
@@ -43,9 +42,8 @@ FilterGlancing(const float angle_min,
   return pointcloud;
 }
 
-vector<Vector2f>
-pointcloud_helpers::LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan,
-                                          double max_range) {
+vector<Vector2f> pointcloud_helpers::LaserScanToPointCloud(
+    sensor_msgs::LaserScan& laser_scan, double max_range) {
   vector<pair<size_t, Vector2f>> pointcloud;
   float angle_offset = laser_scan.range_min;
   for (size_t index = 0; index < laser_scan.ranges.size(); index++) {
@@ -55,16 +53,15 @@ pointcloud_helpers::LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan,
       // Then we must rotate the point by the specified angle at that distance.
       Vector2f point(range, 0.0);
       Matrix2f rot_matrix =
-        Rotation2D<float>(laser_scan.angle_min +
-                         (laser_scan.angle_increment * index))
-          .toRotationMatrix();
+          Rotation2D<float>(laser_scan.angle_min +
+                            (laser_scan.angle_increment * index))
+              .toRotationMatrix();
       point = rot_matrix * point;
       pointcloud.emplace_back(index, point);
     }
     angle_offset += laser_scan.angle_increment;
   }
-  return FilterGlancing(laser_scan.angle_min,
-                        laser_scan.angle_increment,
+  return FilterGlancing(laser_scan.angle_min, laser_scan.angle_increment,
                         pointcloud);
 }
 
@@ -93,16 +90,15 @@ void pointcloud_helpers::InitPointcloud(PointCloud2* point) {
 
 void pointcloud_helpers::PushBackBytes(float val,
                                        sensor_msgs::PointCloud2& ptr) {
-  uint8_t *data_ptr = reinterpret_cast<uint8_t*>(&val);
+  uint8_t* data_ptr = reinterpret_cast<uint8_t*>(&val);
   for (int i = 0; i < 4; i++) {
     ptr.data.push_back(data_ptr[i]);
   }
 }
 
-void
-pointcloud_helpers::PublishPointcloud(const vector<Vector2f>& points,
-                                      PointCloud2& point_cloud,
-                                      Publisher& pub) {
+void pointcloud_helpers::PublishPointcloud(const vector<Vector2f>& points,
+                                           PointCloud2& point_cloud,
+                                           Publisher& pub) {
   for (uint64_t i = 0; i < points.size(); i++) {
     Vector2f vec = points[i];
     PushBackBytes(vec[0], point_cloud);
@@ -115,8 +111,8 @@ pointcloud_helpers::PublishPointcloud(const vector<Vector2f>& points,
   point_cloud.data.clear();
 }
 
-PointCloud2
-pointcloud_helpers::EigenPointcloudToRos(const vector<Vector2f>& pointcloud) {
+PointCloud2 pointcloud_helpers::EigenPointcloudToRos(
+    const vector<Vector2f>& pointcloud) {
   PointCloud2 point_msg;
   InitPointcloud(&point_msg);
   for (uint64_t i = 0; i < pointcloud.size(); i++) {
@@ -130,14 +126,15 @@ pointcloud_helpers::EigenPointcloudToRos(const vector<Vector2f>& pointcloud) {
   return point_msg;
 }
 
-std::vector<Vector2f>
-pointcloud_helpers::normalizePointCloud(const vector<Vector2f>& pointcloud, double range) {
+std::vector<Vector2f> pointcloud_helpers::normalizePointCloud(
+    const vector<Vector2f>& pointcloud, double range) {
   std::vector<Vector2f> normalized(pointcloud.size());
-  Vector2f mean = std::accumulate(pointcloud.begin(), pointcloud.end(), Vector2f(0.0f, 0.0f)) / pointcloud.size();
+  Vector2f mean = std::accumulate(pointcloud.begin(), pointcloud.end(),
+                                  Vector2f(0.0f, 0.0f)) /
+                  pointcloud.size();
   for (uint64_t i = 0; i < pointcloud.size(); i++) {
     normalized[i] = (pointcloud[i] - mean) / range;
   }
 
   return normalized;
 }
-

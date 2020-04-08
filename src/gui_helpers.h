@@ -55,11 +55,8 @@ struct Color4f {
 
 // Initialize the marker to use the global "map" coordinate frame, identity
 // pose, and specified color and type.
-void InitializeMarker(int marker_type,
-                      const Color4f& color,
-                      float scale_x,
-                      float scale_y,
-                      float scale_z,
+void InitializeMarker(int marker_type, const Color4f& color, float scale_x,
+                      float scale_y, float scale_z,
                       visualization_msgs::Marker* msg);
 
 template <class Vector3>
@@ -82,9 +79,7 @@ std_msgs::ColorRGBA StdColor(const Color& color) {
 }
 
 template <class Vector3>
-void AddLine(const Vector3& v1,
-             const Vector3& v2,
-             const Color4f& color,
+void AddLine(const Vector3& v1, const Vector3& v2, const Color4f& color,
              visualization_msgs::Marker* msg) {
   CHECK_EQ(msg->type, visualization_msgs::Marker::LINE_LIST);
   msg->points.push_back(StdPoint(v1));
@@ -94,8 +89,7 @@ void AddLine(const Vector3& v1,
 }
 
 template <class Vector3>
-void AddPoint(const Vector3& v,
-              const Color4f& color,
+void AddPoint(const Vector3& v, const Color4f& color,
               visualization_msgs::Marker* msg) {
   msg->points.push_back(StdPoint(v));
   msg->colors.push_back(StdColor(color));

@@ -7,42 +7,42 @@
 
 #include <vector>
 
-#include <boost/math/distributions/chi_squared.hpp>
-#include "glog/logging.h"
 #include <ros/node_handle.h>
-#include "ros/package.h"
-#include "eigen3/Eigen/Dense"
+#include <boost/math/distributions/chi_squared.hpp>
+#include "CorrelativeScanMatcher.h"
 #include "ceres/ceres.h"
+#include "eigen3/Eigen/Dense"
+#include "glog/logging.h"
+#include "ros/package.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "visualization_msgs/Marker.h"
-#include "CorrelativeScanMatcher.h"
 
-
-#include "./kdtree.h"
-#include "./slam_types.h"
-#include "lidar_slam/HitlSlamInputMsg.h"
-#include "./pointcloud_helpers.h"
 #include "./gui_helpers.h"
-#include "lidar_slam/WriteMsg.h"
+#include "./kdtree.h"
+#include "./pointcloud_helpers.h"
+#include "./slam_types.h"
 #include "config_reader/config_reader.h"
+#include "lidar_slam/HitlSlamInputMsg.h"
+#include "lidar_slam/WriteMsg.h"
 
-using std::vector;
-using Eigen::Vector2f;
-using slam_types::OdometryFactor2D;
-using slam_types::SLAMNodeSolution2D;
-using slam_types::SLAMProblem2D;
-using slam_types::SLAMNode2D;
-using lidar_slam::HitlSlamInputMsgConstPtr;
-using lidar_slam::HitlSlamInputMsg;
-using lidar_slam::WriteMsgConstPtr;
-using Eigen::Affine2f;
-using Eigen::Vector3f;
 using boost::math::chi_squared;
 using boost::math::complement;
 using boost::math::quantile;
+using Eigen::Affine2f;
+using Eigen::Vector2f;
+using Eigen::Vector3f;
+using lidar_slam::HitlSlamInputMsg;
+using lidar_slam::HitlSlamInputMsgConstPtr;
+using lidar_slam::WriteMsgConstPtr;
+using slam_types::OdometryFactor2D;
+using slam_types::SLAMNode2D;
+using slam_types::SLAMNodeSolution2D;
+using slam_types::SLAMProblem2D;
+using std::vector;
 
-template<typename T> Eigen::Transform<T, 2, Eigen::Affine>
-PoseArrayToAffine(const T* rotation, const T* translation) {
+template <typename T>
+Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(const T* rotation,
+                                                        const T* translation) {
   typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
   typedef Eigen::Rotation2D<T> Rotation2DT;
   typedef Eigen::Translation<T, 2> Translation2T;
@@ -51,41 +51,39 @@ PoseArrayToAffine(const T* rotation, const T* translation) {
   return affine;
 }
 
-template<typename T> Eigen::Transform<T, 2, Eigen::Affine>
-PoseArrayToAffine(const T* pose_array) {
+template <typename T>
+Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(const T* pose_array) {
   return PoseArrayToAffine(&pose_array[2], &pose_array[0]);
 }
 
 template <typename T>
 struct LineSegment {
-    const Eigen::Matrix<T, 2, 1> start;
-    const Eigen::Matrix<T, 2, 1> end;
-    LineSegment(Eigen::Matrix<T, 2, 1>& start,
-                Eigen::Matrix<T, 2, 1>& endpoint) :
-                start(start), end(endpoint) {};
+  const Eigen::Matrix<T, 2, 1> start;
+  const Eigen::Matrix<T, 2, 1> end;
+  LineSegment(Eigen::Matrix<T, 2, 1>& start, Eigen::Matrix<T, 2, 1>& endpoint)
+      : start(start), end(endpoint){};
 
-    LineSegment() {}
+  LineSegment() {}
 
-    template <typename F>
-    LineSegment<F> cast() const {
-      typedef Eigen::Matrix<F, 2, 1> Vector2F;
-      Vector2F startF = start.template cast<F>();
-      Vector2F endF = end.template cast<F>();
-      CHECK(ceres::IsFinite(startF.x()));
-      CHECK(ceres::IsFinite(startF.y()));
-      CHECK(ceres::IsFinite(endF.x()));
-      CHECK(ceres::IsFinite(endF.y()));
-      return LineSegment<F>(startF, endF);
-    }
+  template <typename F>
+  LineSegment<F> cast() const {
+    typedef Eigen::Matrix<F, 2, 1> Vector2F;
+    Vector2F startF = start.template cast<F>();
+    Vector2F endF = end.template cast<F>();
+    CHECK(ceres::IsFinite(startF.x()));
+    CHECK(ceres::IsFinite(startF.y()));
+    CHECK(ceres::IsFinite(endF.x()));
+    CHECK(ceres::IsFinite(endF.y()));
+    return LineSegment<F>(startF, endF);
+  }
 };
 
 struct LearnedKeyframe {
-    Eigen::Matrix<double, 32, 1> embedding;
-    const size_t node_idx;
-    LearnedKeyframe(const Eigen::Matrix<double, 32, 1>& embedding,
-                    const size_t node_idx) :
-                        embedding(embedding),
-                        node_idx(node_idx) {}
+  Eigen::Matrix<double, 32, 1> embedding;
+  const size_t node_idx;
+  LearnedKeyframe(const Eigen::Matrix<double, 32, 1>& embedding,
+                  const size_t node_idx)
+      : embedding(embedding), node_idx(node_idx) {}
 };
 
 // Returns if val is between a and b.
@@ -103,7 +101,7 @@ T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
   // We can get the point on the line by projecting the start -> point onto
   // this line.
   Eigen::Hyperplane<T, 2> line =
-    Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.end);
+      Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.end);
   Vector2T point_on_line = line.projection(point);
   if (IsBetween(point_on_line.x(), line_seg.start.x(), line_seg.end.x()) &&
       IsBetween(point_on_line.y(), line_seg.start.y(), line_seg.end.y())) {
@@ -116,67 +114,65 @@ T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
 }
 
 struct LCPose {
-    uint64_t node_idx;
-    vector<Vector2f> points_on_feature;
-    LCPose(uint64_t node_idx, vector<Vector2f> points_on_feature) :
-      node_idx(node_idx), points_on_feature(points_on_feature) {}
+  uint64_t node_idx;
+  vector<Vector2f> points_on_feature;
+  LCPose(uint64_t node_idx, vector<Vector2f> points_on_feature)
+      : node_idx(node_idx), points_on_feature(points_on_feature) {}
 };
 
 struct LCConstraint {
-    vector<LCPose> line_a_poses;
-    vector<LCPose> line_b_poses;
-    const LineSegment<float> line_a;
-    const LineSegment<float> line_b;
-    double chosen_line_pose[3]{0, 0, 0};
-    LCConstraint(const LineSegment<float>& line_a,
-                 const LineSegment<float>& line_b) :
-                 line_a(line_a),
-                 line_b(line_b) {}
-    LCConstraint() {}
+  vector<LCPose> line_a_poses;
+  vector<LCPose> line_b_poses;
+  const LineSegment<float> line_a;
+  const LineSegment<float> line_b;
+  double chosen_line_pose[3]{0, 0, 0};
+  LCConstraint(const LineSegment<float>& line_a,
+               const LineSegment<float>& line_b)
+      : line_a(line_a), line_b(line_b) {}
+  LCConstraint() {}
 };
 
 struct PointCorrespondences {
-    vector<Vector2f> source_points;
-    vector<Vector2f> target_points;
-    vector<Vector2f> source_normals;
-    vector<Vector2f> target_normals;
-    double *source_pose;
-    double *target_pose;
-    uint64_t source_index;
-    uint64_t target_index;
-    PointCorrespondences(double* source_pose,
-                         double* target_pose,
-                         uint64_t source_index,
-                         uint64_t target_index)
-                         : source_pose(source_pose),
-                           target_pose(target_pose),
-                           source_index(source_index),
-                           target_index(target_index) {}
-    PointCorrespondences() : source_pose(nullptr),
-                             target_pose(nullptr),
-                             source_index(0),
-                             target_index(0) {}
+  vector<Vector2f> source_points;
+  vector<Vector2f> target_points;
+  vector<Vector2f> source_normals;
+  vector<Vector2f> target_normals;
+  double* source_pose;
+  double* target_pose;
+  uint64_t source_index;
+  uint64_t target_index;
+  PointCorrespondences(double* source_pose, double* target_pose,
+                       uint64_t source_index, uint64_t target_index)
+      : source_pose(source_pose),
+        target_pose(target_pose),
+        source_index(source_index),
+        target_index(target_index) {}
+  PointCorrespondences()
+      : source_pose(nullptr),
+        target_pose(nullptr),
+        source_index(0),
+        target_index(0) {}
 };
 
 struct ResidualDesc {
-    size_t node_i;
-    size_t node_j;
-    ceres::ResidualBlockId id;
-    ResidualDesc(size_t node_i, size_t node_j, ceres::ResidualBlockId id) :
-      node_i(node_i), node_j(node_j), id(id) {}
+  size_t node_i;
+  size_t node_j;
+  ceres::ResidualBlockId id;
+  ResidualDesc(size_t node_i, size_t node_j, ceres::ResidualBlockId id)
+      : node_i(node_i), node_j(node_j), id(id) {}
 };
 
 struct CeresInformation {
-    void ResetProblem() {
-      problem.reset(new ceres::Problem());
-      res_descriptors.clear();
-      cost_valid = false;
-      cost = 0.0;
-    }
-    bool cost_valid = false;
-    double cost = 0.0;
-    std::shared_ptr<ceres::Problem> problem;
-    vector<ResidualDesc> res_descriptors;
+  void ResetProblem() {
+    problem.reset(new ceres::Problem());
+    res_descriptors.clear();
+    cost_valid = false;
+    cost = 0.0;
+  }
+  bool cost_valid = false;
+  double cost = 0.0;
+  std::shared_ptr<ceres::Problem> problem;
+  vector<ResidualDesc> res_descriptors;
 };
 
 class VisualizationCallback : public ceres::IterationCallback {
@@ -184,10 +180,8 @@ class VisualizationCallback : public ceres::IterationCallback {
   VisualizationCallback(const SLAMProblem2D& problem,
                         const vector<SLAMNodeSolution2D>* solution,
                         const vector<LearnedKeyframe>& keyframes,
-                        ros::NodeHandle& n) :
-          problem(problem),
-          solution(solution),
-          keyframes(keyframes) {
+                        ros::NodeHandle& n)
+      : problem(problem), solution(solution), keyframes(keyframes) {
     pointcloud_helpers::InitPointcloud(&all_points_marker);
     pointcloud_helpers::InitPointcloud(&new_points_marker);
     pointcloud_helpers::InitPointcloud(&keyframe_marker);
@@ -195,49 +189,35 @@ class VisualizationCallback : public ceres::IterationCallback {
     point_pub = n.advertise<sensor_msgs::PointCloud2>("/all_points", 10);
     new_point_pub = n.advertise<sensor_msgs::PointCloud2>("/new_points", 10);
     pose_pub = n.advertise<visualization_msgs::Marker>("/poses", 10);
-    keyframe_poses_pub = n.advertise<visualization_msgs::Marker>("/keyframe_poses", 10);
+    keyframe_poses_pub =
+        n.advertise<visualization_msgs::Marker>("/keyframe_poses", 10);
     match_pub = n.advertise<visualization_msgs::Marker>("/matches", 10);
     normals_pub = n.advertise<visualization_msgs::Marker>("/normals", 10);
     keyframe_pub = n.advertise<sensor_msgs::PointCloud2>("/keyframes", 10);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_STRIP,
-                                  gui_helpers::Color4f::kGreen,
-                                  0.002,
-                                  0.0,
-                                  0.0,
+                                  gui_helpers::Color4f::kGreen, 0.002, 0.0, 0.0,
                                   &pose_array);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
-                                  gui_helpers::Color4f::kBlue,
-                                  0.003,
-                                  0.0,
-                                  0.0,
+                                  gui_helpers::Color4f::kBlue, 0.003, 0.0, 0.0,
                                   &match_line_list);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
-                                  gui_helpers::Color4f::kYellow,
-                                  0.003,
-                                  0.0,
-                                  0.0,
-                                  &normals_marker);
+                                  gui_helpers::Color4f::kYellow, 0.003, 0.0,
+                                  0.0, &normals_marker);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
-                                  gui_helpers::Color4f::kRed,
-                                  0.003,
-                                  0.0,
-                                  0.0,
+                                  gui_helpers::Color4f::kRed, 0.003, 0.0, 0.0,
                                   &key_pose_array);
     constraint_pose_pub = n.advertise<PointCloud2>("/hitl_poses", 10);
     hitl_pointclouds = n.advertise<PointCloud2>("/hitl_pointclouds", 10);
-    point_a_pub = n.advertise<PointCloud2>("/hitl_a_points",100);
-    point_b_pub = n.advertise<PointCloud2>("/hitl_b_points",100);
+    point_a_pub = n.advertise<PointCloud2>("/hitl_a_points", 100);
+    point_b_pub = n.advertise<PointCloud2>("/hitl_b_points", 100);
     line_pub = n.advertise<visualization_msgs::Marker>("/line_a", 10);
     pointcloud_helpers::InitPointcloud(&pose_point_marker);
     pointcloud_helpers::InitPointcloud(&a_points_marker);
     pointcloud_helpers::InitPointcloud(&b_points_marker);
     pointcloud_helpers::InitPointcloud(&hitl_points_marker);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
-                                  gui_helpers::Color4f::kMagenta,
-                                  0.10,
-                                  0.0,
-                                  0.0,
-                                  &line_marker);
+                                  gui_helpers::Color4f::kMagenta, 0.10, 0.0,
+                                  0.0, &line_marker);
   }
 
   void PubVisualization() {
@@ -247,19 +227,19 @@ class VisualizationCallback : public ceres::IterationCallback {
     gui_helpers::ClearMarker(&key_pose_array);
     for (size_t i = 0; i < solution_c.size(); i++) {
       if (new_points.size() > 0) {
-        all_points.insert(all_points.end(),
-                          new_points.begin(),
+        all_points.insert(all_points.end(), new_points.begin(),
                           new_points.end());
         new_points.clear();
       }
       auto pointcloud = problem.nodes[i].lidar_factor.pointcloud;
       Affine2f robot_to_world =
-              PoseArrayToAffine(&(solution_c[i].pose[2]),
-                                &(solution_c[i].pose[0])).cast<float>();
+          PoseArrayToAffine(&(solution_c[i].pose[2]), &(solution_c[i].pose[0]))
+              .cast<float>();
       Eigen::Vector3f pose(solution_c[i].pose[0], solution_c[i].pose[1], 0.0);
       gui_helpers::AddPoint(pose, gui_helpers::Color4f::kGreen, &pose_array);
-      if(solution_c[i].is_keyframe) {
-        gui_helpers::AddPoint(pose, gui_helpers::Color4f::kRed, &key_pose_array);
+      if (solution_c[i].is_keyframe) {
+        gui_helpers::AddPoint(pose, gui_helpers::Color4f::kRed,
+                              &key_pose_array);
       }
 
       gui_helpers::ClearMarker(&normals_marker);
@@ -268,31 +248,24 @@ class VisualizationCallback : public ceres::IterationCallback {
         // Visualize normal
         KDNodeValue<float, 2> source_point_in_tree;
         float dist =
-                problem.nodes[i].lidar_factor
-                        .pointcloud_tree->FindNearestPoint(point,
-                                                           0.01,
-                                                           &source_point_in_tree);
+            problem.nodes[i].lidar_factor.pointcloud_tree->FindNearestPoint(
+                point, 0.01, &source_point_in_tree);
         if (dist != 0.01) {
           Eigen::Vector3f normal(source_point_in_tree.normal.x(),
-                                 source_point_in_tree.normal.y(),
-                                 0.0);
+                                 source_point_in_tree.normal.y(), 0.0);
           normal = robot_to_world * normal;
           Vector2f source_point = robot_to_world * point;
           Eigen::Vector3f source_3f(source_point.x(), source_point.y(), 0.0);
           Eigen::Vector3f result = source_3f + (normal * 0.01);
-          gui_helpers::AddLine(source_3f,
-                               result,
-                               gui_helpers::Color4f::kGreen,
+          gui_helpers::AddLine(source_3f, result, gui_helpers::Color4f::kGreen,
                                &normals_marker);
         }
       }
     }
     if (solution_c.size() >= 2) {
-      pointcloud_helpers::PublishPointcloud(all_points,
-                                            all_points_marker,
+      pointcloud_helpers::PublishPointcloud(all_points, all_points_marker,
                                             point_pub);
-      pointcloud_helpers::PublishPointcloud(new_points,
-                                            new_points_marker,
+      pointcloud_helpers::PublishPointcloud(new_points, new_points_marker,
                                             new_point_pub);
       gui_helpers::ClearMarker(&match_line_list);
       for (const PointCorrespondences& corr : last_correspondences) {
@@ -314,36 +287,33 @@ class VisualizationCallback : public ceres::IterationCallback {
       vector<Vector2f> pose_points;
       vector<Vector2f> a_points;
       vector<Vector2f> b_points;
-      for (const LCPose &pose : hitl_constraint.line_a_poses) {
-        const double *pose_arr = solution_c[pose.node_idx].pose;
+      for (const LCPose& pose : hitl_constraint.line_a_poses) {
+        const double* pose_arr = solution_c[pose.node_idx].pose;
         Vector2f pose_pos(pose_arr[0], pose_arr[1]);
         pose_points.push_back(pose_pos);
-        Affine2f point_to_world = PoseArrayToAffine(&pose_arr[2],
-                                                    &pose_arr[0]).cast<float>();
-        for (const Vector2f &point : pose.points_on_feature) {
+        Affine2f point_to_world =
+            PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
+        for (const Vector2f& point : pose.points_on_feature) {
           Vector2f point_transformed = point_to_world * point;
           a_points.push_back(point_transformed);
         }
       }
-      for (const LCPose &pose : hitl_constraint.line_b_poses) {
-        const double *pose_arr = solution_c[pose.node_idx].pose;
+      for (const LCPose& pose : hitl_constraint.line_b_poses) {
+        const double* pose_arr = solution_c[pose.node_idx].pose;
         Vector2f pose_pos(pose_arr[0], pose_arr[1]);
         pose_points.push_back(pose_pos);
-        Affine2f point_to_world = PoseArrayToAffine(&pose_arr[2],
-                                                    &pose_arr[0]).cast<float>();
-        for (const Vector2f &point : pose.points_on_feature) {
+        Affine2f point_to_world =
+            PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
+        for (const Vector2f& point : pose.points_on_feature) {
           Vector2f point_transformed = point_to_world * point;
           b_points.push_back(point_transformed);
         }
       }
       gui_helpers::AddLine(Vector3f(hitl_constraint.line_a.start.x(),
-                                    hitl_constraint.line_a.start.y(),
-                                    0.0),
+                                    hitl_constraint.line_a.start.y(), 0.0),
                            Vector3f(hitl_constraint.line_a.end.x(),
-                                    hitl_constraint.line_a.end.y(),
-                                    0.0),
-                           gui_helpers::Color4f::kMagenta,
-                           &line_marker);
+                                    hitl_constraint.line_a.end.y(), 0.0),
+                           gui_helpers::Color4f::kMagenta, &line_marker);
       for (int i = 0; i < 5; i++) {
         pointcloud_helpers::PublishPointcloud(pose_points, pose_point_marker,
                                               constraint_pose_pub);
@@ -362,21 +332,20 @@ class VisualizationCallback : public ceres::IterationCallback {
     vector<Vector2f> poses;
     for (LearnedKeyframe frame : keyframes) {
       std::cout << "Frame #: " << frame.node_idx << std::endl;
-      const double *pose_arr = (*solution)[frame.node_idx].pose;
+      const double* pose_arr = (*solution)[frame.node_idx].pose;
       Vector2f pose_point(pose_arr[0], pose_arr[1]);
       poses.push_back(pose_point);
     }
     pointcloud_helpers::PublishPointcloud(poses, keyframe_marker, keyframe_pub);
   }
 
-  void AddPosePointcloud(vector<Vector2f>& pointcloud,
-                         const LCPose& pose) {
+  void AddPosePointcloud(vector<Vector2f>& pointcloud, const LCPose& pose) {
     size_t node_idx = pose.node_idx;
     vector<SLAMNodeSolution2D> solution_c = *solution;
     vector<Vector2f> p_cloud = problem.nodes[node_idx].lidar_factor.pointcloud;
     double* pose_arr = solution_c[node_idx].pose;
     Affine2f robot_to_world =
-      PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
+        PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
     for (const Vector2f& p : p_cloud) {
       pointcloud.push_back(robot_to_world * p);
     }
@@ -384,7 +353,7 @@ class VisualizationCallback : public ceres::IterationCallback {
 
   void PubConstraintPointclouds() {
     vector<Vector2f> pointclouds;
-    for (const LCConstraint &hitl_constraint : constraints) {
+    for (const LCConstraint& hitl_constraint : constraints) {
       for (const LCPose& pose : hitl_constraint.line_a_poses) {
         AddPosePointcloud(pointclouds, pose);
       }
@@ -392,38 +361,28 @@ class VisualizationCallback : public ceres::IterationCallback {
         AddPosePointcloud(pointclouds, pose);
       }
     }
-    pointcloud_helpers::PublishPointcloud(pointclouds,
-                                          hitl_points_marker,
+    pointcloud_helpers::PublishPointcloud(pointclouds, hitl_points_marker,
                                           hitl_pointclouds);
   }
 
-  void ClearNormals() {
-    gui_helpers::ClearMarker(&normals_marker);
-  }
+  void ClearNormals() { gui_helpers::ClearMarker(&normals_marker); }
 
   void AddMatchLines(const PointCorrespondences& correspondence) {
     CHECK_EQ(correspondence.source_points.size(),
              correspondence.target_points.size());
-    for (uint64_t index = 0;
-         index < correspondence.source_points.size();
+    for (uint64_t index = 0; index < correspondence.source_points.size();
          index++) {
       Vector2f source_point = correspondence.source_points[index];
       Vector2f target_point = correspondence.target_points[index];
       Affine2f source_to_world =
-        PoseArrayToAffine(correspondence.source_pose).cast<float>();
+          PoseArrayToAffine(correspondence.source_pose).cast<float>();
       Affine2f target_to_world =
-        PoseArrayToAffine(correspondence.target_pose).cast<float>();
+          PoseArrayToAffine(correspondence.target_pose).cast<float>();
       source_point = source_to_world * source_point;
       target_point = target_to_world * target_point;
-      Vector3f source_3d(source_point.x(),
-                         source_point.y(),
-                         0.0);
-      Vector3f target_3d(target_point.x(),
-                         target_point.y(),
-                         0.0);
-      gui_helpers::AddLine(source_3d,
-                           target_3d,
-                           gui_helpers::Color4f::kBlue,
+      Vector3f source_3d(source_point.x(), source_point.y(), 0.0);
+      Vector3f target_3d(target_point.x(), target_point.y(), 0.0);
+      gui_helpers::AddLine(source_3d, target_3d, gui_helpers::Color4f::kBlue,
                            &match_line_list);
     }
   }
@@ -433,7 +392,7 @@ class VisualizationCallback : public ceres::IterationCallback {
     // points to the same place.
     if (!last_correspondences.empty() &&
         point_correspondence.source_index !=
-        last_correspondences[0].source_index) {
+            last_correspondences[0].source_index) {
       last_correspondences.clear();
     }
     last_correspondences.push_back(point_correspondence);
@@ -443,8 +402,8 @@ class VisualizationCallback : public ceres::IterationCallback {
     constraints.push_back(constraint);
   }
 
-  ceres::CallbackReturnType operator()(const ceres::IterationSummary& summary)
-  override {
+  ceres::CallbackReturnType operator()(
+      const ceres::IterationSummary& summary) override {
     PubVisualization();
     return ceres::SOLVER_CONTINUE;
   }
@@ -486,26 +445,26 @@ class VisualizationCallback : public ceres::IterationCallback {
 };
 
 struct SolverConfig {
-    CONFIG_DOUBLE(translation_weight, "translation_weight");
-    CONFIG_DOUBLE(rotation_weight, "rotation_weight");
-    CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
-    CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
-    CONFIG_STRING(pose_output_file, "pose_output_file");
-    CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
-    CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
-    CONFIG_DOUBLE(embedding_threshold, "embedding_threshold");
-    CONFIG_INT(lidar_constraint_amount, "lidar_constraint_amount");
-    CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
-    CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
-    CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
-    CONFIG_DOUBLE(local_uncertainty_condition_threshold, "local_uncertainty_condition_threshold");
-    CONFIG_DOUBLE(local_uncertainty_scale_threshold, "local_uncertainty_scale_threshold");
-    CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
-    CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
+  CONFIG_DOUBLE(translation_weight, "translation_weight");
+  CONFIG_DOUBLE(rotation_weight, "rotation_weight");
+  CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
+  CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
+  CONFIG_STRING(pose_output_file, "pose_output_file");
+  CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
+  CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
+  CONFIG_DOUBLE(embedding_threshold, "embedding_threshold");
+  CONFIG_INT(lidar_constraint_amount, "lidar_constraint_amount");
+  CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
+  CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
+  CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
+  CONFIG_DOUBLE(local_uncertainty_condition_threshold,
+                "local_uncertainty_condition_threshold");
+  CONFIG_DOUBLE(local_uncertainty_scale_threshold,
+                "local_uncertainty_scale_threshold");
+  CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
+  CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
 
-    SolverConfig() {
-      config_reader::WaitForInit();
-    }
+  SolverConfig() { config_reader::WaitForInit(); }
 };
 
 class Solver {
@@ -513,21 +472,17 @@ class Solver {
   Solver(ros::NodeHandle& n);
   vector<SLAMNodeSolution2D> SolveSLAM();
   double GetPointCorrespondences(const SLAMProblem2D& problem,
-                                 vector<SLAMNodeSolution2D>*
-                                   solution_ptr,
+                                 vector<SLAMNodeSolution2D>* solution_ptr,
                                  PointCorrespondences* point_correspondences,
                                  size_t source_node_index,
                                  size_t target_node_index);
   void AddOdomFactors(ceres::Problem* ceres_problem,
-                      vector<OdometryFactor2D> factors,
-                      double trans_weight,
+                      vector<OdometryFactor2D> factors, double trans_weight,
                       double rot_weight);
   void HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr);
   void WriteCallback(const WriteMsgConstPtr& msg);
   void Vectorize(const WriteMsgConstPtr& msg);
-  vector<SLAMNodeSolution2D> GetSolution() {
-    return solution_;
-  }
+  vector<SLAMNodeSolution2D> GetSolution() { return solution_; }
   LCConstraint GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg);
   bool AddCollinearConstraints(const LCConstraint& constraint);
   void SolveForLC();
@@ -538,6 +493,7 @@ class Solver {
   void AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node);
   void AddSlamNode(SLAMNode2D& node);
   void CheckForLearnedLC(SLAMNode2D& node);
+
  private:
   double CostFromResidualDescriptor(const ResidualDesc& res_desc);
   double GetChiSquareCost(vector<ResidualDesc> lc_res_desc);
@@ -550,12 +506,10 @@ class Solver {
   Eigen::Matrix<double, 32, 1> GetEmbedding(SLAMNode2D& node);
   bool AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
                             LearnedKeyframe& key_frame_b);
-  void LCKeyframes(LearnedKeyframe& key_frame_a,
-                   LearnedKeyframe& key_frame_b);
+  void LCKeyframes(LearnedKeyframe& key_frame_a, LearnedKeyframe& key_frame_b);
   OdometryFactor2D GetTotalOdomChange(const uint64_t node_a,
                                       const uint64_t node_b);
-  bool SimilarScans(const uint64_t node_a,
-                    const uint64_t node_b,
+  bool SimilarScans(const uint64_t node_a, const uint64_t node_b,
                     const double certainty);
   std::pair<double, double> GetLocalUncertainty(const uint64_t node_idx);
   vector<size_t> GetMatchingKeyframeIndices(size_t keyframe_index);
@@ -573,4 +527,4 @@ class Solver {
   SolverConfig config_;
 };
 
-#endif // SRC_SOLVER_H_
+#endif  // SRC_SOLVER_H_

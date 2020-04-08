@@ -24,26 +24,26 @@
 #ifndef SRC_KDTREE_H_
 #define SRC_KDTREE_H_
 
-template<typename T, unsigned int K>
+template <typename T, unsigned int K>
 struct KDNodeValue {
   Eigen::Matrix<T, K, 1> point;
   Eigen::Matrix<T, K, 1> normal;
   int index;
   KDNodeValue() : index(0) {}
   KDNodeValue(const Eigen::Matrix<T, K, 1>& _point,
-              const Eigen::Matrix<T, K, 1>& _normal,
-              int _index) : point(_point), normal(_normal), index(_index) {}
+              const Eigen::Matrix<T, K, 1>& _normal, int _index)
+      : point(_point), normal(_normal), index(_index) {}
 };
 
-
-template<typename T, unsigned int K>
+template <typename T, unsigned int K>
 class KDTree {
  public:
   // Default constructor: Creates an empty KDTree with uninitialized root node.
-  KDTree() : splitting_dimension_(0),
-      left_tree_(NULL),
-      right_tree_(NULL),
-      parent_tree_(NULL)  {}
+  KDTree()
+      : splitting_dimension_(0),
+        left_tree_(NULL),
+        right_tree_(NULL),
+        parent_tree_(NULL) {}
 
   // Destructor: Deletes children trees.
   ~KDTree();
@@ -55,24 +55,23 @@ class KDTree {
   KDTree<T, K>& operator=(const KDTree<T, K>& other) = delete;
 
   // Construct the KDTree using the @values provided.
-  explicit KDTree(const std::vector<KDNodeValue<T, K> >& values);
+  explicit KDTree(const std::vector<KDNodeValue<T, K>>& values);
 
-  static std::vector<KDNodeValue<float, 2>>
-  EigenToKD(const std::vector<Eigen::Vector2f>& values);
+  static std::vector<KDNodeValue<float, 2>> EigenToKD(
+      const std::vector<Eigen::Vector2f>& values);
 
-  static std::vector<KDNodeValue<float, 2>>
-  EigenToKDNoNormals(const std::vector<Eigen::Vector2f>& values);
+  static std::vector<KDNodeValue<float, 2>> EigenToKDNoNormals(
+      const std::vector<Eigen::Vector2f>& values);
 
   // Rebuild the KDTree using the @values provided.
-  KDTree<T, K>* BuildKDTree(std::vector<KDNodeValue<T, K> > values);
+  KDTree<T, K>* BuildKDTree(std::vector<KDNodeValue<T, K>> values);
 
   // Finds the nearest point in the KDTree to the provided &point. Returns
   // the distance to the nearest neighbor found if one is found within the
   // specified threshold. Euclidean L2 norm is used as the distance metric for
   // nearest neighbor search. This is useful for (for example) point to
   // point ICP.
-  T FindNearestPoint(const Eigen::Matrix<T, K, 1>& point,
-                     const T& threshold,
+  T FindNearestPoint(const Eigen::Matrix<T, K, 1>& point, const T& threshold,
                      KDNodeValue<T, K>* neighbor_node);
 
   // Finds the set of points in the KDTree closer than the distance &threshold
@@ -80,7 +79,7 @@ class KDTree {
   // for nearest neighbor search.
   void FindNeighborPoints(const Eigen::Matrix<T, K, 1>& point,
                           const T& threshold,
-                          std::vector<KDNodeValue<T, K> >* neighbor_points);
+                          std::vector<KDNodeValue<T, K>>* neighbor_points);
 
   // Finds the nearest point and normal in the KDTree to the provided &point.
   // Returns the distance to the nearest neighbor if one is found within the

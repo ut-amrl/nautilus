@@ -20,28 +20,29 @@
 
 #include "./kdtree.h"
 
-#include <stdio.h>
 #include <float.h>
+#include <stdio.h>
 #include <algorithm>
 #include <vector>
-#include "glog/logging.h"
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
+#include "glog/logging.h"
 
 #include "./normal_computation.h"
 
-using std::vector;
 using Eigen::Matrix;
 using Eigen::Vector2f;
+using std::vector;
 
 namespace {
 
-template<typename T> inline T min(const T& a, const T& b) {
+template <typename T>
+inline T min(const T& a, const T& b) {
   return (a < b) ? a : b;
 }
 
-template<typename T, unsigned int K>
-int GetSplittingPlane(const vector<KDNodeValue<T, K> >& values) {
+template <typename T, unsigned int K>
+int GetSplittingPlane(const vector<KDNodeValue<T, K>>& values) {
   Matrix<T, K, 1> mean;
   Matrix<T, K, 1> std_dev;
   mean.setZero();
@@ -56,8 +57,8 @@ int GetSplittingPlane(const vector<KDNodeValue<T, K> >& values) {
   // Compute standard deviation along all dimensions.
   for (unsigned int i = 0; i < values.size(); ++i) {
     for (unsigned int j = 0; j < K; ++j) {
-      std_dev(j) = std_dev(j) +
-          (values[i].point(j)-mean(j)) * (values[i].point(j)-mean(j));
+      std_dev(j) = std_dev(j) + (values[i].point(j) - mean(j)) *
+                                    (values[i].point(j) - mean(j));
     }
   }
 
@@ -76,28 +77,27 @@ int GetSplittingPlane(const vector<KDNodeValue<T, K> >& values) {
 
 // Comparator functor used for sorting points based on their values along a
 // particular dimension.
-template<typename T, unsigned int K>
+template <typename T, unsigned int K>
 struct VectorComparator {
   const unsigned int comparator_dimension;
   explicit VectorComparator(int dimension) : comparator_dimension(dimension) {}
-  bool operator()(const KDNodeValue<T, K>& v1,
-                  const KDNodeValue<T, K>& v2) {
+  bool operator()(const KDNodeValue<T, K>& v1, const KDNodeValue<T, K>& v2) {
     return v1.point(comparator_dimension) < v2.point(comparator_dimension);
   }
 };
 
 }  // namespace
 
-template<typename T, unsigned int K>
-KDTree<T, K>::KDTree(const vector<KDNodeValue<T, K> >& values)
+template <typename T, unsigned int K>
+KDTree<T, K>::KDTree(const vector<KDNodeValue<T, K>>& values)
     : splitting_dimension_(0),
-    left_tree_(NULL),
-    right_tree_(NULL),
-    parent_tree_(NULL) {
+      left_tree_(NULL),
+      right_tree_(NULL),
+      parent_tree_(NULL) {
   BuildKDTree(values);
 }
 
-template<typename T, unsigned int K>
+template <typename T, unsigned int K>
 KDTree<T, K>::~KDTree() {
   if (left_tree_ != NULL) {
     delete left_tree_;
@@ -109,10 +109,8 @@ KDTree<T, K>::~KDTree() {
   }
 }
 
-template<typename T, unsigned int K>
-KDTree< T, K >* KDTree<T, K>::BuildKDTree(
-    vector<KDNodeValue<T, K> > values) {
-
+template <typename T, unsigned int K>
+KDTree<T, K>* KDTree<T, K>::BuildKDTree(vector<KDNodeValue<T, K>> values) {
   // Determine splitting plane.
   splitting_dimension_ = GetSplittingPlane<T, K>(values);
   VectorComparator<T, K> comparator(splitting_dimension_);
@@ -127,8 +125,7 @@ KDTree< T, K >* KDTree<T, K>::BuildKDTree(
   // Insert the KD tree of the left hand part of the list to the left node.
   left_tree_ = NULL;
   if (ind > 0) {
-    vector<KDNodeValue<T, K> > points_left(values.begin(),
-                                           values.begin() + ind);
+    vector<KDNodeValue<T, K>> points_left(values.begin(), values.begin() + ind);
     left_tree_ = new KDTree<T, K>(points_left);
     left_tree_->parent_tree_ = this;
   }
@@ -136,46 +133,42 @@ KDTree< T, K >* KDTree<T, K>::BuildKDTree(
   // Insert the KD tree of the right hand part of the list to the right node.
   right_tree_ = NULL;
   if (ind < values.size() - 1) {
-    vector<KDNodeValue<T, K> > points_right(values.begin() + ind + 1,
-                                            values.end());
+    vector<KDNodeValue<T, K>> points_right(values.begin() + ind + 1,
+                                           values.end());
     right_tree_ = new KDTree<T, K>(points_right);
     right_tree_->parent_tree_ = this;
   }
   return this;
 }
 
-template<>
-std::vector<KDNodeValue<float, 2>>
-KDTree<float, 2>::EigenToKD(const std::vector<Vector2f>& values) {
+template <>
+std::vector<KDNodeValue<float, 2>> KDTree<float, 2>::EigenToKD(
+    const std::vector<Vector2f>& values) {
   std::vector<KDNodeValue<float, 2>> point_nodes;
   CHECK_GE(values.size(), 0);
   vector<Vector2f> normals = NormalComputation::GetNormals(values);
   for (size_t node_index = 0; node_index < values.size(); node_index++) {
-    point_nodes.emplace_back(values[node_index],
-                             normals[node_index],
+    point_nodes.emplace_back(values[node_index], normals[node_index],
                              node_index);
   }
   return point_nodes;
 }
 
-template<>
-std::vector<KDNodeValue<float, 2>>
-KDTree<float, 2>::EigenToKDNoNormals(const std::vector<Vector2f>& values) {
+template <>
+std::vector<KDNodeValue<float, 2>> KDTree<float, 2>::EigenToKDNoNormals(
+    const std::vector<Vector2f>& values) {
   std::vector<KDNodeValue<float, 2>> point_nodes;
   CHECK_GE(values.size(), 0);
   for (size_t node_index = 0; node_index < values.size(); node_index++) {
-    point_nodes.emplace_back(values[node_index],
-                             Vector2f(0,0),
-                             node_index);
+    point_nodes.emplace_back(values[node_index], Vector2f(0, 0), node_index);
   }
   return point_nodes;
 }
 
-template<typename T, unsigned int K>
-T KDTree<T, K>::FindNearestPointNormal(
-    const Eigen::Matrix< T, K, 1  >& point,
-    const T& threshold,
-    KDNodeValue< T, K >* neighbor_node) {
+template <typename T, unsigned int K>
+T KDTree<T, K>::FindNearestPointNormal(const Eigen::Matrix<T, K, 1>& point,
+                                       const T& threshold,
+                                       KDNodeValue<T, K>* neighbor_node) {
   T current_best_dist = FLT_MAX;
   if ((value_.point - point).squaredNorm() < threshold * threshold) {
     *neighbor_node = value_;
@@ -187,7 +180,7 @@ T KDTree<T, K>::FindNearestPointNormal(
 
   // The signed distance of the point from the splitting plane.
   const T point_distance(point(splitting_dimension_) -
-      value_.point(splitting_dimension_));
+                         value_.point(splitting_dimension_));
 
   // Follow the query point down the tree and return the best neighbor down
   // that branch.
@@ -205,7 +198,7 @@ T KDTree<T, K>::FindNearestPointNormal(
   if (point_distance >= 0.0 && right_tree_ != NULL) {
     KDNodeValue<T, K> right_tree_neighbor_node;
     T right_tree_dist = right_tree_->FindNearestPointNormal(
-      point, threshold, &right_tree_neighbor_node);
+        point, threshold, &right_tree_neighbor_node);
     if (right_tree_dist < current_best_dist) {
       current_best_dist = right_tree_dist;
       *neighbor_node = right_tree_neighbor_node;
@@ -229,17 +222,16 @@ T KDTree<T, K>::FindNearestPointNormal(
   return current_best_dist;
 }
 
-template<typename T, unsigned int K>
+template <typename T, unsigned int K>
 void KDTree<T, K>::FindNeighborPoints(
-    const Eigen::Matrix<T, K, 1>& point,
-    const T& threshold,
-    std::vector<KDNodeValue<T, K> >* neighbor_points) {
+    const Eigen::Matrix<T, K, 1>& point, const T& threshold,
+    std::vector<KDNodeValue<T, K>>* neighbor_points) {
   T current_dist = (value_.point - point).norm();
   if (current_dist < threshold) neighbor_points->push_back(value_);
 
   // The signed distance of the point from the splitting plane.
   const T point_distance(point(splitting_dimension_) -
-      value_.point(splitting_dimension_));
+                         value_.point(splitting_dimension_));
 
   if (point_distance < threshold && left_tree_ != NULL) {
     left_tree_->FindNeighborPoints(point, threshold, neighbor_points);
@@ -250,11 +242,10 @@ void KDTree<T, K>::FindNeighborPoints(
   }
 }
 
-template<typename T, unsigned int K>
-T KDTree<T, K>::FindNearestPoint(
-    const Eigen::Matrix< T, K, 1  >& point,
-    const T& threshold,
-    KDNodeValue<T, K>* neighbor_node) {
+template <typename T, unsigned int K>
+T KDTree<T, K>::FindNearestPoint(const Eigen::Matrix<T, K, 1>& point,
+                                 const T& threshold,
+                                 KDNodeValue<T, K>* neighbor_node) {
   T current_best_dist = (value_.point - point).norm();
   *neighbor_node = value_;
   if (current_best_dist < FLT_MIN) {
@@ -263,7 +254,7 @@ T KDTree<T, K>::FindNearestPoint(
 
   // The signed distance of the point from the splitting plane.
   const T point_distance(point(splitting_dimension_) -
-      value_.point(splitting_dimension_));
+                         value_.point(splitting_dimension_));
 
   // Follow the query point down the tree and return the best neighbor down
   // that branch.
@@ -324,4 +315,3 @@ template class KDTree<double, 2>;
 // Explicit instantiation of KDTree class for 2D float values.
 template struct KDNodeValue<float, 2>;
 template class KDTree<float, 2>;
-

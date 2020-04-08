@@ -1,28 +1,28 @@
 #include <csignal>
 #include <vector>
 
-#include "ros/node_handle.h"
 #include "gflags/gflags.h"
 #include "glog/logging.h"
+#include "nav_msgs/Odometry.h"
+#include "ros/node_handle.h"
 #include "rosbag/bag.h"
 #include "rosbag/view.h"
 #include "sensor_msgs/LaserScan.h"
-#include "nav_msgs/Odometry.h"
 
 #include "./slam_type_builder.h"
 #include "./slam_types.h"
 #include "./solver.h"
-#include "lidar_slam/CobotOdometryMsg.h"
 #include "config_reader/config_reader.h"
+#include "lidar_slam/CobotOdometryMsg.h"
 
-using std::string;
-using std::vector;
-using slam_types::SLAMNodeSolution2D;
-using slam_types::SLAMProblem2D;
-using slam_types::SLAMNode2D;
 using lidar_slam::CobotOdometryMsg;
 using lidar_slam::HitlSlamInputMsg;
 using lidar_slam::WriteMsg;
+using slam_types::SLAMNode2D;
+using slam_types::SLAMNodeSolution2D;
+using slam_types::SLAMProblem2D;
+using std::string;
+using std::vector;
 
 CONFIG_STRING(bag_path, "bag_path");
 CONFIG_BOOL(auto_lc, "auto_lc");
@@ -30,8 +30,7 @@ CONFIG_STRING(lidar_topic, "lidar_topic");
 CONFIG_STRING(odom_topic, "odom_topic");
 CONFIG_STRING(hitl_lc_topic, "hitl_lc_topic");
 
-SLAMProblem2D ProcessBagFile(const char* bag_path,
-                             const ros::NodeHandle& n) {
+SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
   /*
    * Loads and processes the bag file pulling out the lidar data
    * and the odometry data. Keeps track of the current pose and produces
@@ -42,7 +41,7 @@ SLAMProblem2D ProcessBagFile(const char* bag_path,
   rosbag::Bag bag;
   try {
     bag.open(bag_path, rosbag::bagmode::Read);
-  } catch (rosbag::BagException &exception) {
+  } catch (rosbag::BagException& exception) {
     printf("Unable to read %s, reason: %s\n", bag_path, exception.what());
     return slam_types::SLAMProblem2D();
   }
@@ -54,13 +53,12 @@ SLAMProblem2D ProcessBagFile(const char* bag_path,
   SLAMTypeBuilder slam_builder;
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
-       ros::ok() && it != view.end() && !slam_builder.Done();
-       ++it) {
-    const rosbag::MessageInstance &message = *it;
+       ros::ok() && it != view.end() && !slam_builder.Done(); ++it) {
+    const rosbag::MessageInstance& message = *it;
     {
       // Load all the point clouds into memory.
       sensor_msgs::LaserScanPtr laser_scan =
-              message.instantiate<sensor_msgs::LaserScan>();
+          message.instantiate<sensor_msgs::LaserScan>();
       if (laser_scan != nullptr) {
         slam_builder.LidarCallback(*laser_scan);
       }
@@ -72,7 +70,8 @@ SLAMProblem2D ProcessBagFile(const char* bag_path,
       }
     }
     {
-      lidar_slam::CobotOdometryMsgPtr odom = message.instantiate<CobotOdometryMsg>();
+      lidar_slam::CobotOdometryMsgPtr odom =
+          message.instantiate<CobotOdometryMsg>();
       if (odom != nullptr) {
         slam_builder.OdometryCallback(*odom);
       }
@@ -90,11 +89,9 @@ void SignalHandler(int signum) {
   exit(0);
 }
 
-void LearnedLoopClosure(SLAMProblem2D& slam_problem,
-                        Solver& solver) {
+void LearnedLoopClosure(SLAMProblem2D& slam_problem, Solver& solver) {
   // Iteratively add all the nodes and odometry factors.
-  for (uint64_t node_index = 0;
-       node_index < slam_problem.nodes.size();
+  for (uint64_t node_index = 0; node_index < slam_problem.nodes.size();
        node_index++) {
     if (node_index == 0) {
       solver.AddSlamNode(slam_problem.nodes[0]);
@@ -129,27 +126,20 @@ int main(int argc, char** argv) {
   ros::NodeHandle n;
   signal(SIGINT, SignalHandler);
   // Load and pre-process the data.
-  SLAMProblem2D slam_problem =
-          ProcessBagFile(CONFIG_bag_path.c_str(), n);
+  SLAMProblem2D slam_problem = ProcessBagFile(CONFIG_bag_path.c_str(), n);
   CHECK_GT(slam_problem.nodes.size(), 1)
-    << " Not enough nodes were processed"
-    << " you probably didn't specify the correct topics!\n";
+      << " Not enough nodes were processed"
+      << " you probably didn't specify the correct topics!\n";
   // Load all the residuals into the problem and run to get initial solution.
   Solver solver(n);
   LearnedLoopClosure(slam_problem, solver);
   std::cout << "Waiting for Loop Closure input" << std::endl;
-  ros::Subscriber hitl_sub = n.subscribe(CONFIG_hitl_lc_topic,
-                                         10,
-                                         &Solver::HitlCallback,
-                                         &solver);
-  ros::Subscriber write_sub = n.subscribe("/write_output",
-                                          10,
-                                          &Solver::WriteCallback,
-                                          &solver);
-  ros::Subscriber vector_sub = n.subscribe("/vectorize_output",
-                                           10,
-                                           &Solver::Vectorize,
-                                           &solver);
+  ros::Subscriber hitl_sub =
+      n.subscribe(CONFIG_hitl_lc_topic, 10, &Solver::HitlCallback, &solver);
+  ros::Subscriber write_sub =
+      n.subscribe("/write_output", 10, &Solver::WriteCallback, &solver);
+  ros::Subscriber vector_sub =
+      n.subscribe("/vectorize_output", 10, &Solver::Vectorize, &solver);
   ros::spin();
   return 0;
 }

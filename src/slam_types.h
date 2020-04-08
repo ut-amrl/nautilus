@@ -23,142 +23,135 @@
 #ifndef __SLAM_TYPES_H__
 #define __SLAM_TYPES_H__
 
+#include <memory>
 #include <utility>
 #include <vector>
-#include <memory>
 
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
 
-#include "math_util.h"
 #include "kdtree.h"
-
+#include "math_util.h"
 
 namespace slam_types {
 
 struct LidarFactor {
-    // IDs of the poses
-    uint64_t pose_id;
-    std::vector<Eigen::Vector2f> pointcloud;
-    std::shared_ptr<KDTree<float, 2>> pointcloud_tree;
-    LidarFactor() {
-      pose_id = 0;
-      pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(nullptr);
-    }
-    LidarFactor(uint64_t pose_id,
-                std::vector<Eigen::Vector2f>& pointcloud) :
-                pose_id(pose_id),
-                pointcloud(pointcloud) {
-      KDTree<float, 2>* tree_ptr =
-          new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(pointcloud));
-      pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(tree_ptr);
-    }
+  // IDs of the poses
+  uint64_t pose_id;
+  std::vector<Eigen::Vector2f> pointcloud;
+  std::shared_ptr<KDTree<float, 2>> pointcloud_tree;
+  LidarFactor() {
+    pose_id = 0;
+    pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(nullptr);
+  }
+  LidarFactor(uint64_t pose_id, std::vector<Eigen::Vector2f>& pointcloud)
+      : pose_id(pose_id), pointcloud(pointcloud) {
+    KDTree<float, 2>* tree_ptr =
+        new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(pointcloud));
+    pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(tree_ptr);
+  }
 };
 
 struct RobotPose2D {
-    // Robot location.
-    Eigen::Vector2f loc;
-    // Robot angle: rotates points from robot frame to global.
-    // RADIANS
-    float angle{0};
-    // Default constructor: do nothing.
-    RobotPose2D() : loc(0, 0) {}
-    // Convenience constructor: initialize everything.
-    RobotPose2D(const Eigen::Vector2f&  loc,
-                const float angle) :
-                loc(loc), angle(angle) {}
-    // Return a transform from the robot to the world frame for this pose.
-    Eigen::Affine2f RobotToWorldTf() const {
-      return (Eigen::Translation2f(loc) *
-              Eigen::Rotation2D<float>(angle)
-                  .toRotationMatrix());
-    }
-    // Return a transform from the world to the robot frame for this pose.
-    Eigen::Affine2f WorldToRobotTf() const {
-      return ((Eigen::Translation2f(loc) *
-               Eigen::Rotation2D<float>(angle)
-                   .toRotationMatrix()).inverse());
-    }
+  // Robot location.
+  Eigen::Vector2f loc;
+  // Robot angle: rotates points from robot frame to global.
+  // RADIANS
+  float angle{0};
+  // Default constructor: do nothing.
+  RobotPose2D() : loc(0, 0) {}
+  // Convenience constructor: initialize everything.
+  RobotPose2D(const Eigen::Vector2f& loc, const float angle)
+      : loc(loc), angle(angle) {}
+  // Return a transform from the robot to the world frame for this pose.
+  Eigen::Affine2f RobotToWorldTf() const {
+    return (Eigen::Translation2f(loc) *
+            Eigen::Rotation2D<float>(angle).toRotationMatrix());
+  }
+  // Return a transform from the world to the robot frame for this pose.
+  Eigen::Affine2f WorldToRobotTf() const {
+    return ((Eigen::Translation2f(loc) *
+             Eigen::Rotation2D<float>(angle).toRotationMatrix())
+                .inverse());
+  }
 };
 
 struct OdometryFactor2D {
-    // ID of first pose.
-    uint64_t pose_i{0};
-    // ID of second pose.
-    uint64_t pose_j{0};
-    // Translation to go from pose i to pose j.
-    Eigen::Vector2f translation;
-    // Rotation to go from pose i to pose j.
-    float rotation{};
-    // Default constructor: do nothing.
-    OdometryFactor2D() = default;
-    // Convenience constructor: initialize everything.
-    OdometryFactor2D(uint64_t pose_i,
-                     uint64_t pose_j,
-                     Eigen::Vector2f& translation,
-                     float rotation) :
-            pose_i(pose_i), pose_j(pose_j), translation(translation),
-            rotation(rotation) {}
+  // ID of first pose.
+  uint64_t pose_i{0};
+  // ID of second pose.
+  uint64_t pose_j{0};
+  // Translation to go from pose i to pose j.
+  Eigen::Vector2f translation;
+  // Rotation to go from pose i to pose j.
+  float rotation{};
+  // Default constructor: do nothing.
+  OdometryFactor2D() = default;
+  // Convenience constructor: initialize everything.
+  OdometryFactor2D(uint64_t pose_i, uint64_t pose_j,
+                   Eigen::Vector2f& translation, float rotation)
+      : pose_i(pose_i),
+        pose_j(pose_j),
+        translation(translation),
+        rotation(rotation) {}
 };
 
 struct SLAMNode2D {
-    // Pose index for this node in the nodes vector for the slam problem.
-    uint64_t node_idx{};
-    // Is keyframe?
-    bool is_keyframe;
-    // Timestamp.
-    double timestamp{};
-    // 3DOF parameters.
-    RobotPose2D pose;
-    // Observed Lidar Factor
-    LidarFactor lidar_factor;
-    // Default constructor: do nothing.
-    SLAMNode2D() = default;
-    // Convenience constructor, initialize all components.
-    SLAMNode2D(uint64_t idx,
-             double timestamp,
-             const RobotPose2D& pose,
-             const LidarFactor& lidar_factor) :
-            node_idx(idx),
-            is_keyframe(false),
-            timestamp(timestamp),
-            pose(pose),
-            lidar_factor(lidar_factor) {}
+  // Pose index for this node in the nodes vector for the slam problem.
+  uint64_t node_idx{};
+  // Is keyframe?
+  bool is_keyframe;
+  // Timestamp.
+  double timestamp{};
+  // 3DOF parameters.
+  RobotPose2D pose;
+  // Observed Lidar Factor
+  LidarFactor lidar_factor;
+  // Default constructor: do nothing.
+  SLAMNode2D() = default;
+  // Convenience constructor, initialize all components.
+  SLAMNode2D(uint64_t idx, double timestamp, const RobotPose2D& pose,
+             const LidarFactor& lidar_factor)
+      : node_idx(idx),
+        is_keyframe(false),
+        timestamp(timestamp),
+        pose(pose),
+        lidar_factor(lidar_factor) {}
 };
 
 struct SLAMProblem2D {
-    // Nodes in the pose graph.
-    std::vector<SLAMNode2D> nodes;
-    // Odometry / IMU correspondences.
-    std::vector<OdometryFactor2D> odometry_factors;
-    // Default constructor, do nothing.
-    SLAMProblem2D() = default;
-    // Convenience constructor for initialization.
-    SLAMProblem2D(std::vector<SLAMNode2D>  nodes,
-                  std::vector<OdometryFactor2D>  odometry_factors) :
-            nodes(std::move(nodes)),
-            odometry_factors(std::move(odometry_factors)){}
+  // Nodes in the pose graph.
+  std::vector<SLAMNode2D> nodes;
+  // Odometry / IMU correspondences.
+  std::vector<OdometryFactor2D> odometry_factors;
+  // Default constructor, do nothing.
+  SLAMProblem2D() = default;
+  // Convenience constructor for initialization.
+  SLAMProblem2D(std::vector<SLAMNode2D> nodes,
+                std::vector<OdometryFactor2D> odometry_factors)
+      : nodes(std::move(nodes)),
+        odometry_factors(std::move(odometry_factors)) {}
 };
 
 struct SLAMNodeSolution2D {
-    // Pose ID.
-    uint64_t node_idx{};
-    // Is Keyframe
-    bool is_keyframe;
+  // Pose ID.
+  uint64_t node_idx{};
+  // Is Keyframe
+  bool is_keyframe;
 
-    // Timestamp.
-    double timestamp{};
-    // 3DOF parameters: tx, ty, angle. Note that
-    // angle_* are the coordinates in scaled angle-axis form.
-    double pose[3]{0, 0, 0};
-    // Convenience constructor, initialize all values.
-    explicit SLAMNodeSolution2D(const SLAMNode2D& n) :
-                       node_idx(n.node_idx),
-                       is_keyframe(n.is_keyframe),
-                       timestamp(n.timestamp),
-                       pose{n.pose.loc.x(), n.pose.loc.y(), n.pose.angle} {}
+  // Timestamp.
+  double timestamp{};
+  // 3DOF parameters: tx, ty, angle. Note that
+  // angle_* are the coordinates in scaled angle-axis form.
+  double pose[3]{0, 0, 0};
+  // Convenience constructor, initialize all values.
+  explicit SLAMNodeSolution2D(const SLAMNode2D& n)
+      : node_idx(n.node_idx),
+        is_keyframe(n.is_keyframe),
+        timestamp(n.timestamp),
+        pose{n.pose.loc.x(), n.pose.loc.y(), n.pose.angle} {}
 
-    SLAMNodeSolution2D() = default;
+  SLAMNodeSolution2D() = default;
 };
 
 }  // namespace slam_types

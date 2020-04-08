@@ -2,24 +2,24 @@
 //
 
 #include <algorithm>
+#include <fstream>
 #include <thread>
 #include <vector>
-#include <fstream>
 
+#include <visualization_msgs/Marker.h>
+#include "ceres/ceres.h"
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
 #include "eigen3/Eigen/Sparse"
 #include "eigen3/Eigen/SparseQR"
-#include <visualization_msgs/Marker.h>
-#include "ceres/ceres.h"
 
 #include "./kdtree.h"
+#include "./line_extraction.h"
 #include "./math_util.h"
-#include "timer.h"
 #include "lidar_slam/HitlSlamInputMsg.h"
 #include "lidar_slam/WriteMsg.h"
-#include "./line_extraction.h"
 #include "point_cloud_embedder/GetPointCloudEmbedding.h"
+#include "timer.h"
 
 #include "./solver.h"
 
@@ -27,24 +27,24 @@
 
 #define DEBUG true
 
-using std::vector;
-using slam_types::OdometryFactor2D;
-using slam_types::LidarFactor;
 using ceres::AutoDiffCostFunction;
+using Eigen::Affine2f;
 using Eigen::Matrix2f;
-using Eigen::Vector2f;
 using Eigen::Rotation2D;
+using Eigen::Vector2f;
+using Eigen::Vector3f;
+using lidar_slam::HitlSlamInputMsg;
+using lidar_slam::HitlSlamInputMsgConstPtr;
+using lidar_slam::WriteMsgConstPtr;
+using math_util::NormalsSimilar;
+using point_cloud_embedder::GetPointCloudEmbedding;
+using pointcloud_helpers::EigenPointcloudToRos;
+using slam_types::LidarFactor;
+using slam_types::OdometryFactor2D;
+using slam_types::SLAMNode2D;
 using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
-using Eigen::Affine2f;
-using lidar_slam::HitlSlamInputMsgConstPtr;
-using lidar_slam::HitlSlamInputMsg;
-using lidar_slam::WriteMsgConstPtr;
-using slam_types::SLAMNode2D;
-using Eigen::Vector3f;
-using math_util::NormalsSimilar;
-using pointcloud_helpers::EigenPointcloudToRos;
-using point_cloud_embedder::GetPointCloudEmbedding;
+using std::vector;
 
 double DistBetween(double pose_a[3], double pose_b[3]) {
   Vector2f pose_a_pos(pose_a[0], pose_a[1]);
@@ -54,9 +54,7 @@ double DistBetween(double pose_a[3], double pose_b[3]) {
 
 struct OdometryResidual {
   template <typename T>
-  bool operator() (const T* pose_i,
-                   const T* pose_j,
-                   T* residual) const {
+  bool operator()(const T* pose_i, const T* pose_j, T* residual) const {
     // Predicted pose_j = pose_i * odometry.
     // Hence, error = pose_j.inverse() * pose_i * odometry;
     typedef Eigen::Matrix<T, 2, 1> Vector2T;
@@ -78,21 +76,18 @@ struct OdometryResidual {
     return true;
   }
 
-  OdometryResidual(const OdometryFactor2D& factor,
-                   double translation_weight,
-                   double rotation_weight) :
-          translation_weight(translation_weight),
-          rotation_weight(rotation_weight),
-          R_odom(factor.rotation),
-          T_odom(factor.translation) {}
+  OdometryResidual(const OdometryFactor2D& factor, double translation_weight,
+                   double rotation_weight)
+      : translation_weight(translation_weight),
+        rotation_weight(rotation_weight),
+        R_odom(factor.rotation),
+        T_odom(factor.translation) {}
 
-  static AutoDiffCostFunction<OdometryResidual, 3, 3, 3>*
-  create(const OdometryFactor2D& factor,
-         double translation_weight,
-         double rotation_weight) {
-    OdometryResidual* residual = new OdometryResidual(factor,
-                                                      translation_weight,
-                                                      rotation_weight);
+  static AutoDiffCostFunction<OdometryResidual, 3, 3, 3>* create(
+      const OdometryFactor2D& factor, double translation_weight,
+      double rotation_weight) {
+    OdometryResidual* residual =
+        new OdometryResidual(factor, translation_weight, rotation_weight);
     return new AutoDiffCostFunction<OdometryResidual, 3, 3, 3>(residual);
   }
 
@@ -103,30 +98,28 @@ struct OdometryResidual {
 };
 
 struct LIDARPointBlobResidual {
-
   // TODO: Add the source normals penalization as well.
   // Would cause there to be two normals.
   template <typename T>
-  bool operator() (const T* source_pose,
-                   const T* target_pose,
-                   T* residuals) const {
+  bool operator()(const T* source_pose, const T* target_pose,
+                  T* residuals) const {
     typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
     typedef Eigen::Matrix<T, 2, 1> Vector2T;
     const Affine2T source_to_world =
-      PoseArrayToAffine(&source_pose[2], &source_pose[0]);
+        PoseArrayToAffine(&source_pose[2], &source_pose[0]);
     const Affine2T world_to_target =
-      PoseArrayToAffine(&target_pose[2], &target_pose[0]).inverse();
+        PoseArrayToAffine(&target_pose[2], &target_pose[0]).inverse();
     const Affine2T source_to_target = world_to_target * source_to_world;
-    #pragma omp parallel for default(none) shared(residuals)
+#pragma omp parallel for default(none) shared(residuals)
     for (size_t index = 0; index < source_points.size(); index++) {
       Vector2T source_pointT = source_points[index].cast<T>();
       Vector2T target_pointT = target_points[index].cast<T>();
       // Transform source_point into the frame of target_point
       source_pointT = source_to_target * source_pointT;
       T target_normal_result =
-        target_normals[index].cast<T>().dot(source_pointT - target_pointT);
+          target_normals[index].cast<T>().dot(source_pointT - target_pointT);
       T source_normal_result =
-        source_normals[index].cast<T>().dot(target_pointT - source_pointT);
+          source_normals[index].cast<T>().dot(target_pointT - source_pointT);
       residuals[index * 2] = target_normal_result;
       residuals[index * 2 + 1] = source_normal_result;
     }
@@ -136,30 +129,23 @@ struct LIDARPointBlobResidual {
   LIDARPointBlobResidual(vector<Vector2f>& source_points,
                          vector<Vector2f>& target_points,
                          vector<Vector2f>& source_normals,
-                         vector<Vector2f>& target_normals) :
-                         source_points(source_points),
-                         target_points(target_points),
-                         source_normals(source_normals),
-                         target_normals(target_normals) {
+                         vector<Vector2f>& target_normals)
+      : source_points(source_points),
+        target_points(target_points),
+        source_normals(source_normals),
+        target_normals(target_normals) {
     CHECK_EQ(source_points.size(), target_points.size());
     CHECK_EQ(target_points.size(), target_normals.size());
     CHECK_EQ(source_normals.size(), target_normals.size());
   }
 
   static AutoDiffCostFunction<LIDARPointBlobResidual, ceres::DYNAMIC, 3, 3>*
-  create(vector<Vector2f>& source_points,
-         vector<Vector2f>& target_points,
-         vector<Vector2f>& source_normals,
-         vector<Vector2f>& target_normals) {
-    LIDARPointBlobResidual *residual =
-      new LIDARPointBlobResidual(source_points,
-                                 target_points,
-                                 source_normals,
-                                 target_normals);
-    return new AutoDiffCostFunction<LIDARPointBlobResidual,
-                                    ceres::DYNAMIC,
-                                    3, 3>
-                                    (residual, source_points.size() * 2);
+  create(vector<Vector2f>& source_points, vector<Vector2f>& target_points,
+         vector<Vector2f>& source_normals, vector<Vector2f>& target_normals) {
+    LIDARPointBlobResidual* residual = new LIDARPointBlobResidual(
+        source_points, target_points, source_normals, target_normals);
+    return new AutoDiffCostFunction<LIDARPointBlobResidual, ceres::DYNAMIC, 3,
+                                    3>(residual, source_points.size() * 2);
   }
 
   const vector<Vector2f> source_points;
@@ -170,20 +156,16 @@ struct LIDARPointBlobResidual {
 
 void Solver::AddOdomFactors(ceres::Problem* ceres_problem,
                             vector<OdometryFactor2D> factors,
-                            double trans_weight,
-                            double rot_weight) {
+                            double trans_weight, double rot_weight) {
   for (const OdometryFactor2D& odom_factor : factors) {
     CHECK_LT(odom_factor.pose_i, odom_factor.pose_j);
     CHECK_GT(solution_.size(), odom_factor.pose_i);
     CHECK_GT(solution_.size(), odom_factor.pose_j);
     ceres::ResidualBlockId id = ceres_problem->AddResidualBlock(
-      OdometryResidual::create(odom_factor, trans_weight, rot_weight),
-      NULL,
-      solution_[odom_factor.pose_i].pose,
-      solution_[odom_factor.pose_j].pose);
+        OdometryResidual::create(odom_factor, trans_weight, rot_weight), NULL,
+        solution_[odom_factor.pose_i].pose, solution_[odom_factor.pose_j].pose);
     ceres_information.res_descriptors.emplace_back(odom_factor.pose_i,
-                                                   odom_factor.pose_j,
-                                                   id);
+                                                   odom_factor.pose_j, id);
   }
   if (solution_.size() > 0) {
     ceres_problem->SetParameterBlockConstant(solution_[0].pose);
@@ -191,65 +173,57 @@ void Solver::AddOdomFactors(ceres::Problem* ceres_problem,
 }
 
 // Source moves to target.
-double
-Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
-                                vector<SLAMNodeSolution2D>* solution_ptr,
-                                PointCorrespondences* point_correspondences,
-                                size_t source_node_index,
-                                size_t target_node_index) {
+double Solver::GetPointCorrespondences(
+    const SLAMProblem2D& problem, vector<SLAMNodeSolution2D>* solution_ptr,
+    PointCorrespondences* point_correspondences, size_t source_node_index,
+    size_t target_node_index) {
   // Summed differences between point correspondences.
   double difference = 0.0;
-  vector<SLAMNodeSolution2D> &solution = *solution_ptr;
-  SLAMNodeSolution2D &source_solution = solution[source_node_index];
-  SLAMNodeSolution2D &target_solution = solution[target_node_index];
-  LidarFactor source_lidar =
-          problem.nodes[source_node_index].lidar_factor;
-  LidarFactor target_lidar =
-          problem.nodes[target_node_index].lidar_factor;
+  vector<SLAMNodeSolution2D>& solution = *solution_ptr;
+  SLAMNodeSolution2D& source_solution = solution[source_node_index];
+  SLAMNodeSolution2D& target_solution = solution[target_node_index];
+  LidarFactor source_lidar = problem.nodes[source_node_index].lidar_factor;
+  LidarFactor target_lidar = problem.nodes[target_node_index].lidar_factor;
   // Affine transformations from the two pose's reference frames.
   Affine2f source_to_world =
-          PoseArrayToAffine(&source_solution.pose[2],
-                            &source_solution.pose[0]).cast<float>();
+      PoseArrayToAffine(&source_solution.pose[2], &source_solution.pose[0])
+          .cast<float>();
   Affine2f target_to_world =
-          PoseArrayToAffine(&target_solution.pose[2],
-                            &target_solution.pose[0]).cast<float>();
+      PoseArrayToAffine(&target_solution.pose[2], &target_solution.pose[0])
+          .cast<float>();
   // Loop over all the points in the source pointcloud,
   // match each point to the closest point in the target pointcloud
   // who's normal is within a certain threshold.
-  for (const Vector2f &source_point : source_lidar.pointcloud) {
+  for (const Vector2f& source_point : source_lidar.pointcloud) {
     // Transform the source point to the target frame.
     Vector2f source_point_transformed =
-            target_to_world.inverse() * source_to_world * source_point;
+        target_to_world.inverse() * source_to_world * source_point;
     // Get the closest points within the threshold.
     // For now we assume that a match is within 1/6 of the threshold.
     KDNodeValue<float, 2> closest_target;
     vector<KDNodeValue<float, 2>> neighbors;
-    target_lidar.pointcloud_tree->FindNeighborPoints(source_point_transformed,
-                                                     config_.CONFIG_outlier_threshold / 6.0,
-                                                     &neighbors);
+    target_lidar.pointcloud_tree->FindNeighborPoints(
+        source_point_transformed, config_.CONFIG_outlier_threshold / 6.0,
+        &neighbors);
     // Get the current source point's normal.
     KDNodeValue<float, 2> source_point_with_normal;
-    float found_dist =
-      source_lidar.pointcloud_tree->FindNearestPoint(source_point,
-                                                     0.1,
-                                                     &source_point_with_normal);
+    float found_dist = source_lidar.pointcloud_tree->FindNearestPoint(
+        source_point, 0.1, &source_point_with_normal);
     CHECK_EQ(found_dist, 0.0) << "Source point is not in KD Tree!\n";
     float dist = config_.CONFIG_outlier_threshold;
     // Sort the target points by distance from the source point in the
     // target frame.
-    std::sort(neighbors.begin(),
-              neighbors.end(),
+    std::sort(neighbors.begin(), neighbors.end(),
               [&source_point_transformed](KDNodeValue<float, 2> point_1,
                                           KDNodeValue<float, 2> point_2) {
-                  return (source_point_transformed - point_1.point).norm() <
-                         (source_point_transformed - point_2.point).norm();
+                return (source_point_transformed - point_1.point).norm() <
+                       (source_point_transformed - point_2.point).norm();
               });
     // For all target points, starting with the closest
-    // see if any of them have a close enough normal to be 
+    // see if any of them have a close enough normal to be
     // considered a match.
     for (KDNodeValue<float, 2> current_target : neighbors) {
-      if (NormalsSimilar(current_target.normal,
-                         source_point_with_normal.normal,
+      if (NormalsSimilar(current_target.normal, source_point_with_normal.normal,
                          cos(math_util::DegToRad(20.0)))) {
         closest_target = current_target;
         dist = (source_point_transformed - current_target.point).norm();
@@ -261,22 +235,21 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
     if (dist >= config_.CONFIG_outlier_threshold) {
       // Re-find all the closest targets.
       neighbors.clear();
-      target_lidar.pointcloud_tree->FindNeighborPoints(source_point_transformed,
-                                                       config_.CONFIG_outlier_threshold,
-                                                       &neighbors);
+      target_lidar.pointcloud_tree->FindNeighborPoints(
+          source_point_transformed, config_.CONFIG_outlier_threshold,
+          &neighbors);
       // Sort them again, based on distance from the source point in the
       // target frame.
-      std::sort(neighbors.begin(),
-                neighbors.end(),
+      std::sort(neighbors.begin(), neighbors.end(),
                 [&source_point_transformed](KDNodeValue<float, 2> point_1,
                                             KDNodeValue<float, 2> point_2) {
-                    return (source_point_transformed - point_1.point).norm() <
-                           (source_point_transformed - point_2.point).norm();
+                  return (source_point_transformed - point_1.point).norm() <
+                         (source_point_transformed - point_2.point).norm();
                 });
       // Cut out the first 1/6 threshold that we already checked.
-      vector<KDNodeValue<float, 2>>
-              unchecked_neighbors(neighbors.begin() + (config_.CONFIG_outlier_threshold / 6),
-                                  neighbors.end());
+      vector<KDNodeValue<float, 2>> unchecked_neighbors(
+          neighbors.begin() + (config_.CONFIG_outlier_threshold / 6),
+          neighbors.end());
       // See if any of these points have a normal within our threshold.
       for (KDNodeValue<float, 2> current_target : unchecked_neighbors) {
         if (NormalsSimilar(current_target.normal,
@@ -300,8 +273,8 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
     Vector2f source_point_modifiable = source_point;
     point_correspondences->source_points.push_back(source_point_modifiable);
     point_correspondences->target_points.push_back(closest_target.point);
-    point_correspondences->
-            source_normals.push_back(source_point_with_normal.normal);
+    point_correspondences->source_normals.push_back(
+        source_point_with_normal.normal);
     point_correspondences->target_normals.push_back(closest_target.normal);
     // Add a line from the matches that we are using.
     // Transform everything to the world frame.
@@ -316,7 +289,7 @@ Solver::GetPointCorrespondences(const SLAMProblem2D& problem,
   return difference;
 }
 
-//TODO: This probably shouldn't be dynamically matching poses each time.
+// TODO: This probably shouldn't be dynamically matching poses each time.
 double Solver::AddLidarResidualsForLC(ceres::Problem& problem) {
   double difference = 0.0;
   // For every constraint, add lidar residuals to the
@@ -327,8 +300,8 @@ double Solver::AddLidarResidualsForLC(ceres::Problem& problem) {
       CHECK_LT(a_pose.node_idx, solution_.size());
       auto pose_a_sol_pose = solution_[a_pose.node_idx].pose;
       size_t closest_b_pose_idx = constraint.line_b_poses[0].node_idx;
-      double closest_dist = DistBetween(pose_a_sol_pose,
-                                        solution_[closest_b_pose_idx].pose);
+      double closest_dist =
+          DistBetween(pose_a_sol_pose, solution_[closest_b_pose_idx].pose);
       for (const LCPose& b_pose : constraint.line_b_poses) {
         auto pose_b_sol_pose = solution_[b_pose.node_idx].pose;
         if (DistBetween(pose_a_sol_pose, pose_b_sol_pose) < closest_dist) {
@@ -339,42 +312,34 @@ double Solver::AddLidarResidualsForLC(ceres::Problem& problem) {
       CHECK_LT(closest_b_pose_idx, solution_.size());
       PointCorrespondences correspondence(solution_[a_pose.node_idx].pose,
                                           solution_[closest_b_pose_idx].pose,
-                                          a_pose.node_idx,
-                                          closest_b_pose_idx);
-      double temp_diff = GetPointCorrespondences(problem_,
-                                                 &solution_,
-                                                 &correspondence,
-                                                 a_pose.node_idx,
-                                                 closest_b_pose_idx);
+                                          a_pose.node_idx, closest_b_pose_idx);
+      double temp_diff =
+          GetPointCorrespondences(problem_, &solution_, &correspondence,
+                                  a_pose.node_idx, closest_b_pose_idx);
       // Add the correspondences as constraints in the optimization problem.
       ceres::ResidualBlockId id = problem.AddResidualBlock(
-              LIDARPointBlobResidual::create(correspondence.source_points,
-                                             correspondence.target_points,
-                                             correspondence.source_normals,
-                                             correspondence.target_normals),
-              NULL,
-              correspondence.source_pose,
-              correspondence.target_pose);
+          LIDARPointBlobResidual::create(
+              correspondence.source_points, correspondence.target_points,
+              correspondence.source_normals, correspondence.target_normals),
+          NULL, correspondence.source_pose, correspondence.target_pose);
       ceres_information.res_descriptors.emplace_back(a_pose.node_idx,
-                                                     closest_b_pose_idx,
-                                                     id);
+                                                     closest_b_pose_idx, id);
       difference =
-        temp_diff / problem_.nodes[a_pose.node_idx].lidar_factor.pointcloud.size();
+          temp_diff /
+          problem_.nodes[a_pose.node_idx].lidar_factor.pointcloud.size();
     }
   }
   return difference;
 }
 
-vector<SLAMNodeSolution2D>
-Solver::SolveSLAM() {
+vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
   // Setup ceres for evaluation of the problem.
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::SPARSE_SCHUR;
   options.minimizer_progress_to_stdout = false;
   options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
-  vis_callback_ =
-    std::unique_ptr<VisualizationCallback>(
+  vis_callback_ = std::unique_ptr<VisualizationCallback>(
       new VisualizationCallback(problem_, &solution_, keyframes_, n_));
   options.callbacks.push_back(vis_callback_.get());
   double difference = 0;
@@ -382,8 +347,7 @@ Solver::SolveSLAM() {
   // While our solution moves more than the stopping_accuracy,
   // continue to optimize.
   for (int64_t window_size = 1;
-       window_size <= config_.CONFIG_lidar_constraint_amount;
-       window_size++) {
+       window_size <= config_.CONFIG_lidar_constraint_amount; window_size++) {
     LOG(INFO) << "Using window size: " << window_size << std::endl;
     do {
       vis_callback_->ClearNormals();
@@ -391,50 +355,40 @@ Solver::SolveSLAM() {
       difference = 0;
       ceres_information.ResetProblem();
       // Add all the odometry constraints between our poses.
-      AddOdomFactors(ceres_information.problem.get(),
-                     problem_.odometry_factors,
+      AddOdomFactors(ceres_information.problem.get(), problem_.odometry_factors,
                      config_.CONFIG_translation_weight,
                      config_.CONFIG_rotation_weight);
       // For every SLAM node we want to optimize it against the past
       // lidar constraint amount nodes.
-      for (size_t node_i_index = 0;
-           node_i_index < problem_.nodes.size();
+      for (size_t node_i_index = 0; node_i_index < problem_.nodes.size();
            node_i_index++) {
         for (size_t node_j_index =
-                std::max((int64_t) (node_i_index) - window_size,
-                         0l);
-             node_j_index < node_i_index;
-             node_j_index++) {
+                 std::max((int64_t)(node_i_index)-window_size, 0l);
+             node_j_index < node_i_index; node_j_index++) {
           PointCorrespondences correspondence(solution_[node_i_index].pose,
                                               solution_[node_j_index].pose,
-                                              node_i_index,
-                                              node_j_index);
+                                              node_i_index, node_j_index);
           // Get the correspondences between these two poses.
-          difference += GetPointCorrespondences(problem_,
-                                                &solution_,
-                                                &correspondence,
-                                                node_i_index,
-                                                node_j_index);
+          difference +=
+              GetPointCorrespondences(problem_, &solution_, &correspondence,
+                                      node_i_index, node_j_index);
           vis_callback_->UpdateLastCorrespondence(correspondence);
           difference /=
-            problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
+              problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
           // Add the correspondences as constraints in the optimization problem.
           ceres::ResidualBlockId id =
-            ceres_information.problem->AddResidualBlock(
+              ceres_information.problem->AddResidualBlock(
                   LIDARPointBlobResidual::create(correspondence.source_points,
                                                  correspondence.target_points,
                                                  correspondence.source_normals,
                                                  correspondence.target_normals),
-                  NULL,
-                  correspondence.source_pose,
-                  correspondence.target_pose);
+                  NULL, correspondence.source_pose, correspondence.target_pose);
           ceres_information.res_descriptors.emplace_back(node_i_index,
-                                                         node_j_index,
-                                                         id);
+                                                         node_j_index, id);
         }
       }
       difference += AddLidarResidualsForLC(*ceres_information.problem);
-      //AddCollinearResiduals(&ceres_problem);
+      // AddCollinearResiduals(&ceres_problem);
       ceres::Solve(options, ceres_information.problem.get(), &summary);
     } while (abs(difference - last_difference) >
              config_.CONFIG_stopping_accuracy);
@@ -447,19 +401,17 @@ Solver::SolveSLAM() {
   return solution_;
 }
 
-Solver::Solver(ros::NodeHandle& n) :
-               n_(n),
-               scan_matcher(10, 3, 0.3, 0.03) {
+Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(10, 3, 0.3, 0.03) {
   embedding_client =
-    n_.serviceClient<GetPointCloudEmbedding>("embed_point_cloud");
+      n_.serviceClient<GetPointCloudEmbedding>("embed_point_cloud");
 }
 
 /*
  * Methods relevant to HITL loop closure.
  */
 
-vector<LineSegment<float>>
-LineSegmentsFromHitlMsg(const HitlSlamInputMsg& msg) {
+vector<LineSegment<float>> LineSegmentsFromHitlMsg(
+    const HitlSlamInputMsg& msg) {
   Vector2f start_a(msg.line_a_start.x, msg.line_a_start.y);
   Vector2f end_a(msg.line_a_end.x, msg.line_a_end.y);
   Vector2f start_b(msg.line_b_start.x, msg.line_b_start.y);
@@ -470,8 +422,7 @@ LineSegmentsFromHitlMsg(const HitlSlamInputMsg& msg) {
   return lines;
 }
 
-LCConstraint
-Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
+LCConstraint Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
   // Linearly go through all poses
   // Go through all points and see if they lie on either of the two lines.
   const vector<LineSegment<float>> lines = LineSegmentsFromHitlMsg(hitl_msg);
@@ -479,9 +430,9 @@ Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
   for (size_t node_idx = 0; node_idx < problem_.nodes.size(); node_idx++) {
     vector<Vector2f> points_on_a;
     vector<Vector2f> points_on_b;
-    double *pose_ptr = solution_[node_idx].pose;
+    double* pose_ptr = solution_[node_idx].pose;
     Affine2f node_to_world =
-            PoseArrayToAffine(&pose_ptr[2], &pose_ptr[0]).cast<float>();
+        PoseArrayToAffine(&pose_ptr[2], &pose_ptr[0]).cast<float>();
     for (const Vector2f& point :
          problem_.nodes[node_idx].lidar_factor.pointcloud) {
       Vector2f point_transformed = node_to_world * point;
@@ -513,18 +464,17 @@ bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
       constraint.line_b_poses.size() == 0) {
     return false;
   }
-  
+
   // Find the closest pose to each pose on a on the b line.
   for (unsigned int i = 0; i < constraint.line_a_poses.size(); i++) {
     const LCPose& pose_a = constraint.line_a_poses[i];
-    #if DEBUG
+#if DEBUG
     std::cout << "Applying for one pose" << std::endl;
-    #endif
+#endif
     auto pose_a_sol_pose = solution_[pose_a.node_idx].pose;
     size_t closest_pose = constraint.line_b_poses[0].node_idx;
-    double closest_dist =
-      DistBetween(pose_a_sol_pose,
-                  solution_[constraint.line_b_poses[0].node_idx].pose);
+    double closest_dist = DistBetween(
+        pose_a_sol_pose, solution_[constraint.line_b_poses[0].node_idx].pose);
     for (const LCPose& pose_b : constraint.line_b_poses) {
       auto pose_b_sol_pose = solution_[pose_b.node_idx].pose;
       if (DistBetween(pose_a_sol_pose, pose_b_sol_pose) < closest_dist) {
@@ -535,38 +485,38 @@ bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
     // Apply the transformations to the pose of a.
     CHECK_LT(closest_pose, problem_.nodes.size());
     CHECK_LT(pose_a.node_idx, problem_.nodes.size());
-    #if DEBUG
+#if DEBUG
     std::cout << "Finding trans" << std::endl;
-    #endif
+#endif
     std::pair<double, std::pair<Vector2f, float>> trans_prob_pair =
-      scan_matcher.GetTransformation(
-        problem_.nodes[pose_a.node_idx].lidar_factor.pointcloud,
-        problem_.nodes[closest_pose].lidar_factor.pointcloud,
-        solution_[pose_a.node_idx].pose[2],
-        solution_[closest_pose].pose[2],
-        math_util::DegToRad(180));
+        scan_matcher.GetTransformation(
+            problem_.nodes[pose_a.node_idx].lidar_factor.pointcloud,
+            problem_.nodes[closest_pose].lidar_factor.pointcloud,
+            solution_[pose_a.node_idx].pose[2], solution_[closest_pose].pose[2],
+            math_util::DegToRad(180));
     auto trans = trans_prob_pair.second;
-    #if DEBUG
+#if DEBUG
     std::cout << "Found trans with prob: " << trans_prob_pair.first
               << std::endl;
-    std::cout << "Transformation: " << std::endl << trans.first << std::endl
+    std::cout << "Transformation: " << std::endl
+              << trans.first << std::endl
               << trans.second << std::endl;
-    #endif
+#endif
     // Then this was a badly chosen LC, let's not continue with it
     // TODO figure out if short circuiting in the middle of this loop is OK
     if (trans_prob_pair.first < config_.CONFIG_csm_score_threshold) {
-      #if DEBUG
+#if DEBUG
       std::cout << "Failed to find valid transformation for pose, got score: "
                 << trans_prob_pair.first << std::endl;
-      #endif
+#endif
       return false;
     }
 
     auto closest_pose_arr = solution_[closest_pose].pose;
     solution_[pose_a.node_idx].pose[0] +=
-      (closest_pose_arr[0] - pose_a_sol_pose[0]) + trans.first.x();
+        (closest_pose_arr[0] - pose_a_sol_pose[0]) + trans.first.x();
     solution_[pose_a.node_idx].pose[1] +=
-      (closest_pose_arr[1] - pose_a_sol_pose[1]) + trans.first.y();
+        (closest_pose_arr[1] - pose_a_sol_pose[1]) + trans.first.y();
     solution_[pose_a.node_idx].pose[2] += trans.second;
   }
   loop_closure_constraints_.push_back(constraint);
@@ -594,9 +544,9 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   // Get the poses that belong to this input.
   const LCConstraint collinear_constraint = GetRelevantPosesForHITL(hitl_msg);
   std::cout << "Found " << collinear_constraint.line_a_poses.size()
-    << " poses for the first line." << std::endl;
+            << " poses for the first line." << std::endl;
   std::cout << "Found " << collinear_constraint.line_b_poses.size()
-    << " poses for the second line." << std::endl;
+            << " poses for the second line." << std::endl;
   vis_callback_->AddConstraint(collinear_constraint);
   AddCollinearConstraints(collinear_constraint);
   for (int i = 0; i < 5; i++) {
@@ -607,12 +557,11 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
   // TODO: Find a better way to set these up.
-//  translation_weight_ = lc_translation_weight_;
-//  rotation_weight_ = lc_rotation_weight_;
+  //  translation_weight_ = lc_translation_weight_;
+  //  rotation_weight_ = lc_rotation_weight_;
   SolveSLAM();
   std::cout << "Waiting for Loop Closure input." << std::endl;
 }
-
 
 void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
   if (config_.CONFIG_pose_output_file.compare("") == 0) {
@@ -630,7 +579,7 @@ void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
   output_file.close();
 }
 
-vector<Vector2f> TransformPointcloud(double * pose,
+vector<Vector2f> TransformPointcloud(double* pose,
                                      const vector<Vector2f> pointcloud) {
   vector<Vector2f> pcloud;
   Eigen::Affine2f trans = PoseArrayToAffine(&pose[2], &pose[0]).cast<float>();
@@ -653,19 +602,14 @@ void Solver::Vectorize(const WriteMsgConstPtr& msg) {
   // --- Visualize ---
   visualization_msgs::Marker line_mark;
   gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
-                                gui_helpers::Color4f::kWhite,
-                                0.05,
-                                0.00,
-                                0.00,
+                                gui_helpers::Color4f::kWhite, 0.05, 0.00, 0.00,
                                 &line_mark);
   ros::Publisher lines_pub =
-    n_.advertise<visualization_msgs::Marker>("/debug_lines", 10);
+      n_.advertise<visualization_msgs::Marker>("/debug_lines", 10);
   for (const LineSegment& line : lines) {
     Vector3f line_start(line.start_point.x(), line.start_point.y(), 0.0);
     Vector3f line_end(line.end_point.x(), line.end_point.y(), 0.0);
-    gui_helpers::AddLine(line_start,
-                         line_end,
-                         gui_helpers::Color4f::kWhite,
+    gui_helpers::AddLine(line_start, line_end, gui_helpers::Color4f::kWhite,
                          &line_mark);
   }
   std::cout << "Pointcloud size: " << whole_pointcloud.size() << std::endl;
@@ -693,16 +637,19 @@ OdometryFactor2D Solver::GetTotalOdomChange(const uint64_t node_a,
 }
 
 std::pair<double, double> Solver::GetLocalUncertainty(const uint64_t node_idx) {
-  if (node_idx < static_cast<uint64_t>(config_.CONFIG_local_uncertainty_prev_scans)) {
+  if (node_idx <
+      static_cast<uint64_t>(config_.CONFIG_local_uncertainty_prev_scans)) {
     return std::make_pair(0, 0);
   }
   std::vector<std::vector<Vector2f>> prevScans;
-  for(uint64_t idx = node_idx - 1;
-      idx > node_idx - static_cast<uint64_t>(config_.CONFIG_local_uncertainty_prev_scans);
-      idx--) {
+  for (uint64_t idx = node_idx - 1;
+       idx > node_idx - static_cast<uint64_t>(
+                            config_.CONFIG_local_uncertainty_prev_scans);
+       idx--) {
     prevScans.push_back(problem_.nodes[idx].lidar_factor.pointcloud);
   }
-  return scan_matcher.GetLocalUncertaintyStats(prevScans, problem_.nodes[node_idx].lidar_factor.pointcloud);
+  return scan_matcher.GetLocalUncertaintyStats(
+      prevScans, problem_.nodes[node_idx].lidar_factor.pointcloud);
 }
 
 // Reference from:
@@ -727,8 +674,8 @@ Eigen::MatrixXd CRSToEigen(const ceres::CRSMatrix& crs_matrix) {
 
 double Solver::CostFromResidualDescriptor(const ResidualDesc& res_desc) {
   // Get the associated parameter blocks.
-  double * param_i = solution_[res_desc.node_i].pose;
-  double * param_j = solution_[res_desc.node_j].pose;
+  double* param_i = solution_[res_desc.node_i].pose;
+  double* param_j = solution_[res_desc.node_j].pose;
   // Have the problem only evaluate for these parameter blocks and this specific
   // residual.
   ceres::Problem::EvaluateOptions eval_options;
@@ -736,33 +683,30 @@ double Solver::CostFromResidualDescriptor(const ResidualDesc& res_desc) {
   eval_options.parameter_blocks.push_back(param_i);
   eval_options.parameter_blocks.push_back(param_j);
   eval_options.num_threads =
-    static_cast<int>(std::thread::hardware_concurrency());
+      static_cast<int>(std::thread::hardware_concurrency());
   // Evaluate the problem to get the residuals and jacobian.
   ceres::CRSMatrix jacobian;
   vector<double> residuals;
-  ceres_information.problem->Evaluate(eval_options,
-                                      nullptr,
-                                      &residuals,
-                                      nullptr,
-                                      &jacobian);
+  ceres_information.problem->Evaluate(eval_options, nullptr, &residuals,
+                                      nullptr, &jacobian);
   // Compute the information matrix.
   Eigen::MatrixXd eigen_jacobian = CRSToEigen(jacobian);
   // TODO: Assumption about transpose ordering.
   Eigen::MatrixXd information_matrix =
-    (eigen_jacobian * eigen_jacobian.transpose()).inverse();
+      (eigen_jacobian * eigen_jacobian.transpose()).inverse();
   // Calculate the cost.
   Eigen::VectorXd eigen_residual =
-    Eigen::Map<Eigen::VectorXd>(residuals.data(),
-                                residuals.size(),
-                                1);
-  double cost = eigen_residual.transpose() *
-                information_matrix *
-                eigen_residual;
+      Eigen::Map<Eigen::VectorXd>(residuals.data(), residuals.size(), 1);
+  double cost =
+      eigen_residual.transpose() * information_matrix * eigen_residual;
   if (cost < 0 || !ceres::IsFinite(cost)) {
     std::cout << "--- Invalid ---" << std::endl;
-    std::cout << "From " << res_desc.node_i << " to " << res_desc.node_j << std::endl;
-    std::cout << "Original Information Matrix: " << jacobian.num_rows << "x" << jacobian.num_cols << std::endl;
-    std::cout << "Information Matrix: " << information_matrix.rows() << "x" << information_matrix.cols() << std::endl;
+    std::cout << "From " << res_desc.node_i << " to " << res_desc.node_j
+              << std::endl;
+    std::cout << "Original Information Matrix: " << jacobian.num_rows << "x"
+              << jacobian.num_cols << std::endl;
+    std::cout << "Information Matrix: " << information_matrix.rows() << "x"
+              << information_matrix.cols() << std::endl;
     std::cout << "Residual: " << residuals.size() << std::endl;
   }
   return cost;
@@ -784,7 +728,7 @@ double Solver::GetChiSquareCost(vector<ResidualDesc> lc_res_desc) {
         std::cout << "Cost: << " << cost << std::endl;
         cost += temp_cost;
       }
-      std::cout << "Res Finished: "<< residuals_finished++ << "/"
+      std::cout << "Res Finished: " << residuals_finished++ << "/"
                 << ceres_information.res_descriptors.size() << std::endl;
     }
   }
@@ -798,14 +742,11 @@ double Solver::GetChiSquareCost(vector<ResidualDesc> lc_res_desc) {
 
 OdometryFactor2D Solver::GetDifferenceOdom(const uint64_t node_a,
                                            const uint64_t node_b) {
-  double * pose_a = solution_[node_a].pose;
-  double * pose_b = solution_[node_b].pose;
+  double* pose_a = solution_[node_a].pose;
+  double* pose_b = solution_[node_b].pose;
   Vector2f translation(pose_b[0] - pose_a[0], pose_b[1] - pose_a[1]);
   float rotation = pose_b[2] - pose_a[2];
-  return OdometryFactor2D(node_a,
-                          node_b,
-                          translation,
-                          rotation);
+  return OdometryFactor2D(node_a, node_b, translation, rotation);
 }
 
 vector<ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
@@ -814,36 +755,27 @@ vector<ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
   const uint64_t second_node = std::max(node_a, node_b);
   vector<ResidualDesc> res_desc;
   PointCorrespondences correspondence(solution_[first_node].pose,
-                                      solution_[second_node].pose,
-                                      first_node,
+                                      solution_[second_node].pose, first_node,
                                       second_node);
   // Get the correspondences between these two poses.
-  GetPointCorrespondences(problem_,
-                          &solution_,
-                          &correspondence,
-                          first_node,
+  GetPointCorrespondences(problem_, &solution_, &correspondence, first_node,
                           second_node);
   // Add the correspondences as constraints in the optimization problem.
   ceres::ResidualBlockId lidar_id;
   lidar_id = ceres_information.problem->AddResidualBlock(
-          LIDARPointBlobResidual::create(correspondence.source_points,
-                                         correspondence.target_points,
-                                         correspondence.source_normals,
-                                         correspondence.target_normals),
-          NULL,
-          correspondence.source_pose,
-          correspondence.target_pose);
+      LIDARPointBlobResidual::create(
+          correspondence.source_points, correspondence.target_points,
+          correspondence.source_normals, correspondence.target_normals),
+      NULL, correspondence.source_pose, correspondence.target_pose);
   res_desc.emplace_back(node_a, node_b, lidar_id);
   // TODO: Odom factor is difference between solution positions as we haven't
   // solved using CSM yet and can't get the actual difference between them.
   ceres::ResidualBlockId odom_id;
   odom_id = ceres_information.problem->AddResidualBlock(
-    OdometryResidual::create(GetDifferenceOdom(first_node, second_node),
-                             config_.CONFIG_lc_translation_weight,
-                             config_.CONFIG_lc_rotation_weight),
-    NULL,
-    solution_[first_node].pose,
-    solution_[second_node].pose);
+      OdometryResidual::create(GetDifferenceOdom(first_node, second_node),
+                               config_.CONFIG_lc_translation_weight,
+                               config_.CONFIG_lc_rotation_weight),
+      NULL, solution_[first_node].pose, solution_[second_node].pose);
   res_desc.emplace_back(node_a, node_b, odom_id);
   return res_desc;
 }
@@ -854,8 +786,7 @@ void Solver::RemoveResiduals(vector<ResidualDesc> descs) {
   }
 }
 
-bool Solver::SimilarScans(const uint64_t node_a,
-                          const uint64_t node_b,
+bool Solver::SimilarScans(const uint64_t node_a, const uint64_t node_b,
                           const double certainty) {
   if (node_a == node_b) {
     return false;
@@ -869,7 +800,8 @@ bool Solver::SimilarScans(const uint64_t node_a,
   if (chi_num < 0) {
     return false;
   }
-  // TODO: Assumes that there the DoF of the graph refers to the number of nodes * 3
+  // TODO: Assumes that there the DoF of the graph refers to the number of nodes
+  // * 3
   chi_squared dist(problem_.nodes.size() * 3);
   std::cout << "chinum: " << chi_num << std::endl;
   return boost::math::cdf(dist, chi_num) <= certainty;
@@ -895,7 +827,8 @@ Eigen::Matrix<double, 32, 1> Solver::GetEmbedding(SLAMNode2D& node) {
   point_cloud_embedder::GetPointCloudEmbedding srv;
   // TODO actually pass the range down here
   // std::vector<Eigen::Vector2f> normalized =
-  //   pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud, config_.CONFIG_max_lidar_range);
+  //   pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud,
+  //   config_.CONFIG_max_lidar_range);
   srv.request.cloud = EigenPointcloudToRos(node.lidar_factor.pointcloud);
   if (embedding_client.call(srv)) {
     vector<float> embedding = srv.response.embedding;
@@ -941,8 +874,7 @@ vector<size_t> Solver::GetMatchingKeyframeIndices(size_t keyframe_index) {
       continue;
     }
     if (SimilarScans(keyframes_[i].node_idx,
-                     keyframes_[keyframe_index].node_idx,
-                     0.95)) {
+                     keyframes_[keyframe_index].node_idx, 0.95)) {
       matches.push_back(i);
     }
   }
@@ -957,97 +889,106 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   }
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
   // basically is it different than the last keyframe.
-  if (SimilarScans(keyframes_[keyframes_.size() - 1].node_idx,
-                   node.node_idx,
+  if (SimilarScans(keyframes_[keyframes_.size() - 1].node_idx, node.node_idx,
                    0.95)) {
-    #if DEBUG
+#if DEBUG
     printf("Not a keyframe from chi^2\n");
-    #endif
+#endif
     return;
   }
   std::cout << "Adding Keyframe # " << keyframes_.size() << std::endl;
   AddKeyframe(node);
-  return; // TODO: Remove, using for testing ChiSquared
+  return;  // TODO: Remove, using for testing ChiSquared
 
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
-//  auto uncertainty = GetLocalUncertainty(node.node_idx);
-//  if (uncertainty.first > config_.CONFIG_local_uncertainty_condition_threshold ||
-//      uncertainty.second > config_.CONFIG_local_uncertainty_scale_threshold) {
-//    #if DEBUG
-//    printf("Not a keyframe due to lack of local invariance... Computed Uncertainty: %f, %f\n",
-//            uncertainty.first,
-//            uncertainty.second);
-//    #endif
-//    return;
-//  }
-//
-//  // Step 3: If past both of these steps then save as keyframe. Send it to the
-//  // embedding network and store that embedding as well.
-//  #if DEBUG
-//  printf("Adding Keyframe\n");
-//  // WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
-//  #endif
-//  AddKeyframe(node);
-//  // Step 4: Compare against all previous keyframes and see if there is a match
-//  // or is similar using Chi^2
-//  vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
-//  if (matches.size() == 0) {
-//    #if DEBUG
-//    printf("No match from chi^2\n");
-//    #endif
-//    return;
-//  }
-//  // Step 5: Compare the embeddings and see if there is a match as well.
-//  // Find the closest embedding in all the matches to our new keyframe.
-//  LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
-//  int64_t closest_index = -1;
-//  double closest_distance = INFINITY;
-//  for (size_t match_index : matches) {
-//    LearnedKeyframe matched_keyframe = keyframes[match_index];
-//    #if DEBUG
-//    printf("EMBEDDINGS\n");
-//    std::cout << matched_keyframe.embedding.transpose() << std::endl;
-//    std::cout << new_keyframe.embedding.transpose() << std::endl;
-//    #endif
-//    double distance =
-//      (matched_keyframe.embedding - new_keyframe.embedding).norm();
-//    if (distance < closest_distance) {
-//      #if DEBUG
-//      printf("New minimum embedding distance found: %f\n", distance);
-//      #endif
-//      closest_distance = distance;
-//      closest_index = match_index;
-//    }
-//  }
-//  if (closest_index == -1 ||
-//      closest_distance > config_.CONFIG_embedding_threshold) {
-//    #if DEBUG
-//    printf("Out of %lu keyframes, none were sufficient for LC\n",
-//            matches.size());
-//    #endif
-//    return;
-//  }
-//  #if DEBUG
-//  printf("Found match of pose %lu to %lu\n",
-//          keyframes[closest_index].node_idx,
-//          new_keyframe.node_idx);
-//  printf("timestamps: %f, %f\n\n",
-//          problem_.nodes[keyframes[closest_index].node_idx].timestamp,
-//          problem_.nodes[new_keyframe.node_idx].timestamp);
-//  printf("This is a LC by embedding distance!\n\n\n\n");
-//  // Step 6: Perform loop closure between these poses if there is a LC.
-//  std::vector<WrappedImage> images =
-//    {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud),
-//     DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
-//  WaitForClose(images);
-//
-//  double width = furthest_point(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud).norm();
-//  SaveImage("LC_1", GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud, width, 0.03));
-//  width = furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
-//  SaveImage("LC_2", GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud, width, 0.03));
-//  #endif
-//
-//  LearnedKeyframe best_match_keyframe = keyframes[closest_index];
-//  LCKeyframes(best_match_keyframe, new_keyframe);
+  //  auto uncertainty = GetLocalUncertainty(node.node_idx);
+  //  if (uncertainty.first >
+  //  config_.CONFIG_local_uncertainty_condition_threshold ||
+  //      uncertainty.second > config_.CONFIG_local_uncertainty_scale_threshold)
+  //      {
+  //    #if DEBUG
+  //    printf("Not a keyframe due to lack of local invariance... Computed
+  //    Uncertainty: %f, %f\n",
+  //            uncertainty.first,
+  //            uncertainty.second);
+  //    #endif
+  //    return;
+  //  }
+  //
+  //  // Step 3: If past both of these steps then save as keyframe. Send it to
+  //  the
+  //  // embedding network and store that embedding as well.
+  //  #if DEBUG
+  //  printf("Adding Keyframe\n");
+  //  //
+  //  WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
+  //  #endif
+  //  AddKeyframe(node);
+  //  // Step 4: Compare against all previous keyframes and see if there is a
+  //  match
+  //  // or is similar using Chi^2
+  //  vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
+  //  if (matches.size() == 0) {
+  //    #if DEBUG
+  //    printf("No match from chi^2\n");
+  //    #endif
+  //    return;
+  //  }
+  //  // Step 5: Compare the embeddings and see if there is a match as well.
+  //  // Find the closest embedding in all the matches to our new keyframe.
+  //  LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
+  //  int64_t closest_index = -1;
+  //  double closest_distance = INFINITY;
+  //  for (size_t match_index : matches) {
+  //    LearnedKeyframe matched_keyframe = keyframes[match_index];
+  //    #if DEBUG
+  //    printf("EMBEDDINGS\n");
+  //    std::cout << matched_keyframe.embedding.transpose() << std::endl;
+  //    std::cout << new_keyframe.embedding.transpose() << std::endl;
+  //    #endif
+  //    double distance =
+  //      (matched_keyframe.embedding - new_keyframe.embedding).norm();
+  //    if (distance < closest_distance) {
+  //      #if DEBUG
+  //      printf("New minimum embedding distance found: %f\n", distance);
+  //      #endif
+  //      closest_distance = distance;
+  //      closest_index = match_index;
+  //    }
+  //  }
+  //  if (closest_index == -1 ||
+  //      closest_distance > config_.CONFIG_embedding_threshold) {
+  //    #if DEBUG
+  //    printf("Out of %lu keyframes, none were sufficient for LC\n",
+  //            matches.size());
+  //    #endif
+  //    return;
+  //  }
+  //  #if DEBUG
+  //  printf("Found match of pose %lu to %lu\n",
+  //          keyframes[closest_index].node_idx,
+  //          new_keyframe.node_idx);
+  //  printf("timestamps: %f, %f\n\n",
+  //          problem_.nodes[keyframes[closest_index].node_idx].timestamp,
+  //          problem_.nodes[new_keyframe.node_idx].timestamp);
+  //  printf("This is a LC by embedding distance!\n\n\n\n");
+  //  // Step 6: Perform loop closure between these poses if there is a LC.
+  //  std::vector<WrappedImage> images =
+  //    {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud),
+  //     DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
+  //  WaitForClose(images);
+  //
+  //  double width =
+  //  furthest_point(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud).norm();
+  //  SaveImage("LC_1",
+  //  GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud,
+  //  width, 0.03)); width =
+  //  furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
+  //  SaveImage("LC_2",
+  //  GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud,
+  //  width, 0.03)); #endif
+  //
+  //  LearnedKeyframe best_match_keyframe = keyframes[closest_index];
+  //  LCKeyframes(best_match_keyframe, new_keyframe);
 }

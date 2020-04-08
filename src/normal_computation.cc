@@ -1,14 +1,14 @@
-#include <cstdlib>
 #include <time.h>
+#include <cstdlib>
 #include <iostream>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include "Eigen/Dense"
 
-#include "./normal_computation.h"
 #include "./kdtree.h"
 #include "./math_util.h"
+#include "./normal_computation.h"
 
 /* Normal computation is based on this paper
  * http://imagine.enpc.fr/~marletr/publi/SGP-2012-Boulch-Marlet.pdf
@@ -16,9 +16,9 @@
  * By Boulch et al.
  */
 
-using std::vector;
-using NormalComputation::CircularHoughAccumulator;
 using Eigen::Rotation2Df;
+using NormalComputation::CircularHoughAccumulator;
+using std::vector;
 
 NormalComputationConfig config;
 
@@ -34,15 +34,13 @@ inline size_t SampleLimit(double mean_distance) {
   return (1 / (2.0 * mean_distance * mean_distance));
 }
 
-inline double BinMean(size_t bin_num, 
-                      const CircularHoughAccumulator& accum) {
+inline double BinMean(size_t bin_num, const CircularHoughAccumulator& accum) {
   return accum.Votes(bin_num) / accum.accumulator.size();
 }
 
 inline bool MeansDontIntersect(CircularHoughAccumulator& accum) {
-  double mean_difference =
-    BinMean(accum.GetMostVotedBinIndex(), accum) - 
-    BinMean(accum.GetSecondMostVotedBinIndex(), accum);
+  double mean_difference = BinMean(accum.GetMostVotedBinIndex(), accum) -
+                           BinMean(accum.GetSecondMostVotedBinIndex(), accum);
   // Assuming confidence level of 95%
   double lower_bound = 2.0 * sqrt(1.0 / accum.accumulator.size());
   return mean_difference >= lower_bound;
@@ -66,18 +64,17 @@ vector<double> LargestClusterWithinThreshold(const vector<double> normal_angles,
   return largest_cluster;
 }
 
-vector<Vector2f>
-NormalComputation::GetNormals(const vector<Vector2f>& points) {
+vector<Vector2f> NormalComputation::GetNormals(const vector<Vector2f>& points) {
   // TODO: Fix the bug that doesn't let config-reader have static vars.
   // For each point we have to randomly sample points within its neighborhood.
-  // Then when we either reach the upper limit of samples, or pass the 
+  // Then when we either reach the upper limit of samples, or pass the
   // threshold of confidence and stop.
   // Pick the most selected bin and set the normal of this point to the average
   // angle of that bin.
   // Compute the line using that angle and a point at (1,0).
   srand(time(NULL));
   KDTree<float, 2>* tree =
-    new KDTree<float, 2>(KDTree<float, 2>::EigenToKDNoNormals(points));
+      new KDTree<float, 2>(KDTree<float, 2>::EigenToKDNoNormals(points));
   vector<Vector2f> normals;
   for (const Vector2f& point : points) {
     CircularHoughAccumulator accum(config.CONFIG_bin_number);
@@ -99,22 +96,24 @@ NormalComputation::GetNormals(const vector<Vector2f>& points) {
       do {
         first_index = rand() % neighbors.size();
         second_index = rand() % neighbors.size();
-      } while (first_index == second_index || chosen_samples[neighbors.size() * first_index + second_index]);
+      } while (first_index == second_index ||
+               chosen_samples[neighbors.size() * first_index + second_index]);
       chosen_samples[neighbors.size() * first_index + second_index] = true;
       Vector2f point_1 = neighbors[first_index].point;
       Vector2f point_2 = neighbors[second_index].point;
       // Now come up with their normal.
       Eigen::Hyperplane<float, 2> surface_line =
-        Eigen::Hyperplane<float, 2>::Through(point_1, point_2);
+          Eigen::Hyperplane<float, 2>::Through(point_1, point_2);
       Vector2f normal = surface_line.normal();
       double angle_with_x_axis = acos(normal.dot(Vector2f(1, 0)));
       accum.AddVote(angle_with_x_axis);
       if (MeansDontIntersect(accum)) {
-        break; 
+        break;
       }
       number_of_samples++;
     }
-    normals.push_back(GetNormalFromAngle(accum.AverageBinAngle(accum.GetMostVotedBinIndex())));
+    normals.push_back(GetNormalFromAngle(
+        accum.AverageBinAngle(accum.GetMostVotedBinIndex())));
   }
   return normals;
 }

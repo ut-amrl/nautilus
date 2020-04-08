@@ -109,6 +109,7 @@ class CumulativeFunctionTimer {
 
     // Default destructor, Stops the timer.
     ~Invocation();
+
    private:
     // Disable copy constructor.
     Invocation(const Invocation&);

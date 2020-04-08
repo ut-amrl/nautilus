@@ -4,32 +4,30 @@
 
 #include "eigen3/Eigen/Dense"
 
-#include "slam_type_builder.h"
-#include "pointcloud_helpers.h"
-#include "math_util.h"
 #include "lidar_slam/CobotOdometryMsg.h"
 #include "math_util.h"
+#include "pointcloud_helpers.h"
+#include "slam_type_builder.h"
 
+using Eigen::Rotation2Df;
+using Eigen::Vector2f;
+using lidar_slam::CobotOdometryMsg;
+using math_util::AngleDist;
 using pointcloud_helpers::LaserScanToPointCloud;
 using slam_types::LidarFactor;
-using slam_types::RobotPose2D;
 using slam_types::OdometryFactor2D;
+using slam_types::RobotPose2D;
 using slam_types::SLAMNode2D;
 using slam_types::SLAMProblem2D;
-using math_util::AngleDist;
-using Eigen::Vector2f;
-using Eigen::Rotation2Df;
-using lidar_slam::CobotOdometryMsg;
 
 void SLAMTypeBuilder::AddOdomFactor(
-        std::vector<OdometryFactor2D>& odom_factors) {
+    std::vector<OdometryFactor2D>& odom_factors) {
   CHECK_GE(nodes_.size(), 2);
   auto node_i = nodes_[nodes_.size() - 1];
   auto node_j = nodes_[nodes_.size() - 2];
   double angle = node_i.pose.angle - node_j.pose.angle;
   Vector2f translation = node_i.pose.loc - node_j.pose.loc;
-  OdometryFactor2D odom_factor(nodes_.size() - 2,
-                               nodes_.size() - 1,
+  OdometryFactor2D odom_factor(nodes_.size() - 2, nodes_.size() - 1,
                                translation, angle);
   odom_factors.emplace_back(odom_factor);
 }
@@ -37,13 +35,14 @@ void SLAMTypeBuilder::AddOdomFactor(
 void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
   // We only want one odometry between each lidar callback.
   if (((config_.CONFIG_diff_odom && diff_tracking_.ReadyForLidar()) ||
-       odom_tracking_.ReadyForLidar()) && !Done()) {
+       odom_tracking_.ReadyForLidar()) &&
+      !Done()) {
     // Transform this laser scan into a point cloud.s
-    double max_range =
-      (config_.CONFIG_max_lidar_range <= 0)? laser_scan.range_max :
-                                            config_.CONFIG_max_lidar_range;
+    double max_range = (config_.CONFIG_max_lidar_range <= 0)
+                           ? laser_scan.range_max
+                           : config_.CONFIG_max_lidar_range;
     std::vector<Vector2f> pointcloud =
-      LaserScanToPointCloud(laser_scan, max_range);
+        LaserScanToPointCloud(laser_scan, max_range);
     LidarFactor lidar_factor(pose_id_, pointcloud);
     RobotPose2D pose;
     if (config_.CONFIG_diff_odom) {
@@ -62,7 +61,8 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
 }
 
 float ZRadiansFromQuaterion(geometry_msgs::Quaternion& q) {
-  // Protect against case of gimbal lock which will give us a singular transformation.
+  // Protect against case of gimbal lock which will give us a singular
+  // transformation.
   // http://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/
   if ((q.x * q.y) + (q.z * q.w) == 0.5) {
     return 0.0;
@@ -78,8 +78,7 @@ void SLAMTypeBuilder::OdometryCallback(nav_msgs::Odometry& odometry) {
   odom_tracking_.OdometryCallback(odometry);
 }
 
-void
-SLAMTypeBuilder::OdometryCallback(CobotOdometryMsg& odometry) {
+void SLAMTypeBuilder::OdometryCallback(CobotOdometryMsg& odometry) {
   diff_tracking_.OdometryCallback(odometry);
 }
 
@@ -89,7 +88,7 @@ slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
 }
 
 void DifferentialOdometryTracking::OdometryCallback(
-        lidar_slam::CobotOdometryMsg &odometry) {
+    lidar_slam::CobotOdometryMsg& odometry) {
   if (!odom_initialized_) {
     odom_initialized_ = true;
     pending_rotation_ = 0;
@@ -105,23 +104,23 @@ RobotPose2D DifferentialOdometryTracking::GetPose() {
   // is in the context of the last robots position's frame.
   total_translation += Rotation2Df(total_rotation) * pending_translation_;
   total_rotation = math_util::angle_mod(total_rotation + pending_rotation_);
-  pending_translation_ = Vector2f(0,0);
+  pending_translation_ = Vector2f(0, 0);
   pending_rotation_ = 0.0;
   return RobotPose2D(total_translation, total_rotation);
 }
 
-void AbsoluteOdometryTracking::OdometryCallback(nav_msgs::Odometry &odometry) {
+void AbsoluteOdometryTracking::OdometryCallback(nav_msgs::Odometry& odometry) {
   if (!odom_initialized_) {
-    init_odom_translation_ = Vector2f(odometry.pose.pose.position.x,
-                                      odometry.pose.pose.position.y);
+    init_odom_translation_ =
+        Vector2f(odometry.pose.pose.position.x, odometry.pose.pose.position.y);
     init_odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
     last_odom_translation_ = init_odom_translation_;
     last_odom_angle_ = init_odom_angle_;
     odom_initialized_ = true;
   }
   odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
-  odom_translation_ = Vector2f(odometry.pose.pose.position.x,
-                               odometry.pose.pose.position.y);
+  odom_translation_ =
+      Vector2f(odometry.pose.pose.position.x, odometry.pose.pose.position.y);
 }
 
 RobotPose2D AbsoluteOdometryTracking::GetPose() {
