@@ -23,7 +23,7 @@
 
 #include <DEBUG.h>
 
-#define EMBEDDING_THRESHOLD 4
+#define EMBEDDING_THRESHOLD 8
 #define LIDAR_CONSTRAINT_AMOUNT 10
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
@@ -32,7 +32,7 @@
 #define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .35
 #define LOCAL_UNCERTAINTY_PREV_SCANS 2
 #define CSM_SCORE_THRESHOLD -3.5
-#define DEBUG true
+#define DEBUG false
 
 using std::vector;
 using slam_types::OdometryFactor2D;
@@ -472,6 +472,7 @@ Solver::Solver(double translation_weight,
                scan_matcher(10, 3, 0.3, 0.03) {
   embedding_client =
     n_.serviceClient<point_cloud_embedder::GetPointCloudEmbedding>("embed_point_cloud");
+  lc_poses_pub = n_.advertise<visualization_msgs::Marker>("/lc_poses", 10);
 }
 
 /*
@@ -782,7 +783,9 @@ void Solver::AddSLAMNodeOdom(SLAMNode2D& node,
   SLAMNodeSolution2D sol_node(node);
   solution_.push_back(sol_node);
   if (auto_lc_enabled_) {
+    #if DEBUG
     std::cout << "Auto LC Enabled" << std::endl;
+    #endif
     CheckForLearnedLC(node);
   }
 }
@@ -792,7 +795,9 @@ void Solver::AddSlamNode(SLAMNode2D& node) {
   SLAMNodeSolution2D sol_node(node);
   solution_.push_back(sol_node);
   if (auto_lc_enabled_) {
+    #if DEBUG
     std::cout << "Auto LC Enabled" << std::endl;
+    #endif
     CheckForLearnedLC(node);
   }
 }
@@ -831,6 +836,24 @@ bool Solver::AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
 void Solver::LCKeyframes(LearnedKeyframe& key_frame_a,
                          LearnedKeyframe& key_frame_b) {
   // Solve the problem with pseudo odometry.
+  visualization_msgs::Marker pose_array;
+
+  gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
+                                gui_helpers::Color4f::kRed,
+                                0.003,
+                                0.0,
+                                0.0,
+                                &pose_array);
+
+                                
+
+  // Eigen::Vector3f pose(solution_[key_frame_a.node_idx].pose[0], solution_[key_frame_a.node_idx].pose[1], solution_[key_frame_a.node_idx].pose[2]);
+  // Eigen::Vector3f poseB(solution_[key_frame_b.node_idx].pose[0], solution_[key_frame_b.node_idx].pose[1], solution_[key_frame_b.node_idx].pose[2]);
+  // gui_helpers::AddPoint(pose, gui_helpers::Color4f::kRed, &pose_array);
+  // gui_helpers::AddPoint(poseB, gui_helpers::Color4f::kRed, &pose_array);
+
+  // lc_poses_pub.publish(pose_array);
+
   problem_.odometry_factors = GetSolvedOdomFactors();
   if (AddKeyframeResiduals(key_frame_a, key_frame_b)) {
     SolveSLAM();
@@ -855,9 +878,7 @@ vector<size_t> Solver::GetMatchingKeyframeIndices(size_t keyframe_index) {
 }
 
 void Solver::CheckForLearnedLC(SLAMNode2D& node) {
-  #if DEBUG
   printf("Processing node %lu\n", node.node_idx);
-  #endif
   // First node is always a keyframe for simplicity.
   if (keyframes.size() == 0) {
     AddKeyframe(node);
@@ -940,10 +961,11 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     #endif
     return;
   }
-  #if DEBUG
   printf("Found match of pose %lu to %lu\n",
           keyframes[closest_index].node_idx,
           new_keyframe.node_idx);
+
+  #if DEBUG
   printf("timestamps: %f, %f\n\n", problem_.nodes[keyframes[closest_index].node_idx].timestamp, problem_.nodes[new_keyframe.node_idx].timestamp);
   printf("This is a LC by embedding distance!\n\n\n\n");
   // Step 6: Perform loop closure between these poses if there is a LC.
