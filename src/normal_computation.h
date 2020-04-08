@@ -19,7 +19,7 @@ struct NormalComputationConfig {
     CONFIG_INT(bin_number, "nc_bin_number");
 
     NormalComputationConfig() {
-      while (!config_reader::VariablesReady()) {}
+      config_reader::WaitForInit();
     }
 };
 

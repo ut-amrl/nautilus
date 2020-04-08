@@ -25,7 +25,7 @@ struct SlamTypeBuilderConfig {
     CONFIG_DOUBLE(translation_change, "translation_change_for_lidar");
 
     SlamTypeBuilderConfig() {
-      while(!config_reader::VariablesReady());
+      config_reader::WaitForInit();
     }
 };
 

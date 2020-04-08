@@ -504,7 +504,7 @@ struct SolverConfig {
     CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
 
     SolverConfig() {
-      while(!config_reader::VariablesReady());
+      config_reader::WaitForInit();
     }
 };
 

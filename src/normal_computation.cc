@@ -20,6 +20,8 @@ using std::vector;
 using NormalComputation::CircularHoughAccumulator;
 using Eigen::Rotation2Df;
 
+NormalComputationConfig config;
+
 // TODO: Possibly adaptively set the k neighborhood size.
 // TODO: Orientation of normals.
 
@@ -67,7 +69,6 @@ vector<double> LargestClusterWithinThreshold(const vector<double> normal_angles,
 vector<Vector2f>
 NormalComputation::GetNormals(const vector<Vector2f>& points) {
   // TODO: Fix the bug that doesn't let config-reader have static vars.
-  NormalComputationConfig config;
   // For each point we have to randomly sample points within its neighborhood.
   // Then when we either reach the upper limit of samples, or pass the 
   // threshold of confidence and stop.

@@ -20,8 +20,6 @@ On Ubuntu:
 
 You will also need Lua 5.1 and clang for the config-reader library. You can get these by running the InstallPackages script in ```third_party/config-reader```.
 
-```
-
 ### Compiling
 And then navigate to the installed directory and make the project using the following code:
 

@@ -15,7 +15,7 @@ IF(${CMAKE_BUILD_TYPE} MATCHES "Release")
 ELSEIF(${CMAKE_BUILD_TYPE} MATCHES "Debug")
     option(TESTING "Build tests" ON)
     MESSAGE(STATUS "Additional Flags for Debug mode")
-    SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -g -O0")
+    SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -fopenmp -g -O0")
 ENDIF()
 
 FIND_PACKAGE(Ceres REQUIRED)
