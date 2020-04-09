@@ -464,7 +464,11 @@ struct SolverConfig {
   CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
   CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
 
-  SolverConfig() { config_reader::WaitForInit(); }
+  SolverConfig() {
+    std::cout << "Solver Waiting..." << std::endl;
+    config_reader::WaitForInit();
+    std::cout << "--- Done Waiting ---" << std::endl;
+  }
 };
 
 class Solver {
@@ -496,7 +500,7 @@ class Solver {
 
  private:
   double CostFromResidualDescriptor(const ResidualDesc& res_desc);
-  double GetChiSquareCost(vector<ResidualDesc> lc_res_desc);
+  double GetChiSquareCost(uint64_t node_a, uint64_t node_b);
   OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
                                      const uint64_t node_b);
   vector<ResidualDesc> AddLCResiduals(const uint64_t node_a,

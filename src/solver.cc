@@ -672,71 +672,56 @@ Eigen::MatrixXd CRSToEigen(const ceres::CRSMatrix& crs_matrix) {
   return matrix;
 }
 
-double Solver::CostFromResidualDescriptor(const ResidualDesc& res_desc) {
-  // Get the associated parameter blocks.
-  double* param_i = solution_[res_desc.node_i].pose;
-  double* param_j = solution_[res_desc.node_j].pose;
-  // Have the problem only evaluate for these parameter blocks and this specific
-  // residual.
-  ceres::Problem::EvaluateOptions eval_options;
-  eval_options.residual_blocks.push_back(res_desc.id);
-  eval_options.parameter_blocks.push_back(param_i);
-  eval_options.parameter_blocks.push_back(param_j);
-  eval_options.num_threads =
-      static_cast<int>(std::thread::hardware_concurrency());
-  // Evaluate the problem to get the residuals and jacobian.
-  ceres::CRSMatrix jacobian;
-  vector<double> residuals;
-  ceres_information.problem->Evaluate(eval_options, nullptr, &residuals,
-                                      nullptr, &jacobian);
-  // Compute the information matrix.
-  Eigen::MatrixXd eigen_jacobian = CRSToEigen(jacobian);
-  // TODO: Assumption about transpose ordering.
-  Eigen::MatrixXd information_matrix =
-      (eigen_jacobian * eigen_jacobian.transpose()).inverse();
-  // Calculate the cost.
-  Eigen::VectorXd eigen_residual =
-      Eigen::Map<Eigen::VectorXd>(residuals.data(), residuals.size(), 1);
-  double cost =
-      eigen_residual.transpose() * information_matrix * eigen_residual;
-  if (cost < 0 || !ceres::IsFinite(cost)) {
-    std::cout << "--- Invalid ---" << std::endl;
-    std::cout << "From " << res_desc.node_i << " to " << res_desc.node_j
-              << std::endl;
-    std::cout << "Original Information Matrix: " << jacobian.num_rows << "x"
-              << jacobian.num_cols << std::endl;
-    std::cout << "Information Matrix: " << information_matrix.rows() << "x"
-              << information_matrix.cols() << std::endl;
-    std::cout << "Residual: " << residuals.size() << std::endl;
-  }
-  return cost;
-}
-
-double Solver::GetChiSquareCost(vector<ResidualDesc> lc_res_desc) {
-  double cost = 0.0;
-  if (ceres_information.cost_valid) {
-    cost = ceres_information.cost;
-  } else {
-    std::cout << "Calculating base problem costs, res num: "
-              << ceres_information.res_descriptors.size() << std::endl;
-    int residuals_finished = 0;
-    for (const ResidualDesc& res_desc : ceres_information.res_descriptors) {
-      double temp_cost = CostFromResidualDescriptor(res_desc);
-      if (temp_cost < 0 || !ceres::IsFinite(temp_cost)) {
-        std::cout << "Invalid Cost!" << std::endl;
-      } else {
-        std::cout << "Cost: << " << cost << std::endl;
-        cost += temp_cost;
-      }
-      std::cout << "Res Finished: " << residuals_finished++ << "/"
-                << ceres_information.res_descriptors.size() << std::endl;
-    }
-  }
-  // Get the cost from the LC Residuals.
-  std::cout << "Adding LC Residuals" << std::endl;
-  for (const ResidualDesc& res_desc : lc_res_desc) {
-    cost += CostFromResidualDescriptor(res_desc);
-  }
+double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
+  CHECK_LT(node_a, solution_.size());
+  CHECK_LT(node_b, solution_.size());
+  double * param_block_a = solution_[node_a].pose;
+  double * param_block_b = solution_[node_b].pose;
+  // Set the first LC pose constant so it has 0 covariance with itself.
+  // Then the covariance obtained from all the other poses will be relative to
+  // this pose.
+  ceres_information.problem->SetParameterBlockConstant(param_block_a);
+  // Grab the covariance between these two blocks.
+  ceres::Covariance::Options cov_options;
+  cov_options.num_threads = std::thread::hardware_concurrency();
+  ceres::Covariance covariance(cov_options);
+  vector<pair<const double*, const double*>> param_blocks;
+  param_blocks.push_back(std::make_pair(param_block_a, param_block_b));
+  CHECK(covariance.Compute(param_blocks, (ceres::Problem*)ceres_information.problem.get()));
+  double covariance_ab[3 * 3];
+  covariance.GetCovarianceBlock(param_block_a, param_block_b, covariance_ab);
+  // Remove the constant trait that we set earlier on this parameter block,
+  // so future iterations aren't messed up.
+  ceres_information.problem->SetParameterBlockVariable(param_block_a);
+  // Now we need the difference between the poses in the solution.
+  double difference_in_poses[3];
+  difference_in_poses[0] = param_block_b[0] - param_block_a[0];
+  difference_in_poses[1] = param_block_b[1] - param_block_a[1];
+  difference_in_poses[2] = param_block_b[2] - param_block_a[2];
+  // Now get the expected transformation from CSM.
+  // TODO: Should we be restricting by rotation here?
+  std::pair<double, std::pair<Vector2f, float>> trans_prob_pair =
+          scan_matcher.GetTransformation(
+                  problem_.nodes[node_a].lidar_factor.pointcloud,
+                  problem_.nodes[node_b].lidar_factor.pointcloud,
+                  solution_[node_a].pose[2], solution_[node_b].pose[2],
+                  math_util::DegToRad(180));
+  auto trans = trans_prob_pair.second;
+  double difference_from_csm[3];
+  difference_from_csm[0] =
+          (param_block_b[0] - param_block_a[0]) + trans.first.x();
+  difference_from_csm[1] =
+          (param_block_b[1] - param_block_a[1]) + trans.first.y();
+  difference_from_csm[2] = trans.second;
+  double difference_pred_exp[3];
+  difference_pred_exp[0] = difference_in_poses[0] - difference_from_csm[0];
+  difference_pred_exp[0] = difference_in_poses[1] - difference_from_csm[1];
+  difference_pred_exp[0] = difference_in_poses[2] - difference_from_csm[2];
+  Eigen::Vector3d vec = Eigen::Map<Eigen::Vector3d>(difference_pred_exp);
+  Eigen::Matrix3d cov = Eigen::Map<Eigen::Matrix3d>(covariance_ab);
+  std::cout << "residuals:\n" << vec << std::endl;
+  std::cout << "covariance:\n" << cov << std::endl;
+  double cost = (vec.transpose() * cov.inverse() * vec).norm();
   return cost;
 }
 
@@ -795,14 +780,12 @@ bool Solver::SimilarScans(const uint64_t node_a, const uint64_t node_b,
   CHECK_GE(certainty, 0.0);
   // Add the LC residuals.
   vector<ResidualDesc> lc_res_desc = AddLCResiduals(node_a, node_b);
-  double chi_num = GetChiSquareCost(lc_res_desc);
+  double chi_num = GetChiSquareCost(node_a, node_b);
   RemoveResiduals(lc_res_desc);
   if (chi_num < 0) {
     return false;
   }
-  // TODO: Assumes that there the DoF of the graph refers to the number of nodes
-  // * 3
-  chi_squared dist(problem_.nodes.size() * 3);
+  chi_squared dist(3);
   std::cout << "chinum: " << chi_num << std::endl;
   return boost::math::cdf(dist, chi_num) <= certainty;
 }
@@ -889,8 +872,8 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   }
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
   // basically is it different than the last keyframe.
-  if (SimilarScans(keyframes_[keyframes_.size() - 1].node_idx, node.node_idx,
-                   0.95)) {
+  if (!SimilarScans(keyframes_[keyframes_.size() - 1].node_idx, node.node_idx,
+                    0.95)) {
 #if DEBUG
     printf("Not a keyframe from chi^2\n");
 #endif
