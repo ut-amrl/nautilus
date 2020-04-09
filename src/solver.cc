@@ -687,9 +687,17 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
   ceres::Covariance covariance(cov_options);
   vector<pair<const double*, const double*>> param_blocks;
   param_blocks.push_back(std::make_pair(param_block_a, param_block_b));
+  // TODO: Remove after confirming works as intended
+  param_blocks.push_back(std::make_pair(param_block_a, param_block_a));
+  param_blocks.push_back(std::make_pair(param_block_b, param_block_b));
   CHECK(covariance.Compute(param_blocks, (ceres::Problem*)ceres_information.problem.get()));
   double covariance_ab[3 * 3];
   covariance.GetCovarianceBlock(param_block_a, param_block_b, covariance_ab);
+  // TODO: Remove after testing
+  double covariance_aa[3 * 3];
+  double covariance_bb[3 * 3];
+  covariance.GetCovarianceBlock(param_block_a, param_block_a, covariance_aa);
+  covariance.GetCovarianceBlock(param_block_b, param_block_b, covariance_bb);
   // Remove the constant trait that we set earlier on this parameter block,
   // so future iterations aren't messed up.
   ceres_information.problem->SetParameterBlockVariable(param_block_a);
@@ -721,6 +729,9 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
   Eigen::Matrix3d cov = Eigen::Map<Eigen::Matrix3d>(covariance_ab);
   std::cout << "residuals:\n" << vec << std::endl;
   std::cout << "covariance:\n" << cov << std::endl;
+  // TODO: Remove after testing.
+  std::cout << "covariance axa:\n" << Eigen::Map<Eigen::Matrix3d>(covariance_aa) << std::endl;
+  std::cout << "covariance bxb:\n" << Eigen::Map<Eigen::Matrix3d>(covariance_bb) << std::endl;
   double cost = (vec.transpose() * cov.inverse() * vec).norm();
   return cost;
 }
