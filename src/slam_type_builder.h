@@ -38,7 +38,10 @@ class DifferentialOdometryTracking {
     return pending_rotation_ >= config_.CONFIG_rotation_change ||
            pending_translation_.norm() >= config_.CONFIG_translation_change;
   }
-
+  void ResetInits() {
+    total_translation = Vector2f(0, 0);
+    total_rotation = 0.0f;
+  }
  private:
   SlamTypeBuilderConfig config_;
   bool odom_initialized_ = false;
@@ -62,7 +65,10 @@ class AbsoluteOdometryTracking {
     return d_angle >= config_.CONFIG_rotation_change ||
            d_trans >= config_.CONFIG_translation_change;
   }
-
+  void ResetInits() {
+    init_odom_angle_ = odom_angle_;
+    init_odom_translation_ = odom_translation_;
+  }
  private:
   SlamTypeBuilderConfig config_;
   bool odom_initialized_ = false;

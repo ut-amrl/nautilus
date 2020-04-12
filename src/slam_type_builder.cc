@@ -45,6 +45,15 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
         LaserScanToPointCloud(laser_scan, max_range);
     LidarFactor lidar_factor(pose_id_, pointcloud);
     RobotPose2D pose;
+    // Reset the initial values for everything,
+    // we should start at 0 for everything.
+    if (pose_id_ == 0) {
+      if (config_.CONFIG_diff_odom) {
+        diff_tracking_.ResetInits();
+      } else {
+        odom_tracking_.ResetInits();
+      }
+    }
     if (config_.CONFIG_diff_odom) {
       pose = diff_tracking_.GetPose();
     } else {
@@ -118,14 +127,16 @@ void AbsoluteOdometryTracking::OdometryCallback(nav_msgs::Odometry& odometry) {
     last_odom_angle_ = init_odom_angle_;
     odom_initialized_ = true;
   }
-  odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
+  odom_angle_ =
+    ZRadiansFromQuaterion(odometry.pose.pose.orientation);
   odom_translation_ =
       Vector2f(odometry.pose.pose.position.x, odometry.pose.pose.position.y);
 }
 
 RobotPose2D AbsoluteOdometryTracking::GetPose() {
+  // TODO: Fix the poor starting odometry bug.
   Vector2f translation = odom_translation_ - init_odom_translation_;
-  double angle = odom_angle_;
+  double angle = odom_angle_ - init_odom_angle_;
   last_odom_angle_ = odom_angle_;
   last_odom_translation_ = odom_translation_;
   return RobotPose2D(translation, angle);
