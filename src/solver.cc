@@ -704,12 +704,14 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
   CHECK(covariance.GetCovarianceBlock(param_block_a, param_block_b,
                                       covariance_ab));
   // Now we need the difference between the poses in the solution.
-  // Specifically, it is the difference to transform a to b.
+  // Specifically, it is the difference to transform b to a.
   // Because this is how CSM will calculate it later.
+  // Important note, CSM calculates relative transform of b to a, not the other
+  // way around.
   double difference_in_poses[3];
-  difference_in_poses[0] = param_block_b[0] - param_block_a[0];
-  difference_in_poses[1] = param_block_b[1] - param_block_a[1];
-  difference_in_poses[2] = param_block_b[2] - param_block_a[2];
+  difference_in_poses[0] = param_block_a[0] - param_block_b[0];
+  difference_in_poses[1] = param_block_a[1] - param_block_b[1];
+  difference_in_poses[2] = param_block_a[2] - param_block_b[2];
   // Now get the expected transformation from CSM.
   // TODO: Should we be restricting by rotation here?
   std::cout << "Running CSM" << std::endl;
@@ -718,13 +720,13 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
           problem_.nodes[node_a].lidar_factor.pointcloud,
           problem_.nodes[node_b].lidar_factor.pointcloud,
           solution_[node_a].pose[2], solution_[node_b].pose[2],
-          math_util::DegToRad(180));
+          math_util::DegToRad(90));
   auto trans = trans_prob_pair.second;
   double difference_from_csm[3];
-  difference_from_csm[0] =
-      (param_block_b[0] - param_block_a[0]) + trans.first.x();
-  difference_from_csm[1] =
-      (param_block_b[1] - param_block_a[1]) + trans.first.y();
+  std::cout << "Raw CSM Translation " << std::endl << trans.first << std::endl;
+  // TODO: Trying Raw CSM as it makes more sense.
+  difference_from_csm[0] = trans.first.x();
+  difference_from_csm[1] = trans.first.y();
   difference_from_csm[2] = trans.second;
   std::cout << "CSM Found Difference: " << difference_from_csm[0] << " "
                                         << difference_from_csm[1] << " "
@@ -742,7 +744,7 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
   Eigen::Matrix3d cov = Eigen::Map<Eigen::Matrix3d>(covariance_ab);
   std::cout << "residuals:\n" << vec << std::endl;
   std::cout << "covariance:\n" << cov << std::endl;
-  double cost = (vec.transpose() * cov.inverse() * vec).norm();
+  double cost = (vec.transpose() * cov.inverse() * vec);
   return cost;
 }
 
@@ -808,7 +810,9 @@ bool Solver::SimilarScans(const uint64_t node_a, const uint64_t node_b,
     return false;
   }
   chi_squared dist(3);
-  return boost::math::cdf(dist, chi_num) <= certainty;
+  double upper_critical_value = quantile(complement(dist, certainty));
+  std::cout << "Boundary: " << upper_critical_value << std::endl;
+  return chi_num < upper_critical_value;
 }
 
 void Solver::AddSLAMNodeOdom(SLAMNode2D& node,

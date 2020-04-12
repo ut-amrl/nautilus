@@ -15,8 +15,6 @@
 #include "config_reader/config_reader.h"
 #include "lidar_slam/CobotOdometryMsg.h"
 
-#include <DEBUG.h>
-
 using lidar_slam::CobotOdometryMsg;
 using lidar_slam::HitlSlamInputMsg;
 using lidar_slam::WriteMsg;
@@ -146,10 +144,21 @@ int main(int argc, char** argv) {
   ros::Subscriber vector_sub =
       n.subscribe("/vectorize_output", 10, &Solver::Vectorize, &solver);
   ros::spin();
-  while (asking_for_input) {
-    int scan_a, scan_b;
-    std::cin >> scan_a >> " " >> scan_b;
-
-  }
+//  while (asking_for_input) {
+//    uint64_t scan_a, scan_b;
+//    std::cout << "Type a pose A: "
+//    std::cin >> scan_a;
+//    std::cout << std::endl << "Type a pose B: ";
+//    std::cin >> scan_b;
+//    std::cout << std::endl;
+//    // Run ChiSquare on these two scans.
+//    if (scan_a > slam_problem.nodes.size() | scan_b > slam_problem.nodes.size()) {
+//      continue;
+//    }
+//    int chi_num = solver.GetChiSquare();
+//    chi_squared dist(3);
+//    return boost::math::cdf(dist, chi_num) <= certainty;
+//    std::cout << "ChiSquare Boundary is: " << boost::math::cdf(dist, chi_num);
+//  }
   return 0;
 }
