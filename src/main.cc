@@ -15,6 +15,8 @@
 #include "config_reader/config_reader.h"
 #include "lidar_slam/CobotOdometryMsg.h"
 
+#include <DEBUG.h>
+
 using lidar_slam::CobotOdometryMsg;
 using lidar_slam::HitlSlamInputMsg;
 using lidar_slam::WriteMsg;
@@ -29,6 +31,8 @@ CONFIG_BOOL(auto_lc, "auto_lc");
 CONFIG_STRING(lidar_topic, "lidar_topic");
 CONFIG_STRING(odom_topic, "odom_topic");
 CONFIG_STRING(hitl_lc_topic, "hitl_lc_topic");
+
+static bool asking_for_input = true;
 
 SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
   /*
@@ -85,6 +89,7 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
 
 void SignalHandler(int signum) {
   printf("Exiting with %d\n", signum);
+  asking_for_input = false;
   ros::shutdown();
   exit(0);
 }
@@ -141,5 +146,10 @@ int main(int argc, char** argv) {
   ros::Subscriber vector_sub =
       n.subscribe("/vectorize_output", 10, &Solver::Vectorize, &solver);
   ros::spin();
+  while (asking_for_input) {
+    int scan_a, scan_b;
+    std::cin >> scan_a >> " " >> scan_b;
+
+  }
   return 0;
 }

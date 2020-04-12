@@ -179,8 +179,7 @@ class VisualizationCallback : public ceres::IterationCallback {
  public:
   VisualizationCallback(const SLAMProblem2D& problem,
                         const vector<SLAMNodeSolution2D>* solution,
-                        const vector<LearnedKeyframe>& keyframes,
-                        ros::NodeHandle& n)
+                        vector<LearnedKeyframe>& keyframes, ros::NodeHandle& n)
       : problem(problem), solution(solution), keyframes(keyframes) {
     pointcloud_helpers::InitPointcloud(&all_points_marker);
     pointcloud_helpers::InitPointcloud(&new_points_marker);
@@ -402,6 +401,10 @@ class VisualizationCallback : public ceres::IterationCallback {
     constraints.push_back(constraint);
   }
 
+  void AddKeyframe(const LearnedKeyframe& keyframe) {
+    keyframes.push_back(keyframe);
+  }
+
   ceres::CallbackReturnType operator()(
       const ceres::IterationSummary& summary) override {
     PubVisualization();
@@ -414,7 +417,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   std::vector<Vector2f> all_points;
   const SLAMProblem2D& problem;
   const vector<SLAMNodeSolution2D>* solution;
-  const vector<LearnedKeyframe>& keyframes;
+  vector<LearnedKeyframe>& keyframes;
   ros::Publisher point_pub;
   ros::Publisher pose_pub;
   ros::Publisher match_pub;

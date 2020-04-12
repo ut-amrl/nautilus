@@ -362,6 +362,8 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
       // lidar constraint amount nodes.
       for (size_t node_i_index = 0; node_i_index < problem_.nodes.size();
            node_i_index++) {
+        std::mutex problem_mutex;
+#pragma omp parallel for
         for (size_t node_j_index =
                  std::max((int64_t)(node_i_index)-window_size, 0l);
              node_j_index < node_i_index; node_j_index++) {
@@ -372,10 +374,13 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
           difference +=
               GetPointCorrespondences(problem_, &solution_, &correspondence,
                                       node_i_index, node_j_index);
+          problem_mutex.lock();
           vis_callback_->UpdateLastCorrespondence(correspondence);
+          problem_mutex.unlock();
           difference /=
               problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
           // Add the correspondences as constraints in the optimization problem.
+          problem_mutex.lock();
           ceres::ResidualBlockId id =
               ceres_information.problem->AddResidualBlock(
                   LIDARPointBlobResidual::create(correspondence.source_points,
@@ -385,6 +390,7 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
                   NULL, correspondence.source_pose, correspondence.target_pose);
           ceres_information.res_descriptors.emplace_back(node_i_index,
                                                          node_j_index, id);
+          problem_mutex.unlock();
         }
       }
       difference += AddLidarResidualsForLC(*ceres_information.problem);
@@ -401,7 +407,7 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
   return solution_;
 }
 
-Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(10, 3, 0.3, 0.03) {
+Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(30, 2, 0.3, 0.03) {
   embedding_client =
       n_.serviceClient<GetPointCloudEmbedding>("embed_point_cloud");
 }
@@ -673,14 +679,15 @@ Eigen::MatrixXd CRSToEigen(const ceres::CRSMatrix& crs_matrix) {
 }
 
 double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
+  std::cout << "Between " << node_a << " and " << node_b << std::endl;
   CHECK_LT(node_a, solution_.size());
   CHECK_LT(node_b, solution_.size());
-  double * param_block_a = solution_[node_a].pose;
-  double * param_block_b = solution_[node_b].pose;
+  CHECK_GT(solution_.size(), 1);
+  double* param_block_a = solution_[node_a].pose;
+  double* param_block_b = solution_[node_b].pose;
   // Set the first LC pose constant so it has 0 covariance with itself.
   // Then the covariance obtained from all the other poses will be relative to
-  // this pose.
-  ceres_information.problem->SetParameterBlockConstant(param_block_a);
+  // this pose. Also set the first one variable.
   // Grab the covariance between these two blocks.
   ceres::Covariance::Options cov_options;
   cov_options.num_threads = std::thread::hardware_concurrency();
@@ -690,48 +697,51 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
   // TODO: Remove after confirming works as intended
   param_blocks.push_back(std::make_pair(param_block_a, param_block_a));
   param_blocks.push_back(std::make_pair(param_block_b, param_block_b));
-  CHECK(covariance.Compute(param_blocks, (ceres::Problem*)ceres_information.problem.get()));
+  std::cout << "Computing Covariance" << std::endl;
+  CHECK(covariance.Compute(param_blocks,
+                           (ceres::Problem*)ceres_information.problem.get()));
   double covariance_ab[3 * 3];
-  covariance.GetCovarianceBlock(param_block_a, param_block_b, covariance_ab);
-  // TODO: Remove after testing
-  double covariance_aa[3 * 3];
-  double covariance_bb[3 * 3];
-  covariance.GetCovarianceBlock(param_block_a, param_block_a, covariance_aa);
-  covariance.GetCovarianceBlock(param_block_b, param_block_b, covariance_bb);
-  // Remove the constant trait that we set earlier on this parameter block,
-  // so future iterations aren't messed up.
-  ceres_information.problem->SetParameterBlockVariable(param_block_a);
+  CHECK(covariance.GetCovarianceBlock(param_block_a, param_block_b,
+                                      covariance_ab));
   // Now we need the difference between the poses in the solution.
+  // Specifically, it is the difference to transform a to b.
+  // Because this is how CSM will calculate it later.
   double difference_in_poses[3];
   difference_in_poses[0] = param_block_b[0] - param_block_a[0];
   difference_in_poses[1] = param_block_b[1] - param_block_a[1];
   difference_in_poses[2] = param_block_b[2] - param_block_a[2];
   // Now get the expected transformation from CSM.
   // TODO: Should we be restricting by rotation here?
+  std::cout << "Running CSM" << std::endl;
   std::pair<double, std::pair<Vector2f, float>> trans_prob_pair =
-          scan_matcher.GetTransformation(
-                  problem_.nodes[node_a].lidar_factor.pointcloud,
-                  problem_.nodes[node_b].lidar_factor.pointcloud,
-                  solution_[node_a].pose[2], solution_[node_b].pose[2],
-                  math_util::DegToRad(180));
+      scan_matcher.GetTransformation(
+          problem_.nodes[node_a].lidar_factor.pointcloud,
+          problem_.nodes[node_b].lidar_factor.pointcloud,
+          solution_[node_a].pose[2], solution_[node_b].pose[2],
+          math_util::DegToRad(180));
   auto trans = trans_prob_pair.second;
   double difference_from_csm[3];
   difference_from_csm[0] =
-          (param_block_b[0] - param_block_a[0]) + trans.first.x();
+      (param_block_b[0] - param_block_a[0]) + trans.first.x();
   difference_from_csm[1] =
-          (param_block_b[1] - param_block_a[1]) + trans.first.y();
+      (param_block_b[1] - param_block_a[1]) + trans.first.y();
   difference_from_csm[2] = trans.second;
+  std::cout << "CSM Found Difference: " << difference_from_csm[0] << " "
+                                        << difference_from_csm[1] << " "
+                                        << difference_from_csm[2] << " "
+                                        << std::endl;
+  std::cout << "Difference from Solution: " << difference_in_poses[0] << " "
+                                            << difference_in_poses[1] << " "
+                                            << difference_in_poses[2] << " "
+                                            << std::endl;
   double difference_pred_exp[3];
   difference_pred_exp[0] = difference_in_poses[0] - difference_from_csm[0];
-  difference_pred_exp[0] = difference_in_poses[1] - difference_from_csm[1];
-  difference_pred_exp[0] = difference_in_poses[2] - difference_from_csm[2];
+  difference_pred_exp[1] = difference_in_poses[1] - difference_from_csm[1];
+  difference_pred_exp[2] = difference_in_poses[2] - difference_from_csm[2];
   Eigen::Vector3d vec = Eigen::Map<Eigen::Vector3d>(difference_pred_exp);
   Eigen::Matrix3d cov = Eigen::Map<Eigen::Matrix3d>(covariance_ab);
   std::cout << "residuals:\n" << vec << std::endl;
   std::cout << "covariance:\n" << cov << std::endl;
-  // TODO: Remove after testing.
-  std::cout << "covariance axa:\n" << Eigen::Map<Eigen::Matrix3d>(covariance_aa) << std::endl;
-  std::cout << "covariance bxb:\n" << Eigen::Map<Eigen::Matrix3d>(covariance_bb) << std::endl;
   double cost = (vec.transpose() * cov.inverse() * vec).norm();
   return cost;
 }
@@ -785,19 +795,19 @@ void Solver::RemoveResiduals(vector<ResidualDesc> descs) {
 bool Solver::SimilarScans(const uint64_t node_a, const uint64_t node_b,
                           const double certainty) {
   if (node_a == node_b) {
-    return false;
+    return true;
   }
   CHECK_LE(certainty, 1.0);
   CHECK_GE(certainty, 0.0);
   // Add the LC residuals.
   vector<ResidualDesc> lc_res_desc = AddLCResiduals(node_a, node_b);
   double chi_num = GetChiSquareCost(node_a, node_b);
+  std::cout << "chinum: " << chi_num << std::endl;
   RemoveResiduals(lc_res_desc);
-  if (chi_num < 0) {
+  if (chi_num < 0 || !ceres::IsFinite(chi_num)) {
     return false;
   }
   chi_squared dist(3);
-  std::cout << "chinum: " << chi_num << std::endl;
   return boost::math::cdf(dist, chi_num) <= certainty;
 }
 
@@ -837,7 +847,10 @@ Eigen::Matrix<double, 32, 1> Solver::GetEmbedding(SLAMNode2D& node) {
 void Solver::AddKeyframe(SLAMNode2D& node) {
   Eigen::Matrix<double, 32, 1> embedding = GetEmbedding(node);
   node.is_keyframe = true;
-  keyframes_.emplace_back(embedding, node.node_idx);
+  LearnedKeyframe kf(embedding, node.node_idx);
+  keyframes_.push_back(kf);
+  vis_callback_->AddKeyframe(kf);
+  vis_callback_->PubVisualization();
 }
 
 bool Solver::AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
@@ -876,9 +889,16 @@ vector<size_t> Solver::GetMatchingKeyframeIndices(size_t keyframe_index) {
 }
 
 void Solver::CheckForLearnedLC(SLAMNode2D& node) {
-  // First node is always a keyframe for simplicity.
-  if (keyframes_.size() == 0) {
-    AddKeyframe(node);
+  // TODO: Used to add first node as keyframe,
+  // now its the 2nd node as the first is constant and therefore
+  // has 0 covariance with anything else.
+  if (keyframes_.size() == 0 && problem_.nodes.size() > 1) {
+    AddKeyframe(problem_.nodes[1]);
+    return;
+  } else if (keyframes_.size() == 0) {
+    // Keyframes is empty, but we don't have the 2nd node yet.
+    // But we don't want to even check the 1st node, because
+    // constant.
     return;
   }
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
