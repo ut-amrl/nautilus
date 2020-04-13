@@ -127,8 +127,7 @@ void AbsoluteOdometryTracking::OdometryCallback(nav_msgs::Odometry& odometry) {
     last_odom_angle_ = init_odom_angle_;
     odom_initialized_ = true;
   }
-  odom_angle_ =
-    ZRadiansFromQuaterion(odometry.pose.pose.orientation);
+  odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
   odom_translation_ =
       Vector2f(odometry.pose.pose.position.x, odometry.pose.pose.position.y);
 }

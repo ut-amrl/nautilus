@@ -491,7 +491,7 @@ class Solver {
   void Vectorize(const WriteMsgConstPtr& msg);
   vector<SLAMNodeSolution2D> GetSolution() { return solution_; }
   LCConstraint GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg);
-  bool AddCollinearConstraints(const LCConstraint& constraint);
+  bool AddColinearConstraints(const LCConstraint& constraint);
   void SolveForLC();
   void AddCollinearResiduals(ceres::Problem* problem);
   double AddLidarResidualsForLC(ceres::Problem& problem);

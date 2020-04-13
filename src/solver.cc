@@ -310,23 +310,59 @@ double Solver::AddLidarResidualsForLC(ceres::Problem& problem) {
         }
       }
       CHECK_LT(closest_b_pose_idx, solution_.size());
-      PointCorrespondences correspondence(solution_[a_pose.node_idx].pose,
-                                          solution_[closest_b_pose_idx].pose,
-                                          a_pose.node_idx, closest_b_pose_idx);
-      double temp_diff =
-          GetPointCorrespondences(problem_, &solution_, &correspondence,
-                                  a_pose.node_idx, closest_b_pose_idx);
-      // Add the correspondences as constraints in the optimization problem.
-      ceres::ResidualBlockId id = problem.AddResidualBlock(
-          LIDARPointBlobResidual::create(
-              correspondence.source_points, correspondence.target_points,
-              correspondence.source_normals, correspondence.target_normals),
-          NULL, correspondence.source_pose, correspondence.target_pose);
-      ceres_information.res_descriptors.emplace_back(a_pose.node_idx,
-                                                     closest_b_pose_idx, id);
-      difference =
-          temp_diff /
-          problem_.nodes[a_pose.node_idx].lidar_factor.pointcloud.size();
+      // TODO: Should we be doing this to b as well with all the poses before A?
+      for (int64_t pose_num =
+               std::max(static_cast<int64_t>(closest_b_pose_idx) -
+                            config_.CONFIG_lidar_constraint_amount + 1,
+                        static_cast<int64_t>(0));
+           pose_num <= static_cast<int64_t>(closest_b_pose_idx); pose_num++) {
+        if (static_cast<int64_t>(a_pose.node_idx) == pose_num) {
+          continue;
+        }
+        PointCorrespondences correspondence(solution_[a_pose.node_idx].pose,
+                                            solution_[pose_num].pose,
+                                            a_pose.node_idx, pose_num);
+        double temp_diff = GetPointCorrespondences(
+            problem_, &solution_, &correspondence, a_pose.node_idx, pose_num);
+        // Add the correspondences as constraints in the optimization problem.
+        ceres::ResidualBlockId id = problem.AddResidualBlock(
+            LIDARPointBlobResidual::create(
+                correspondence.source_points, correspondence.target_points,
+                correspondence.source_normals, correspondence.target_normals),
+            NULL, correspondence.source_pose, correspondence.target_pose);
+        ceres_information.res_descriptors.emplace_back(a_pose.node_idx,
+                                                       pose_num, id);
+        difference +=
+            temp_diff /
+            problem_.nodes[a_pose.node_idx].lidar_factor.pointcloud.size();
+      }
+      // Do the same for Closest Pose B
+      for (int64_t pose_num =
+               std::max(static_cast<int64_t>(a_pose.node_idx) -
+                            config_.CONFIG_lidar_constraint_amount + 1,
+                        static_cast<int64_t>(0));
+           pose_num <= static_cast<int64_t>(a_pose.node_idx); pose_num++) {
+        if (static_cast<int64_t>(closest_b_pose_idx) == pose_num) {
+          continue;
+        }
+        PointCorrespondences correspondence(solution_[closest_b_pose_idx].pose,
+                                            solution_[pose_num].pose,
+                                            closest_b_pose_idx, pose_num);
+        double temp_diff =
+            GetPointCorrespondences(problem_, &solution_, &correspondence,
+                                    closest_b_pose_idx, pose_num);
+        // Add the correspondences as constraints in the optimization problem.
+        ceres::ResidualBlockId id = problem.AddResidualBlock(
+            LIDARPointBlobResidual::create(
+                correspondence.source_points, correspondence.target_points,
+                correspondence.source_normals, correspondence.target_normals),
+            NULL, correspondence.source_pose, correspondence.target_pose);
+        ceres_information.res_descriptors.emplace_back(closest_b_pose_idx,
+                                                       pose_num, id);
+        difference +=
+            temp_diff /
+            problem_.nodes[closest_b_pose_idx].lidar_factor.pointcloud.size();
+      }
     }
   }
   return difference;
@@ -407,7 +443,7 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
   return solution_;
 }
 
-//TODO: Upped the Scanmatcher resolution to 0.01 for ChiSquare.
+// TODO: Upped the Scanmatcher resolution to 0.01 for ChiSquare.
 Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(30, 2, 0.3, 0.01) {
   embedding_client =
       n_.serviceClient<GetPointCloudEmbedding>("embed_point_cloud");
@@ -466,7 +502,7 @@ LCConstraint Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
  * Applies the CSM transformation to each
  * of the closest poses in A to those in B.
  */
-bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
+bool Solver::AddColinearConstraints(const LCConstraint& constraint) {
   if (constraint.line_a_poses.size() == 0 ||
       constraint.line_b_poses.size() == 0) {
     return false;
@@ -511,19 +547,19 @@ bool Solver::AddCollinearConstraints(const LCConstraint& constraint) {
 #endif
     // Then this was a badly chosen LC, let's not continue with it
     // TODO figure out if short circuiting in the middle of this loop is OK
-    if (trans_prob_pair.first < config_.CONFIG_csm_score_threshold) {
-#if DEBUG
-      std::cout << "Failed to find valid transformation for pose, got score: "
-                << trans_prob_pair.first << std::endl;
-#endif
-      return false;
-    }
+    // Doesn't work for hallways as there is a lot of possible transformations.
+    //    if (trans_prob_pair.first < config_.CONFIG_csm_score_threshold) {
+    //#if DEBUG
+    //      std::cout << "Failed to find valid transformation for pose, got
+    //      score: "
+    //                << trans_prob_pair.first << std::endl;
+    //#endif
+    //      continue;
+    //    }
 
     auto closest_pose_arr = solution_[closest_pose].pose;
-    solution_[pose_a.node_idx].pose[0] +=
-        (closest_pose_arr[0] - pose_a_sol_pose[0]) + trans.first.x();
-    solution_[pose_a.node_idx].pose[1] +=
-        (closest_pose_arr[1] - pose_a_sol_pose[1]) + trans.first.y();
+    solution_[pose_a.node_idx].pose[0] = closest_pose_arr[0] + trans.first.x();
+    solution_[pose_a.node_idx].pose[1] = closest_pose_arr[1] + trans.first.y();
     solution_[pose_a.node_idx].pose[2] += trans.second;
   }
   loop_closure_constraints_.push_back(constraint);
@@ -555,7 +591,7 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   std::cout << "Found " << collinear_constraint.line_b_poses.size()
             << " poses for the second line." << std::endl;
   vis_callback_->AddConstraint(collinear_constraint);
-  AddCollinearConstraints(collinear_constraint);
+  AddColinearConstraints(collinear_constraint);
   for (int i = 0; i < 5; i++) {
     vis_callback_->PubVisualization();
     sleep(1);
@@ -715,19 +751,22 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
           math_util::DegToRad(90));
   auto trans = trans_prob_pair.second;
   double difference_from_solution[3];
-  std::cout << "Pose A: " << param_block_a[0] << " " << param_block_a[1] << " " << param_block_a[2] << std::endl;
-  std::cout << "Pose B: " << param_block_b[0] << " " << param_block_b[1] << " " << param_block_b[2] << std::endl;
+  std::cout << "Pose A: " << param_block_a[0] << " " << param_block_a[1] << " "
+            << param_block_a[2] << std::endl;
+  std::cout << "Pose B: " << param_block_b[0] << " " << param_block_b[1] << " "
+            << param_block_b[2] << std::endl;
   std::cout << "Raw CSM Translation: " << std::endl << trans.first << std::endl;
   std::cout << "Raw CSM Rotation: " << trans.second << std::endl;
   // TODO: Trying Raw CSM as it makes more sense.
-  difference_from_solution[0] = param_block_a[0] - (param_block_b[0] + trans.first.x());
-  difference_from_solution[1] = param_block_a[1] - (param_block_b[1] + trans.first.y());
-  difference_from_solution[2] = param_block_a[2] - (param_block_b[2] + trans.second);
+  difference_from_solution[0] =
+      param_block_a[0] - (param_block_b[0] + trans.first.x());
+  difference_from_solution[1] =
+      param_block_a[1] - (param_block_b[1] + trans.first.y());
+  difference_from_solution[2] =
+      param_block_a[2] - (param_block_b[2] + trans.second);
   std::cout << "CSM Found Difference from Solution: " << std::endl
-                                        << difference_from_solution[0] << " "
-                                        << difference_from_solution[1] << " "
-                                        << difference_from_solution[2] << " "
-                                        << std::endl;
+            << difference_from_solution[0] << " " << difference_from_solution[1]
+            << " " << difference_from_solution[2] << " " << std::endl;
   Eigen::Vector3d vec = Eigen::Map<Eigen::Vector3d>(difference_from_solution);
   Eigen::Matrix3d cov = Eigen::Map<Eigen::Matrix3d>(covariance_ab);
   std::cout << "residuals:\n" << vec << std::endl;
@@ -791,7 +830,8 @@ bool Solver::SimilarScans(const uint64_t node_a, const uint64_t node_b,
   CHECK_GE(certainty, 0.0);
   // Add the LC residuals.
   vector<ResidualDesc> lc_res_desc = AddLCResiduals(node_a, node_b);
-  double chi_num = GetChiSquareCost(std::min(node_a, node_b), std::max(node_a, node_b));
+  double chi_num =
+      GetChiSquareCost(std::min(node_a, node_b), std::max(node_a, node_b));
   std::cout << "chinum: " << chi_num << std::endl;
   RemoveResiduals(lc_res_desc);
   if (chi_num < 0 || !ceres::IsFinite(chi_num)) {
@@ -853,7 +893,7 @@ bool Solver::AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
   LCPose pose_b(key_frame_b.node_idx, vector<Vector2f>());
   constraint.line_a_poses.push_back(pose_a);
   constraint.line_b_poses.push_back(pose_b);
-  return AddCollinearConstraints(constraint);
+  return AddColinearConstraints(constraint);
 }
 
 void Solver::LCKeyframes(LearnedKeyframe& key_frame_a,
