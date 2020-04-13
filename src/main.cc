@@ -30,6 +30,8 @@ CONFIG_STRING(lidar_topic, "lidar_topic");
 CONFIG_STRING(odom_topic, "odom_topic");
 CONFIG_STRING(hitl_lc_topic, "hitl_lc_topic");
 
+DEFINE_string(config_file, "", "The path to the config file to use.");
+
 static bool asking_for_input = true;
 
 SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
@@ -120,10 +122,14 @@ void LearnedLoopClosure(SLAMProblem2D& slam_problem, Solver& solver) {
 int main(int argc, char** argv) {
   google::InitGoogleLogging(*argv);
   google::ParseCommandLineFlags(&argc, &argv, false);
-  config_reader::ConfigReader reader({"config/lgrc_bag_config.lua"});
+  if (FLAGS_config_file.compare("") == 0) {
+    printf("Must specify a config file!\n");
+    exit(1);
+  }
+  config_reader::ConfigReader reader({FLAGS_config_file});
   if (CONFIG_bag_path.compare("") == 0) {
     printf("Must specify an input bag!\n");
-    exit(0);
+    exit(1);
   }
   ros::init(argc, argv, "lidar_slam");
   ros::NodeHandle n;

@@ -407,7 +407,8 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
   return solution_;
 }
 
-Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(30, 2, 0.3, 0.03) {
+//TODO: Upped the Scanmatcher resolution to 0.01 for ChiSquare.
+Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(30, 2, 0.3, 0.01) {
   embedding_client =
       n_.serviceClient<GetPointCloudEmbedding>("embed_point_cloud");
 }
@@ -703,15 +704,6 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
   double covariance_ab[3 * 3];
   CHECK(covariance.GetCovarianceBlock(param_block_a, param_block_b,
                                       covariance_ab));
-  // Now we need the difference between the poses in the solution.
-  // Specifically, it is the difference to transform b to a.
-  // Because this is how CSM will calculate it later.
-  // Important note, CSM calculates relative transform of b to a, not the other
-  // way around.
-  double difference_in_poses[3];
-  difference_in_poses[0] = param_block_a[0] - param_block_b[0];
-  difference_in_poses[1] = param_block_a[1] - param_block_b[1];
-  difference_in_poses[2] = param_block_a[2] - param_block_b[2];
   // Now get the expected transformation from CSM.
   // TODO: Should we be restricting by rotation here?
   std::cout << "Running CSM" << std::endl;
@@ -722,29 +714,25 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
           solution_[node_a].pose[2], solution_[node_b].pose[2],
           math_util::DegToRad(90));
   auto trans = trans_prob_pair.second;
-  double difference_from_csm[3];
-  std::cout << "Raw CSM Translation " << std::endl << trans.first << std::endl;
+  double difference_from_solution[3];
+  std::cout << "Pose A: " << param_block_a[0] << " " << param_block_a[1] << " " << param_block_a[2] << std::endl;
+  std::cout << "Pose B: " << param_block_b[0] << " " << param_block_b[1] << " " << param_block_b[2] << std::endl;
+  std::cout << "Raw CSM Translation: " << std::endl << trans.first << std::endl;
+  std::cout << "Raw CSM Rotation: " << trans.second << std::endl;
   // TODO: Trying Raw CSM as it makes more sense.
-  difference_from_csm[0] = trans.first.x();
-  difference_from_csm[1] = trans.first.y();
-  difference_from_csm[2] = trans.second;
-  std::cout << "CSM Found Difference: " << difference_from_csm[0] << " "
-                                        << difference_from_csm[1] << " "
-                                        << difference_from_csm[2] << " "
+  difference_from_solution[0] = param_block_a[0] - (param_block_b[0] + trans.first.x());
+  difference_from_solution[1] = param_block_a[1] - (param_block_b[1] + trans.first.y());
+  difference_from_solution[2] = param_block_a[2] - (param_block_b[2] + trans.second);
+  std::cout << "CSM Found Difference from Solution: " << std::endl
+                                        << difference_from_solution[0] << " "
+                                        << difference_from_solution[1] << " "
+                                        << difference_from_solution[2] << " "
                                         << std::endl;
-  std::cout << "Difference from Solution: " << difference_in_poses[0] << " "
-                                            << difference_in_poses[1] << " "
-                                            << difference_in_poses[2] << " "
-                                            << std::endl;
-  double difference_pred_exp[3];
-  difference_pred_exp[0] = difference_in_poses[0] - difference_from_csm[0];
-  difference_pred_exp[1] = difference_in_poses[1] - difference_from_csm[1];
-  difference_pred_exp[2] = difference_in_poses[2] - difference_from_csm[2];
-  Eigen::Vector3d vec = Eigen::Map<Eigen::Vector3d>(difference_pred_exp);
+  Eigen::Vector3d vec = Eigen::Map<Eigen::Vector3d>(difference_from_solution);
   Eigen::Matrix3d cov = Eigen::Map<Eigen::Matrix3d>(covariance_ab);
   std::cout << "residuals:\n" << vec << std::endl;
   std::cout << "covariance:\n" << cov << std::endl;
-  double cost = (vec.transpose() * cov.inverse() * vec);
+  double cost = (vec.transpose() * cov * vec);
   return cost;
 }
 
@@ -803,7 +791,7 @@ bool Solver::SimilarScans(const uint64_t node_a, const uint64_t node_b,
   CHECK_GE(certainty, 0.0);
   // Add the LC residuals.
   vector<ResidualDesc> lc_res_desc = AddLCResiduals(node_a, node_b);
-  double chi_num = GetChiSquareCost(node_a, node_b);
+  double chi_num = GetChiSquareCost(std::min(node_a, node_b), std::max(node_a, node_b));
   std::cout << "chinum: " << chi_num << std::endl;
   RemoveResiduals(lc_res_desc);
   if (chi_num < 0 || !ceres::IsFinite(chi_num)) {
@@ -812,6 +800,7 @@ bool Solver::SimilarScans(const uint64_t node_a, const uint64_t node_b,
   chi_squared dist(3);
   double upper_critical_value = quantile(complement(dist, certainty));
   std::cout << "Boundary: " << upper_critical_value << std::endl;
+  // Upper Critical Value so must be less than to accept (i.e. are similar).
   return chi_num < upper_critical_value;
 }
 
