@@ -32,7 +32,6 @@ class DifferentialOdometryTracking {
   DifferentialOdometryTracking(SlamTypeBuilderConfig config)
       : config_(config) {}
   void OdometryCallback(lidar_slam::CobotOdometryMsg& odometry);
-  OdometryFactor2D GetOdomFactor(uint64_t pose_id);
   RobotPose2D GetPose();
   bool ReadyForLidar() {
     return pending_rotation_ >= config_.CONFIG_rotation_change ||
@@ -42,7 +41,6 @@ class DifferentialOdometryTracking {
     total_translation = Vector2f(0, 0);
     total_rotation = 0.0f;
   }
-
  private:
   SlamTypeBuilderConfig config_;
   bool odom_initialized_ = false;
@@ -58,19 +56,19 @@ class AbsoluteOdometryTracking {
  public:
   AbsoluteOdometryTracking(SlamTypeBuilderConfig config) : config_(config) {}
   void OdometryCallback(nav_msgs::Odometry& odometry);
-  OdometryFactor2D GetOdomFactor(uint64_t pose_id);
   RobotPose2D GetPose();
   bool ReadyForLidar() {
-    float d_angle = math_util::AngleDiff(last_odom_angle_, odom_angle_);
-    float d_trans = (odom_translation_ - last_odom_translation_).norm();
-    return d_angle >= config_.CONFIG_rotation_change ||
-           d_trans >= config_.CONFIG_translation_change;
+    return pending_rotation_ >= config_.CONFIG_rotation_change ||
+           pending_translation_.norm() >= config_.CONFIG_translation_change;
   }
   void ResetInits() {
     init_odom_angle_ = odom_angle_;
     init_odom_translation_ = odom_translation_;
+    pending_translation_ = Vector2f(0, 0);
+    pending_rotation_ = 0.0f;
+    last_odom_angle_ = init_odom_angle_;
+    last_odom_translation_ = init_odom_translation_;
   }
-
  private:
   SlamTypeBuilderConfig config_;
   bool odom_initialized_ = false;
@@ -78,8 +76,16 @@ class AbsoluteOdometryTracking {
   float init_odom_angle_ = 0;
   Eigen::Vector2f odom_translation_ = Vector2f(0, 0);
   float odom_angle_ = 0;
+  Eigen::Vector2f pending_translation_ = Vector2f(0, 0);
+  float pending_rotation_ = 0.0;
+  // This is the real translation since the last GetPose.
+  // It includes the init_odom_translation_ in it.
   Eigen::Vector2f last_odom_translation_ = Vector2f(0, 0);
   float last_odom_angle_ = 0;
+  // This is the translation in the visualization window. It has been zeroed,
+  // and starts from the origin.
+  Eigen::Vector2f adjusted_last_translation_ = Vector2f(0, 0);
+  float adjusted_last_rotation_ = 0.0f;
 };
 
 class SLAMTypeBuilder {

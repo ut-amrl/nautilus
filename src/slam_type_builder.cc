@@ -128,17 +128,26 @@ void AbsoluteOdometryTracking::OdometryCallback(nav_msgs::Odometry& odometry) {
     odom_initialized_ = true;
   }
   odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
-  odom_translation_ =
-      Vector2f(odometry.pose.pose.position.x, odometry.pose.pose.position.y);
+  pending_rotation_ = odom_angle_ - last_odom_angle_;
+  odom_translation_ = Vector2f(odometry.pose.pose.position.x, odometry.pose.pose.position.y);
+  pending_translation_ = Vector2f(odometry.pose.pose.position.x, odometry.pose.pose.position.y) - last_odom_translation_;
 }
 
 RobotPose2D AbsoluteOdometryTracking::GetPose() {
   // TODO: Fix the poor starting odometry bug.
-  Vector2f translation = odom_translation_ - init_odom_translation_;
-  double angle = odom_angle_ - init_odom_angle_;
+  Vector2f total_translation = adjusted_last_translation_;
+  float total_rotation = adjusted_last_rotation_;
+  // We multiply by the total rotation because this translation
+  // is in the context of the last robots position's frame.
+  total_translation += Rotation2Df(-init_odom_angle_) * pending_translation_;
+  total_rotation = math_util::angle_mod(total_rotation + pending_rotation_);
+  pending_translation_ = Vector2f(0, 0);
+  pending_rotation_ = 0.0;
   last_odom_angle_ = odom_angle_;
   last_odom_translation_ = odom_translation_;
-  return RobotPose2D(translation, angle);
+  adjusted_last_translation_ = total_translation;
+  adjusted_last_rotation_ = total_rotation;
+  return RobotPose2D(total_translation, total_rotation);
 }
 
 bool SLAMTypeBuilder::Done() {

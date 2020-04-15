@@ -3,4 +3,4 @@ bag_path="data/00010_2019-Timestamps-Correct.bag"
 lidar_topic="/velodyne_2dscan_high_beams"
 odom_topic="/odometry/filtered"
 auto_lc=false
-pose_number=30
+pose_number=450

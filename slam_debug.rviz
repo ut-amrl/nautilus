@@ -7,6 +7,7 @@ Panels:
         - /Global Options1
         - /Status1
         - /PointCloud21
+        - /PointCloud23
         - /Marker4
         - /Covariance1
         - /Marker5
@@ -142,7 +143,7 @@ Visualization Manager:
       Axis: Z
       Channel Name: intensity
       Class: rviz/PointCloud2
-      Color: 252; 175; 62
+      Color: 32; 74; 135
       Color Transformer: FlatColor
       Decay Time: 0
       Enabled: true
@@ -172,21 +173,21 @@ Visualization Manager:
       Axis: Z
       Channel Name: intensity
       Class: rviz/PointCloud2
-      Color: 255; 255; 255
-      Color Transformer: ""
+      Color: 204; 0; 0
+      Color Transformer: FlatColor
       Decay Time: 0
       Enabled: true
       Invert Rainbow: false
-      Max Color: 255; 255; 255
+      Max Color: 164; 0; 0
       Max Intensity: 4096
       Min Color: 0; 0; 0
       Min Intensity: 0
       Name: PointCloud2
-      Position Transformer: ""
+      Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.009999999776482582
+      Size (m): 0.10000000149011612
       Style: Flat Squares
       Topic: /hitl_poses_line_b
       Unreliable: false
@@ -345,25 +346,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/ThirdPersonFollower
-      Distance: 43.15552520751953
+      Distance: 7.965352535247803
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 7.859322547912598
-        Y: -9.400376319885254
-        Z: 6.382929132087156e-5
+        X: 15.952516555786133
+        Y: -0.5369824171066284
+        Z: 6.970244430704042e-5
       Focal Shape Fixed Size: false
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.2747974395751953
+      Pitch: 1.3202030658721924
       Target Frame: <Fixed Frame>
       Value: ThirdPersonFollower (rviz)
-      Yaw: 4.282208442687988
+      Yaw: 4.665773868560791
     Saved: ~
 Window Geometry:
   Displays:
