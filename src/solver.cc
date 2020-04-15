@@ -375,8 +375,6 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
   options.linear_solver_type = ceres::SPARSE_SCHUR;
   options.minimizer_progress_to_stdout = false;
   options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
-  vis_callback_ = std::unique_ptr<VisualizationCallback>(
-      new VisualizationCallback(problem_, &solution_, keyframes_, n_));
   options.callbacks.push_back(vis_callback_.get());
   double difference = 0;
   double last_difference = 0;
@@ -399,7 +397,7 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
       for (size_t node_i_index = 0; node_i_index < problem_.nodes.size();
            node_i_index++) {
         std::mutex problem_mutex;
-#pragma omp parallel for
+        #pragma omp parallel for
         for (size_t node_j_index =
                  std::max((int64_t)(node_i_index)-window_size, 0l);
              node_j_index < node_i_index; node_j_index++) {
@@ -447,6 +445,7 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
 Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(30, 2, 0.3, 0.01) {
   embedding_client =
       n_.serviceClient<GetPointCloudEmbedding>("embed_point_cloud");
+  vis_callback_ = std::unique_ptr<VisualizationCallback>(new VisualizationCallback(keyframes_, n_));
 }
 
 /*
@@ -591,12 +590,12 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   std::cout << "Found " << collinear_constraint.line_b_poses.size()
             << " poses for the second line." << std::endl;
   vis_callback_->AddConstraint(collinear_constraint);
-  AddColinearConstraints(collinear_constraint);
   for (int i = 0; i < 5; i++) {
     vis_callback_->PubVisualization();
     sleep(1);
   }
-  vis_callback_->PubConstraintVisualization();
+  AddColinearConstraints(collinear_constraint);
+  vis_callback_->PubVisualization();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
   // TODO: Find a better way to set these up.
@@ -755,6 +754,9 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
             << param_block_a[2] << std::endl;
   std::cout << "Pose B: " << param_block_b[0] << " " << param_block_b[1] << " "
             << param_block_b[2] << std::endl;
+  std::cout << "Difference from poses: " << param_block_a[0] - param_block_b[0] << " "
+                                         << param_block_a[1] - param_block_b[1] << " "
+                                         << param_block_a[2] - param_block_b[2] << std::endl;
   std::cout << "Raw CSM Translation: " << std::endl << trans.first << std::endl;
   std::cout << "Raw CSM Rotation: " << trans.second << std::endl;
   // TODO: Trying Raw CSM as it makes more sense.
@@ -771,7 +773,7 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
   Eigen::Matrix3d cov = Eigen::Map<Eigen::Matrix3d>(covariance_ab);
   std::cout << "residuals:\n" << vec << std::endl;
   std::cout << "covariance:\n" << cov << std::endl;
-  double cost = (vec.transpose() * cov * vec);
+  double cost = (vec.transpose() * cov.inverse() * vec);
   return cost;
 }
 
@@ -852,12 +854,14 @@ void Solver::AddSLAMNodeOdom(SLAMNode2D& node,
   initial_odometry_factors.push_back(odom_factor_to_node);
   SLAMNodeSolution2D sol_node(node);
   solution_.push_back(sol_node);
+  vis_callback_->UpdateProblemAndSolution(node, &solution_, odom_factor_to_node);
 }
 
 void Solver::AddSlamNode(SLAMNode2D& node) {
   problem_.nodes.push_back(node);
   SLAMNodeSolution2D sol_node(node);
   solution_.push_back(sol_node);
+  vis_callback_->UpdateProblemAndSolution(node, &solution_);
 }
 
 Eigen::Matrix<double, 32, 1> Solver::GetEmbedding(SLAMNode2D& node) {
