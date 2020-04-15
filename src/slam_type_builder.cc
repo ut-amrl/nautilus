@@ -129,8 +129,11 @@ void AbsoluteOdometryTracking::OdometryCallback(nav_msgs::Odometry& odometry) {
   }
   odom_angle_ = ZRadiansFromQuaterion(odometry.pose.pose.orientation);
   pending_rotation_ = odom_angle_ - last_odom_angle_;
-  odom_translation_ = Vector2f(odometry.pose.pose.position.x, odometry.pose.pose.position.y);
-  pending_translation_ = Vector2f(odometry.pose.pose.position.x, odometry.pose.pose.position.y) - last_odom_translation_;
+  odom_translation_ =
+      Vector2f(odometry.pose.pose.position.x, odometry.pose.pose.position.y);
+  pending_translation_ =
+      Vector2f(odometry.pose.pose.position.x, odometry.pose.pose.position.y) -
+      last_odom_translation_;
 }
 
 RobotPose2D AbsoluteOdometryTracking::GetPose() {

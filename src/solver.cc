@@ -397,7 +397,7 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
       for (size_t node_i_index = 0; node_i_index < problem_.nodes.size();
            node_i_index++) {
         std::mutex problem_mutex;
-        #pragma omp parallel for
+#pragma omp parallel for
         for (size_t node_j_index =
                  std::max((int64_t)(node_i_index)-window_size, 0l);
              node_j_index < node_i_index; node_j_index++) {
@@ -445,7 +445,8 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
 Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(30, 2, 0.3, 0.01) {
   embedding_client =
       n_.serviceClient<GetPointCloudEmbedding>("embed_point_cloud");
-  vis_callback_ = std::unique_ptr<VisualizationCallback>(new VisualizationCallback(keyframes_, n_));
+  vis_callback_ = std::unique_ptr<VisualizationCallback>(
+      new VisualizationCallback(keyframes_, n_));
 }
 
 /*
@@ -754,9 +755,9 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
             << param_block_a[2] << std::endl;
   std::cout << "Pose B: " << param_block_b[0] << " " << param_block_b[1] << " "
             << param_block_b[2] << std::endl;
-  std::cout << "Difference from poses: " << param_block_a[0] - param_block_b[0] << " "
-                                         << param_block_a[1] - param_block_b[1] << " "
-                                         << param_block_a[2] - param_block_b[2] << std::endl;
+  std::cout << "Difference from poses: " << param_block_a[0] - param_block_b[0]
+            << " " << param_block_a[1] - param_block_b[1] << " "
+            << param_block_a[2] - param_block_b[2] << std::endl;
   std::cout << "Raw CSM Translation: " << std::endl << trans.first << std::endl;
   std::cout << "Raw CSM Rotation: " << trans.second << std::endl;
   // TODO: Trying Raw CSM as it makes more sense.
@@ -854,7 +855,8 @@ void Solver::AddSLAMNodeOdom(SLAMNode2D& node,
   initial_odometry_factors.push_back(odom_factor_to_node);
   SLAMNodeSolution2D sol_node(node);
   solution_.push_back(sol_node);
-  vis_callback_->UpdateProblemAndSolution(node, &solution_, odom_factor_to_node);
+  vis_callback_->UpdateProblemAndSolution(node, &solution_,
+                                          odom_factor_to_node);
 }
 
 void Solver::AddSlamNode(SLAMNode2D& node) {

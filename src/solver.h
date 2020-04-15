@@ -316,7 +316,7 @@ class VisualizationCallback : public ceres::IterationCallback {
         pointcloud_helpers::PublishPointcloud(line_a_poses, pose_a_point_marker,
                                               constraint_a_pose_pub);
         pointcloud_helpers::PublishPointcloud(line_b_poses, pose_b_point_marker,
-                                             constraint_b_pose_pub);
+                                              constraint_b_pose_pub);
         pointcloud_helpers::PublishPointcloud(a_points, a_points_marker,
                                               point_a_pub);
         pointcloud_helpers::PublishPointcloud(b_points, b_points_marker,
@@ -415,7 +415,8 @@ class VisualizationCallback : public ceres::IterationCallback {
   void UpdateProblemAndSolution(SLAMNode2D& new_node,
                                 vector<SLAMNodeSolution2D>* new_solution,
                                 OdometryFactor2D& new_odom_factor) {
-    CHECK_EQ(new_node.node_idx, (*new_solution)[new_solution->size() - 1].node_idx);
+    CHECK_EQ(new_node.node_idx,
+             (*new_solution)[new_solution->size() - 1].node_idx);
     CHECK_EQ(new_node.node_idx, new_odom_factor.pose_j);
     problem.nodes.push_back(new_node);
     problem.odometry_factors.push_back(new_odom_factor);
@@ -425,7 +426,8 @@ class VisualizationCallback : public ceres::IterationCallback {
 
   void UpdateProblemAndSolution(SLAMNode2D& new_node,
                                 vector<SLAMNodeSolution2D>* new_solution) {
-    CHECK_EQ(new_node.node_idx, (*new_solution)[new_solution->size() - 1].node_idx);
+    CHECK_EQ(new_node.node_idx,
+             (*new_solution)[new_solution->size() - 1].node_idx);
     problem.nodes.push_back(new_node);
     solution = new_solution;
     CHECK_EQ(solution->size(), problem.nodes.size());

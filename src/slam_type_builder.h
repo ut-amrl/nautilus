@@ -41,6 +41,7 @@ class DifferentialOdometryTracking {
     total_translation = Vector2f(0, 0);
     total_rotation = 0.0f;
   }
+
  private:
   SlamTypeBuilderConfig config_;
   bool odom_initialized_ = false;
@@ -69,6 +70,7 @@ class AbsoluteOdometryTracking {
     last_odom_angle_ = init_odom_angle_;
     last_odom_translation_ = init_odom_translation_;
   }
+
  private:
   SlamTypeBuilderConfig config_;
   bool odom_initialized_ = false;
