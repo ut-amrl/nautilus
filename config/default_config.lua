@@ -68,6 +68,17 @@ lidar_constraint_amount=10
 -- as the same point during ICL / ICP.
 outlier_threshold=0.25
 
+-- Translational and Rotational standard deviation, proportional to the translational and rotational change.
+-- See these slides for more information:
+-- https://docs.google.com/presentation/d/1BNHQwS6eHec8QiOcSBBNpA3mrDqHAYvrXJGju4lLUjU/edit#slide=id.g80de3824c7_0_308
+-- Scaling factors used in calculation.
+translation_scaling_1 = 1 / 10
+translation_scaling_2 = 1 / 10
+rotation_scaling_1 = 1 / 20
+rotation_scaling_2 = 1 / 20
+translation_standard_deviation = translation_scaling_1 * translation_change_for_lidar + rotation_scaling_1 * rotation_change_for_lidar
+rotation_standard_deviation = translation_scaling_2 * translation_change_for_lidar + rotation_scaling_2 * rotation_change_for_lidar
+
 --[[ HITL LC Variables ]]--
 
 -- HITL LC topic, tools that send HitlSlamInputMsg publish on this topic.

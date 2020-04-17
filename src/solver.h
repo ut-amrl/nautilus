@@ -489,6 +489,8 @@ struct SolverConfig {
                 "local_uncertainty_scale_threshold");
   CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
   CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
+  CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
+  CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
 
   SolverConfig() {
     std::cout << "Solver Waiting..." << std::endl;
@@ -531,6 +533,7 @@ class Solver {
                                      const uint64_t node_b);
   vector<ResidualDesc> AddLCResiduals(const uint64_t node_a,
                                       const uint64_t node_b);
+  void AddHITLResiduals(ceres::Problem* problem);
   void RemoveResiduals(vector<ResidualDesc> descs);
   void AddKeyframe(SLAMNode2D& node);
   Eigen::Matrix<double, 32, 1> GetEmbedding(SLAMNode2D& node);
@@ -549,6 +552,7 @@ class Solver {
   vector<SLAMNodeSolution2D> solution_;
   ros::NodeHandle n_;
   vector<LCConstraint> loop_closure_constraints_;
+  vector<LCConstraint> hitl_constraints_;
   std::unique_ptr<VisualizationCallback> vis_callback_ = nullptr;
   vector<LearnedKeyframe> keyframes_;
   ros::ServiceClient embedding_client;

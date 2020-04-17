@@ -428,6 +428,7 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
         }
       }
       difference += AddLidarResidualsForLC(*ceres_information.problem);
+      AddHITLResiduals(ceres_information.problem.get());
       // AddCollinearResiduals(&ceres_problem);
       ceres::Solve(options, ceres_information.problem.get(), &summary);
     } while (abs(difference - last_difference) >
@@ -452,6 +453,45 @@ Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(30, 2, 0.3, 0.01) {
 /*
  * Methods relevant to HITL loop closure.
  */
+
+struct PointToLineResidual {
+  template <typename T>
+  bool operator()(const T* pose, const T* line_pose, T* residuals) const {
+    typedef Eigen::Matrix<T, 2, 1> Vector2T;
+    typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
+    const Affine2T pose_to_world = PoseArrayToAffine(&pose[2], &pose[0]);
+    const Affine2T line_to_world =
+        PoseArrayToAffine(&line_pose[2], &line_pose[0]);
+    Vector2T line_start = line_to_world * line_segment_.start.cast<T>();
+    Vector2T line_end = line_to_world * line_segment_.end.cast<T>();
+    const LineSegment<T> TransformedLineSegment(line_start, line_end);
+#pragma omp parallel for default(none) shared(residuals)
+    for (size_t index = 0; index < points_.size(); index++) {
+      Vector2T pointT = points_[index].cast<T>();
+      // Transform source_point into the frame of the line
+      pointT = pose_to_world * pointT;
+      T dist_along_normal =
+          DistanceToLineSegment(pointT, TransformedLineSegment);
+      residuals[index] = dist_along_normal;
+    }
+    return true;
+  }
+
+  PointToLineResidual(const LineSegment<float>& line_segment,
+                      const vector<Vector2f> points)
+      : line_segment_(line_segment), points_(points) {}
+
+  static AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC, 3, 3>*
+  create(const LineSegment<float>& line_segment,
+         const vector<Vector2f> points) {
+    PointToLineResidual* res = new PointToLineResidual(line_segment, points);
+    return new AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC, 3, 3>(
+        res, points.size());
+  }
+
+  const LineSegment<float> line_segment_;
+  const vector<Vector2f> points_;
+};
 
 vector<LineSegment<float>> LineSegmentsFromHitlMsg(
     const HitlSlamInputMsg& msg) {
@@ -496,6 +536,25 @@ LCConstraint Solver::GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg) {
     }
   }
   return hitl_constraint;
+}
+
+void Solver::AddHITLResiduals(ceres::Problem* problem) {
+  for (LCConstraint& constraint : hitl_constraints_) {
+    for (const LCPose& a_pose : constraint.line_a_poses) {
+      const vector<Vector2f>& pointcloud_a = a_pose.points_on_feature;
+      CHECK_LT(a_pose.node_idx, solution_.size());
+      problem->AddResidualBlock(
+          PointToLineResidual::create(constraint.line_a, pointcloud_a), NULL,
+          solution_[a_pose.node_idx].pose, constraint.chosen_line_pose);
+    }
+    for (const LCPose& b_pose : constraint.line_b_poses) {
+      const vector<Vector2f>& pointcloud_b = b_pose.points_on_feature;
+      CHECK_LT(b_pose.node_idx, solution_.size());
+      problem->AddResidualBlock(
+          PointToLineResidual::create(constraint.line_a, pointcloud_b), NULL,
+          solution_[b_pose.node_idx].pose, constraint.chosen_line_pose);
+    }
+  }
 }
 
 /*
@@ -585,23 +644,25 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   problem_.odometry_factors = GetSolvedOdomFactors();
   const HitlSlamInputMsg hitl_msg = *hitl_ptr;
   // Get the poses that belong to this input.
-  const LCConstraint collinear_constraint = GetRelevantPosesForHITL(hitl_msg);
-  std::cout << "Found " << collinear_constraint.line_a_poses.size()
+  const LCConstraint colinear_constraint = GetRelevantPosesForHITL(hitl_msg);
+  std::cout << "Found " << colinear_constraint.line_a_poses.size()
             << " poses for the first line." << std::endl;
-  std::cout << "Found " << collinear_constraint.line_b_poses.size()
+  std::cout << "Found " << colinear_constraint.line_b_poses.size()
             << " poses for the second line." << std::endl;
-  vis_callback_->AddConstraint(collinear_constraint);
+  vis_callback_->AddConstraint(colinear_constraint);
   for (int i = 0; i < 5; i++) {
     vis_callback_->PubVisualization();
     sleep(1);
   }
-  AddColinearConstraints(collinear_constraint);
+  hitl_constraints_.push_back(colinear_constraint);
   vis_callback_->PubVisualization();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
   // TODO: Find a better way to set these up.
   //  translation_weight_ = lc_translation_weight_;
   //  rotation_weight_ = lc_rotation_weight_;
+  SolveSLAM();
+  problem_.odometry_factors = initial_odometry_factors;
   SolveSLAM();
   std::cout << "Waiting for Loop Closure input." << std::endl;
 }
