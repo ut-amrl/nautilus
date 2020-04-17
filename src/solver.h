@@ -40,21 +40,9 @@ using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
 using std::vector;
 
-template <typename T>
-Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(const T* rotation,
-                                                        const T* translation) {
-  typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
-  typedef Eigen::Rotation2D<T> Rotation2DT;
-  typedef Eigen::Translation<T, 2> Translation2T;
-  Affine2T affine = Translation2T(translation[0], translation[1]) *
-                    Rotation2DT(rotation[0]).toRotationMatrix();
-  return affine;
-}
-
-template <typename T>
-Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(const T* pose_array) {
-  return PoseArrayToAffine(&pose_array[2], &pose_array[0]);
-}
+/*----------------------------------------------------------------------------*
+ *                            DATA STRUCTURES                                 |
+ *----------------------------------------------------------------------------*/
 
 template <typename T>
 struct LineSegment {
@@ -85,33 +73,6 @@ struct LearnedKeyframe {
                   const size_t node_idx)
       : embedding(embedding), node_idx(node_idx) {}
 };
-
-// Returns if val is between a and b.
-template <typename T>
-bool IsBetween(const T& val, const T& a, const T& b) {
-  return (val >= a && val <= b) || (val >= b && val <= a);
-}
-
-template <typename T>
-T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
-                        const LineSegment<T>& line_seg) {
-  typedef Eigen::Matrix<T, 2, 1> Vector2T;
-  // Line segment is parametric, with a start point and end.
-  // Parameterized by t between 0 and 1.
-  // We can get the point on the line by projecting the start -> point onto
-  // this line.
-  Eigen::Hyperplane<T, 2> line =
-      Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.end);
-  Vector2T point_on_line = line.projection(point);
-  if (IsBetween(point_on_line.x(), line_seg.start.x(), line_seg.end.x()) &&
-      IsBetween(point_on_line.y(), line_seg.start.y(), line_seg.end.y())) {
-    return line.absDistance(point);
-  }
-
-  T dist_to_start = (point - line_seg.start).norm();
-  T dist_to_endpoint = (point - line_seg.end).norm();
-  return std::min<T>(dist_to_start, dist_to_endpoint);
-}
 
 struct LCPose {
   uint64_t node_idx;
@@ -174,6 +135,122 @@ struct CeresInformation {
   std::shared_ptr<ceres::Problem> problem;
   vector<ResidualDesc> res_descriptors;
 };
+
+struct SolverConfig {
+  CONFIG_DOUBLE(translation_weight, "translation_weight");
+  CONFIG_DOUBLE(rotation_weight, "rotation_weight");
+  CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
+  CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
+  CONFIG_STRING(pose_output_file, "pose_output_file");
+  CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
+  CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
+  CONFIG_DOUBLE(embedding_threshold, "embedding_threshold");
+  CONFIG_INT(lidar_constraint_amount, "lidar_constraint_amount");
+  CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
+  CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
+  CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
+  CONFIG_DOUBLE(local_uncertainty_condition_threshold,
+                "local_uncertainty_condition_threshold");
+  CONFIG_DOUBLE(local_uncertainty_scale_threshold,
+                "local_uncertainty_scale_threshold");
+  CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
+  CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
+  CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
+  CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
+
+  SolverConfig() {
+    std::cout << "Solver Waiting..." << std::endl;
+    config_reader::WaitForInit();
+    std::cout << "--- Done Waiting ---" << std::endl;
+  }
+};
+
+/*----------------------------------------------------------------------------*
+ *                            HELPER FUNCTIONS                                |
+ *----------------------------------------------------------------------------*/
+
+template <typename T>
+Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(const T* rotation,
+                                                        const T* translation) {
+  typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
+  typedef Eigen::Rotation2D<T> Rotation2DT;
+  typedef Eigen::Translation<T, 2> Translation2T;
+  Affine2T affine = Translation2T(translation[0], translation[1]) *
+                    Rotation2DT(rotation[0]).toRotationMatrix();
+  return affine;
+}
+
+template <typename T>
+Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(const T* pose_array) {
+  return PoseArrayToAffine(&pose_array[2], &pose_array[0]);
+}
+
+inline double DistBetween(double pose_a[3], double pose_b[3]) {
+  Vector2f pose_a_pos(pose_a[0], pose_a[1]);
+  Vector2f pose_b_pos(pose_b[0], pose_b[1]);
+  return (pose_a_pos - pose_b_pos).norm();
+}
+
+inline vector<Vector2f> TransformPointcloud(double* pose,
+                                            const vector<Vector2f> pointcloud) {
+  vector<Vector2f> pcloud;
+  Eigen::Affine2f trans = PoseArrayToAffine(&pose[2], &pose[0]).cast<float>();
+  for (const Vector2f& p : pointcloud) {
+    pcloud.push_back(trans * p);
+  }
+  return pcloud;
+}
+
+// Reference from:
+// https://github.com/SoylentGraham/libmv/blob/master/src/libmv/simple_pipeline/bundle.cc
+inline Eigen::MatrixXd CRSToEigen(const ceres::CRSMatrix& crs_matrix) {
+  Eigen::MatrixXd matrix(crs_matrix.num_rows, crs_matrix.num_cols);
+  matrix.setZero();
+  // Row contains starting position of this row in the cols.
+  for (int row = 0; row < crs_matrix.num_rows; row++) {
+    int row_start = crs_matrix.rows[row];
+    int row_end = crs_matrix.rows[row + 1];
+    // Cols contains the non-zero elements column numbers.
+    for (int col = row_start; col < row_end; col++) {
+      int col_num = crs_matrix.cols[col];
+      // Value is contained in the same index of the values array.
+      double value = crs_matrix.values[col];
+      matrix(row, col_num) = value;
+    }
+  }
+  return matrix;
+}
+
+// Returns if val is between a and b.
+template <typename T>
+bool IsBetween(const T& val, const T& a, const T& b) {
+  return (val >= a && val <= b) || (val >= b && val <= a);
+}
+
+template <typename T>
+T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
+                        const LineSegment<T>& line_seg) {
+  typedef Eigen::Matrix<T, 2, 1> Vector2T;
+  // Line segment is parametric, with a start point and end.
+  // Parameterized by t between 0 and 1.
+  // We can get the point on the line by projecting the start -> point onto
+  // this line.
+  Eigen::Hyperplane<T, 2> line =
+      Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.end);
+  Vector2T point_on_line = line.projection(point);
+  if (IsBetween(point_on_line.x(), line_seg.start.x(), line_seg.end.x()) &&
+      IsBetween(point_on_line.y(), line_seg.start.y(), line_seg.end.y())) {
+    return line.absDistance(point);
+  }
+
+  T dist_to_start = (point - line_seg.start).norm();
+  T dist_to_endpoint = (point - line_seg.end).norm();
+  return std::min<T>(dist_to_start, dist_to_endpoint);
+}
+
+/*----------------------------------------------------------------------------*
+ *                           DEBUGGING OUTPUT                                 |
+ *----------------------------------------------------------------------------*/
 
 class VisualizationCallback : public ceres::IterationCallback {
  public:
@@ -470,34 +547,9 @@ class VisualizationCallback : public ceres::IterationCallback {
   vector<LCConstraint> constraints;
 };
 
-struct SolverConfig {
-  CONFIG_DOUBLE(translation_weight, "translation_weight");
-  CONFIG_DOUBLE(rotation_weight, "rotation_weight");
-  CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
-  CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
-  CONFIG_STRING(pose_output_file, "pose_output_file");
-  CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
-  CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
-  CONFIG_DOUBLE(embedding_threshold, "embedding_threshold");
-  CONFIG_INT(lidar_constraint_amount, "lidar_constraint_amount");
-  CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
-  CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
-  CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
-  CONFIG_DOUBLE(local_uncertainty_condition_threshold,
-                "local_uncertainty_condition_threshold");
-  CONFIG_DOUBLE(local_uncertainty_scale_threshold,
-                "local_uncertainty_scale_threshold");
-  CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
-  CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
-  CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
-  CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
-
-  SolverConfig() {
-    std::cout << "Solver Waiting..." << std::endl;
-    config_reader::WaitForInit();
-    std::cout << "--- Done Waiting ---" << std::endl;
-  }
-};
+/*----------------------------------------------------------------------------*
+ *                                SOLVER                                      |
+ *----------------------------------------------------------------------------*/
 
 class Solver {
  public:

@@ -6,4 +6,4 @@ auto_lc=false
 pose_number=150
 differential_odom=true
 rotation_weight=2
-translation_weight=2
+translation_weight=3
