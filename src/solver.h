@@ -79,11 +79,11 @@ struct LineSegment {
 };
 
 struct LearnedKeyframe {
-    Eigen::Matrix<double, 32, 1> embedding;
+    std::vector<Eigen::Matrix<double, 32, 1>> embedding_history(5);
     const size_t node_idx;
-    LearnedKeyframe(const Eigen::Matrix<double, 32, 1>& embedding,
+    LearnedKeyframe(const std::vector<Eigen::Matrix<double, 32, 1>>& embedding_history,
                     const size_t node_idx) :
-                        embedding(embedding),
+                        embedding_history(embedding_history),
                         node_idx(node_idx) {}
 };
 
@@ -504,6 +504,7 @@ class Solver {
  private:
   void AddKeyframe(SLAMNode2D& node);
   Eigen::Matrix<double, 32, 1> GetEmbedding(SLAMNode2D& node);
+  std::vector<Eigen::Matrix<double, 32, 1>> Solver::GetEmbeddingHistory(SLAMNode2D& node);
   bool AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
                             LearnedKeyframe& key_frame_b);
   void LCKeyframes(LearnedKeyframe& key_frame_a,

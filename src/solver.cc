@@ -812,8 +812,16 @@ Eigen::Matrix<double, 32, 1> Solver::GetEmbedding(SLAMNode2D& node) {
   }
 }
 
+std::vector<Eigen::Matrix<double, 32, 1>> Solver::GetEmbeddingHistory(SLAMNode2D& node) {
+  std::vector<Eigen::Matrix<double, 32, 1>> history;
+  for(unsigned int idx = node.node_idx; idx > std::max(0, node.node_idx - 5); idx--) {
+    history.push_back(GetEmbedding(problem_.nodes[idx]));
+  }
+  return history;
+}
+
 void Solver::AddKeyframe(SLAMNode2D& node) {
-  Eigen::Matrix<double, 32, 1> embedding = GetEmbedding(node);
+  Eigen::Matrix<double, 32, 1> embedding = GetEmbeddingHistory(node);
   node.is_keyframe = true;
   keyframes.emplace_back(embedding, node.node_idx);
 }
@@ -858,6 +866,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   #if DEBUG
   printf("Processing node %lu\n", node.node_idx);
   #endif
+
   // First node is always a keyframe for simplicity.
   if (keyframes.size() == 0) {
     AddKeyframe(node);
@@ -920,11 +929,13 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   for (size_t match_index : matches) {
     LearnedKeyframe matched_keyframe = keyframes[match_index];
     #if DEBUG
-    printf("EMBEDDINGS\n");
-    std::cout << matched_keyframe.embedding.transpose() << std::endl;
-    std::cout << new_keyframe.embedding.transpose() << std::endl;
+    printf("COMPARING EMBEDDING HISTORIES\n");
     #endif
-    double distance = (matched_keyframe.embedding - new_keyframe.embedding).norm();
+    double distance = 0.0;
+    for(int i = matched_keyframe.embedding_history.size(); i > 0; i--) {
+      distance += (new_keyframe.embedding_history[i] - matched_keyframe.embedding_history[i]).norm();
+    }
+    
     if (distance < closest_distance) {
       #if DEBUG
       printf("New minimum embedding distance found: %f\n", distance);
