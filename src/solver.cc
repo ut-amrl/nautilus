@@ -819,16 +819,16 @@ Eigen::Matrix<double, 32, 1> Solver::GetEmbedding(SLAMNode2D& node) {
 
 std::vector<Eigen::Matrix<double, 32, 1>> Solver::GetEmbeddingHistory(SLAMNode2D& node) {
   std::vector<Eigen::Matrix<double, 32, 1>> history;
-  for(unsigned int idx = node.node_idx; idx > std::max(0, node.node_idx - 5); idx--) {
+  for(int idx = node.node_idx; idx > std::max(0, (int)node.node_idx - 5); idx--) {
     history.push_back(GetEmbedding(problem_.nodes[idx]));
   }
   return history;
 }
 
 void Solver::AddKeyframe(SLAMNode2D& node) {
-  Eigen::Matrix<double, 32, 1> embedding = GetEmbeddingHistory(node);
+  std::vector<Eigen::Matrix<double, 32, 1>> hist = GetEmbeddingHistory(node);
   node.is_keyframe = true;
-  keyframes.emplace_back(embedding, node.node_idx);
+  keyframes.emplace_back(hist, node.node_idx);
 }
 
 bool Solver::AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
@@ -955,6 +955,8 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     for(int i = matched_keyframe.embedding_history.size(); i > 0; i--) {
       distance += (new_keyframe.embedding_history[i] - matched_keyframe.embedding_history[i]).norm();
     }
+    // We want an average distance, not that it should matter much
+    distance = distance / matched_keyframe.embedding_history.size();
     
     if (distance < closest_distance) {
       #if DEBUG
