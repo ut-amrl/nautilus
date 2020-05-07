@@ -526,6 +526,7 @@ class Solver {
   double stopping_accuracy_;
   double max_lidar_range_;
   bool auto_lc_enabled_;
+  ros::Publisher lc_poses_pub;
   std::string pose_output_file_;
   SLAMProblem2D problem_;
   vector<OdometryFactor2D> initial_odometry_factors;
