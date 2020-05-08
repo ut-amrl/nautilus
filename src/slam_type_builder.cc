@@ -50,7 +50,7 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
       (range_cutoff_ <= 0)? laser_scan.range_max : range_cutoff_;
     std::vector<Vector2f> pointcloud =
       LaserScanToPointCloud(laser_scan, max_range, true);
-    LidarFactor lidar_factor(pose_id_, pointcloud);
+    LidarFactor lidar_factor(pose_id_, laser_scan, pointcloud);
     RobotPose2D pose;
     if (differential_odom_) {
       pose = diff_tracking.GetPose();

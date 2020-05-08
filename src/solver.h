@@ -79,11 +79,8 @@ struct LineSegment {
 };
 
 struct LearnedKeyframe {
-    std::vector<Eigen::Matrix<double, 32, 1>> embedding_history;
     const size_t node_idx;
-    LearnedKeyframe(const std::vector<Eigen::Matrix<double, 32, 1>>& embedding_history,
-                    const size_t node_idx) :
-                        embedding_history(embedding_history),
+    LearnedKeyframe(const size_t node_idx) :
                         node_idx(node_idx) {}
 };
 
@@ -503,8 +500,7 @@ class Solver {
 
  private:
   void AddKeyframe(SLAMNode2D& node);
-  Eigen::Matrix<double, 32, 1> GetEmbedding(SLAMNode2D& node);
-  std::vector<Eigen::Matrix<double, 32, 1>> GetEmbeddingHistory(SLAMNode2D& node);
+  float GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe);
   bool AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
                             LearnedKeyframe& key_frame_b);
   void LCKeyframes(LearnedKeyframe& key_frame_a,
@@ -535,7 +531,7 @@ class Solver {
   vector<LCConstraint> loop_closure_constraints_;
   std::unique_ptr<VisualizationCallback> vis_callback_ = nullptr;
   vector<LearnedKeyframe> keyframes;
-  ros::ServiceClient embedding_client;
+  ros::ServiceClient matcher_client;
   CorrelativeScanMatcher scan_matcher;
 };
 

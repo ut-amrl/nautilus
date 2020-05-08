@@ -19,7 +19,7 @@
 #include "./gui_helpers.h"
 #include "lidar_slam/WriteMsg.h"
 #include "./line_extraction.h"
-#include "point_cloud_embedder/GetPointCloudEmbedding.h"
+#include "laser_scan_matcher/MatchLaserScans.h"
 
 #include <DEBUG.h>
 
@@ -28,11 +28,11 @@
 #define OUTLIER_THRESHOLD 0.25
 #define HITL_LINE_WIDTH 0.05
 #define HITL_POSE_POINT_THRESHOLD 10
-#define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 9.5
+#define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 12.5
 #define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .35
 #define LOCAL_UNCERTAINTY_PREV_SCANS 2
 #define CSM_SCORE_THRESHOLD -3.5
-#define DEBUG false
+#define DEBUG true
 
 using std::vector;
 using slam_types::OdometryFactor2D;
@@ -470,8 +470,8 @@ Solver::Solver(double translation_weight,
                pose_output_file_(pose_output_file),
                n_(n),
                scan_matcher(10, 3, 0.3, 0.03) {
-  embedding_client =
-    n_.serviceClient<point_cloud_embedder::GetPointCloudEmbedding>("embed_point_cloud");
+  matcher_client =
+    n_.serviceClient<laser_scan_matcher::MatchLaserScans>("match_laser_scans");
   lc_poses_pub = n_.advertise<visualization_msgs::Marker>("/lc_poses", 10);
 }
 
@@ -802,33 +802,24 @@ void Solver::AddSlamNode(SLAMNode2D& node) {
   }
 }
 
-Eigen::Matrix<double, 32, 1> Solver::GetEmbedding(SLAMNode2D& node) {
-  point_cloud_embedder::GetPointCloudEmbedding srv;
+float Solver::GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe) {
+  laser_scan_matcher::MatchLaserScans srv;
   // TODO actually pass the range down here
   // std::vector<Eigen::Vector2f> normalized = pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud, max_lidar_range_); 
-  srv.request.cloud = EigenPointcloudToRos(node.lidar_factor.pointcloud);
-  if (embedding_client.call(srv)) {
-    vector<float> embedding = srv.response.embedding;
-    Eigen::Matrix<float, 32, 1> mat(embedding.data());
-    return mat.cast<double>();
+  srv.request.scan = node.lidar_factor.scan;
+  srv.request.alt_scan = keyframe.lidar_factor.scan;
+  if (matcher_client.call(srv)) {
+    float score = srv.response.match_prob;
+    return score;
   } else {
-    std::cerr << "Failed to call service embed_point_cloud" << std::endl;
+    std::cerr << "Failed to call service match_laser_scans" << std::endl;
     exit(100);
   }
 }
 
-std::vector<Eigen::Matrix<double, 32, 1>> Solver::GetEmbeddingHistory(SLAMNode2D& node) {
-  std::vector<Eigen::Matrix<double, 32, 1>> history;
-  for(int idx = node.node_idx; idx > std::max(0, (int)node.node_idx - 5); idx--) {
-    history.push_back(GetEmbedding(problem_.nodes[idx]));
-  }
-  return history;
-}
-
 void Solver::AddKeyframe(SLAMNode2D& node) {
-  std::vector<Eigen::Matrix<double, 32, 1>> hist = GetEmbeddingHistory(node);
   node.is_keyframe = true;
-  keyframes.emplace_back(hist, node.node_idx);
+  keyframes.emplace_back(node.node_idx);
 }
 
 bool Solver::AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
@@ -945,41 +936,25 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // Find the closest embedding in all the matches to our new keyframe.
   LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
   int64_t closest_index = -1;
-  double closest_distance = INFINITY;
+  float best_match = 0.0;
+
   for (size_t match_index : matches) {
     LearnedKeyframe matched_keyframe = keyframes[match_index];
-    #if DEBUG
-    printf("COMPARING EMBEDDING HISTORIES\n");
-    #endif
-    double distance = 0.0;
-    for(int i = matched_keyframe.embedding_history.size(); i > 0; i--) {
-      distance += (new_keyframe.embedding_history[i] - matched_keyframe.embedding_history[i]).norm();
-    }
-    // We want an average distance, not that it should matter much
-    distance = distance / matched_keyframe.embedding_history.size();
-    
-    if (distance < closest_distance) {
+
+    float match_score = GetMatchScores(problem_.nodes[new_keyframe.node_idx], problem_.nodes[matched_keyframe.node_idx]);
+
+    if (match_score > best_match) {
       #if DEBUG
-      printf("New minimum embedding distance found: %f\n", distance);
+      printf("New best match found: %f\n", match_score);
       #endif
-      closest_distance = distance;
+      best_match = match_score;
       closest_index = match_index;
     }
   }
-  if (closest_index == -1 || closest_distance > EMBEDDING_THRESHOLD) {
-    #if DEBUG
-    printf("Out of %lu keyframes, none were sufficient for LC\n",
-            matches.size());
-    #endif
-    return;
-  }
-  printf("Found match of pose %lu to %lu\n",
-          keyframes[closest_index].node_idx,
-          new_keyframe.node_idx);
+  
 
   #if DEBUG
   printf("timestamps: %f, %f\n\n", problem_.nodes[keyframes[closest_index].node_idx].timestamp, problem_.nodes[new_keyframe.node_idx].timestamp);
-  printf("This is a LC by embedding distance!\n\n\n\n");
   // Step 6: Perform loop closure between these poses if there is a LC.
   std::vector<WrappedImage> images = {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud), DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
   WaitForClose(images);
@@ -989,6 +964,17 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   width = furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
   SaveImage("LC_2", GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud, width, 0.03));
   #endif
+
+  if (closest_index == -1 || best_match < 0.75) {
+    #if DEBUG
+    printf("Out of %lu keyframes, none were sufficient for LC\n",
+            matches.size());
+    #endif
+    return;
+  }
+  printf("Found match of pose %lu to %lu\n",
+          keyframes[closest_index].node_idx,
+          new_keyframe.node_idx);
 
   LearnedKeyframe best_match_keyframe = keyframes[closest_index];
   LCKeyframes(best_match_keyframe, new_keyframe);
