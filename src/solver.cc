@@ -31,7 +31,7 @@
 #define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 12.5
 #define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .35
 #define LOCAL_UNCERTAINTY_PREV_SCANS 2
-#define CSM_SCORE_THRESHOLD -3.5
+#define CSM_SCORE_THRESHOLD -4.0
 #define DEBUG true
 
 using std::vector;
@@ -886,12 +886,17 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
 
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
   // basically is it different than the last keyframe.
-  if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
-                   node.node_idx,
-                   0.95)) {
-    #if DEBUG
-    printf("Not a keyframe from chi^2\n");
-    #endif
+  // if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
+  //                  node.node_idx,
+  //                  0.65)) {
+  //   #if DEBUG
+  //   printf("Not a keyframe from chi^2\n");
+  //   #endif
+  //   return;
+  // }
+
+  // Temporary hack to exmulate chiSquare
+  if (node.node_idx - keyframes[keyframes.size() - 1].node_idx < 7) {
     return;
   }
 
@@ -952,6 +957,13 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     }
   }
   
+  if (closest_index == -1 || best_match < 0.35) {
+    #if DEBUG
+    printf("Out of %lu keyframes, none were sufficient for LC\n",
+            matches.size());
+    #endif
+    return;
+  }
 
   #if DEBUG
   printf("timestamps: %f, %f\n\n", problem_.nodes[keyframes[closest_index].node_idx].timestamp, problem_.nodes[new_keyframe.node_idx].timestamp);
@@ -960,18 +972,11 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   WaitForClose(images);
 
   double width = furthest_point(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud).norm();
-  SaveImage("LC_1", GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud, width, 0.03));
+  SaveImage("LC_1.png", GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud, width, 0.03));
   width = furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
-  SaveImage("LC_2", GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud, width, 0.03));
+  SaveImage("LC_2.png", GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud, width, 0.03));
   #endif
 
-  if (closest_index == -1 || best_match < 0.75) {
-    #if DEBUG
-    printf("Out of %lu keyframes, none were sufficient for LC\n",
-            matches.size());
-    #endif
-    return;
-  }
   printf("Found match of pose %lu to %lu\n",
           keyframes[closest_index].node_idx,
           new_keyframe.node_idx);
