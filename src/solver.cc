@@ -199,7 +199,7 @@ struct PointToLineResidual {
 // TODO: Upped the Scanmatcher resolution to 0.01 for ChiSquare.
 Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(30, 2, 0.3, 0.01) {
   matcher_client =
-      n_.serviceClient<MatchLaserScans>("laser_scan_matcher");
+      n_.serviceClient<MatchLaserScans>("match_laser_scans");
   vis_callback_ = std::unique_ptr<VisualizationCallback>(
       new VisualizationCallback(keyframes, n_));
 }
@@ -863,14 +863,22 @@ bool Solver::SimilarScans(const uint64_t node_a, const uint64_t node_b,
 }
 
 float Solver::GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe) {
+  // TODO figure out how this even happened
+  if (node.node_idx == keyframe.node_idx) {
+    return 0.0f;
+  }
+
   laser_scan_matcher::MatchLaserScans srv;
   srv.request.scan = node.lidar_factor.scan;
   srv.request.alt_scan = keyframe.lidar_factor.scan;
-  if (matcher_client.call(srv)) {
+
+  printf("COMPARING %ld %ld\n", node.node_idx, keyframe.node_idx);
+  int response = matcher_client.call(srv);
+  if (response) {
     float score = srv.response.match_prob;
     return score;
   } else {
-    std::cerr << "Failed to call service match_laser_scans" << std::endl;
+    std::cerr << "Failed to call service match_laser_scans: "  << response  << "\t" << srv.response.match_prob << std::endl;
     exit(100);
   }
 }
@@ -931,108 +939,102 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   }
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
   // basically is it different than the last keyframe.
-  if (!SimilarScans(keyframes[keyframes.size() - 1].node_idx, node.node_idx,
-                    0.95)) {
-#if DEBUG
-    printf("Not a keyframe from chi^2\n");
-#endif
+  //   if (!SimilarScans(keyframes[keyframes.size() - 1].node_idx, node.node_idx,
+  //                     0.95)) {
+  // #if DEBUG
+  //     printf("Not a keyframe from chi^2\n");
+  // #endif
+  //     return;
+  //   }
+
+  // Weak emulation of chi^2....only add keyframes after enough time has passed
+  if (node.node_idx - keyframes[keyframes.size() - 1].node_idx < 10) {
     return;
   }
-  std::cout << "Adding Keyframe # " << keyframes.size() << std::endl;
-  AddKeyframe(node);
-  std::cout << "Finished adding Keyframe # " << keyframes.size() - 1 << std::endl;
-  return;  // TODO: Remove, using for testing ChiSquared
 
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
-  //  auto uncertainty = GetLocalUncertainty(node.node_idx);
-  //  if (uncertainty.first >
-  //  config_.CONFIG_local_uncertainty_condition_threshold ||
-  //      uncertainty.second > config_.CONFIG_local_uncertainty_scale_threshold)
-  //      {
-  //    #if DEBUG
-  //    printf("Not a keyframe due to lack of local invariance... Computed
-  //    Uncertainty: %f, %f\n",
-  //            uncertainty.first,
-  //            uncertainty.second);
-  //    #endif
-  //    return;
-  //  }
-  //
-  //  // Step 3: If past both of these steps then save as keyframe. Send it to
-  //  the
-  //  // embedding network and store that embedding as well.
-  //  #if DEBUG
-  //  printf("Adding Keyframe\n");
-  //  //
-  //  WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
-  //  #endif
-  //  AddKeyframe(node);
-  //  // Step 4: Compare against all previous keyframes and see if there is a
-  //  match
-  //  // or is similar using Chi^2
-  //  vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
-  //  if (matches.size() == 0) {
-  //    #if DEBUG
-  //    printf("No match from chi^2\n");
-  //    #endif
-  //    return;
-  //  }
+  auto uncertainty = GetLocalUncertainty(node.node_idx);
+  if (uncertainty.first > config_.CONFIG_local_uncertainty_condition_threshold ||
+      uncertainty.second > config_.CONFIG_local_uncertainty_scale_threshold)
+      {
+    #if DEBUG
+    printf("Not a keyframe due to lack of local invariance... Computed Uncertainty: %f, %f\n",
+            uncertainty.first,
+            uncertainty.second);
+    #endif
+    return;
+  }
+  
+  #if DEBUG
+  std::cout << "Adding Keyframe # " << keyframes.size() << std::endl;
+  #endif
+  AddKeyframe(node);
+  // Step 4: Compare against all previous keyframes and see if there is a
+  // or is similar using Chi^2
+  // vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
+  // if (matches.size() == 0) {
+  //   #if DEBUG
+  //   printf("No match from chi^2\n");
+  //   #endif
+  //   return;
+  // }
   
   // Step 5: Compare the embeddings and see if there is a match as well.
   // Find the closest embedding in all the matches to our new keyframe.
-  // LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
-  // int64_t closest_index = -1;
-  // float best_match = 0.0;
+  LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
+  int64_t closest_index = -1;
+  float best_match = 0.0;
 
-  // for (size_t match_index : matches) {
-  //   LearnedKeyframe matched_keyframe = keyframes[match_index];
+  for (size_t match_index = 0; match_index < keyframes.size() - 1; match_index++) {
+    LearnedKeyframe matched_keyframe = keyframes[match_index];
+    float match_score = GetMatchScores(problem_.nodes[new_keyframe.node_idx], problem_.nodes[matched_keyframe.node_idx]);
 
-  //   float match_score = GetMatchScores(problem_.nodes[new_keyframe.node_idx], problem_.nodes[matched_keyframe.node_idx]);
-
-  //   if (match_score > best_match) {
-  //     #if DEBUG
-  //     printf("New best match found: %f\n", match_score);
-  //     #endif
-  //     best_match = match_score;
-  //     closest_index = match_index;
-  //   }
-  // }
+    if (match_score > best_match) {
+      #if DEBUG
+      printf("New best match found: %f\n", match_score);
+      #endif
+      best_match = match_score;
+      closest_index = match_index;
+    }
+  }
   
-  //  if (closest_index == -1 ||
-  //      best_match < best_thresh) {
-  //    #if DEBUG
-  //    printf("Out of %lu keyframes, none were sufficient for LC\n",
-  //            matches.size());
-  //    #endif
-  //    return;
-  //  }
-  //  #if DEBUG
-  //  printf("Found match of pose %lu to %lu\n",
-  //          keyframes[closest_index].node_idx,
-  //          new_keyframe.node_idx);
-  //  printf("timestamps: %f, %f\n\n",
-  //          problem_.nodes[keyframes[closest_index].node_idx].timestamp,
-  //          problem_.nodes[new_keyframe.node_idx].timestamp);
-  //  printf("This is a LC by embedding distance!\n\n\n\n");
-  //  // Step 6: Perform loop closure between these poses if there is a LC.
-  //  std::vector<WrappedImage> images =
-  //    {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud),
-  //     DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
-  //  WaitForClose(images);
-  //
-  //  double width =
-  //  furthest_point(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud).norm();
-  //  SaveImage("LC_1",
-  //  GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud,
-  //  width, 0.03)); width =
-  //  furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
-  //  SaveImage("LC_2",
-  //  GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud,
-  //  width, 0.03)); #endif
-  //
-  //  LearnedKeyframe best_match_keyframe = keyframes[closest_index];
-  //  LCKeyframes(best_match_keyframe, new_keyframe);
+  if (closest_index == -1 ||
+      best_match < config_.CONFIG_lc_match_threshold) {
+    #if DEBUG
+    printf("Out of %lu keyframes, none were sufficient for LC\n",
+            keyframes.size() - 1);
+    #endif
+    return;
+  }
+
+  printf("Found match of pose %lu to %lu\n",
+          keyframes[closest_index].node_idx,
+          new_keyframe.node_idx);
+  printf("timestamps: %f, %f\n\n",
+          problem_.nodes[keyframes[closest_index].node_idx].timestamp,
+          problem_.nodes[new_keyframe.node_idx].timestamp);
+  printf("This is a LC by key frame matcher!\n\n\n\n");
+  #if DEBUG
+  // Step 6: Perform loop closure between these poses if there is a LC.
+  std::vector<WrappedImage> images =
+    {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud),
+    DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
+  WaitForClose(images);
+
+  double width =
+  furthest_point(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud).norm();
+  SaveImage("LC_1",
+  GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud,
+  width, 0.03)); width =
+  furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
+  SaveImage("LC_2",
+  GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud,
+  width, 0.03));
+  #endif
+
+  LearnedKeyframe best_match_keyframe = keyframes[closest_index];
+  LCKeyframes(best_match_keyframe, new_keyframe);
 }
 
 /*----------------------------------------------------------------------------*

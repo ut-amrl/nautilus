@@ -109,8 +109,8 @@ local_uncertainty_scale_threshold=0.35
 -- The amount of previous scans to use for calculating local uncertainty.
 local_uncertainty_prev_scans=2
 
--- Embedding threshold used in automatic loop closure.
-embedding_threshold=8
+-- threshold used in automatic loop closure.
+lc_match_threshold=0.5
 
 --[[ Normal Computation Variables ]]--
 

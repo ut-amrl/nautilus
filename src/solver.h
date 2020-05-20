@@ -136,7 +136,7 @@ struct SolverConfig {
   CONFIG_STRING(pose_output_file, "pose_output_file");
   CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
   CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
-  CONFIG_DOUBLE(embedding_threshold, "embedding_threshold");
+  CONFIG_DOUBLE(lc_match_threshold, "lc_match_threshold");
   CONFIG_INT(lidar_constraint_amount, "lidar_constraint_amount");
   CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
   CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
