@@ -469,6 +469,7 @@ class Solver {
          double max_lidar_range,
          bool auto_lc_enabled,
          std::string pose_output_file,
+         std::string lc_output_dir,
          ros::NodeHandle& n);
   vector<SLAMNodeSolution2D> SolveSLAM();
   double GetPointCorrespondences(const SLAMProblem2D& problem,
@@ -524,6 +525,7 @@ class Solver {
   bool auto_lc_enabled_;
   ros::Publisher lc_poses_pub;
   std::string pose_output_file_;
+  std::string lc_output_dir_;
   SLAMProblem2D problem_;
   vector<OdometryFactor2D> initial_odometry_factors;
   vector<SLAMNodeSolution2D> solution_;

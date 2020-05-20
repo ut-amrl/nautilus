@@ -29,9 +29,10 @@
 #define HITL_LINE_WIDTH 0.05
 #define HITL_POSE_POINT_THRESHOLD 10
 #define LOCAL_UNCERTAINTY_CONDITION_THRESHOLD 12.5
-#define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .35
+#define LOCAL_UNCERTAINTY_SCALE_THRESHOLD .35 
 #define LOCAL_UNCERTAINTY_PREV_SCANS 2
 #define CSM_SCORE_THRESHOLD -4.0
+#define LC_MATCH_THRESHOLD 0.5
 #define DEBUG true
 
 using std::vector;
@@ -459,6 +460,7 @@ Solver::Solver(double translation_weight,
                double max_lidar_range,
                bool auto_lc_enabled,
                std::string pose_output_file,
+               std::string lc_output_dir,
                ros::NodeHandle& n) :
                translation_weight_(translation_weight),
                rotation_weight_(rotation_weight),
@@ -468,6 +470,7 @@ Solver::Solver(double translation_weight,
                max_lidar_range_(max_lidar_range),
                auto_lc_enabled_(auto_lc_enabled),
                pose_output_file_(pose_output_file),
+               lc_output_dir_(lc_output_dir),
                n_(n),
                scan_matcher(10, 3, 0.3, 0.03) {
   matcher_client =
@@ -878,9 +881,13 @@ vector<size_t> Solver::GetMatchingKeyframeIndices(size_t keyframe_index) {
 
 void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   printf("Processing node %lu\n", node.node_idx);
+  
+  double img_width = furthest_point(problem_.nodes[node.node_idx].lidar_factor.pointcloud).norm();
+
   // First node is always a keyframe for simplicity.
   if (keyframes.size() == 0) {
     AddKeyframe(node);
+    SaveImage(lc_output_dir_ + "/key_frame_" + std::to_string(node.node_idx) + ".png", GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud, img_width, 0.03));
     return;
   } 
 
@@ -912,6 +919,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD || uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
     #if DEBUG
     printf("Not a keyframe due to lack of local invariance...Computed Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
+    // SaveImage(lc_output_dir_ + "/rejected_uncertainty_" + std::to_string(node.node_idx) + ".png", GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud, img_width, 0.03));
     #endif
     return;
   }
@@ -920,7 +928,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // embedding network and store that embedding as well.
   #if DEBUG
   printf("Adding Keyframe\n");
-  // WaitForClose(DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud));
+  SaveImage(lc_output_dir_ + "/key_frame_" + std::to_string(node.node_idx) + ".png", GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud, img_width, 0.03));
   #endif
   AddKeyframe(node);
 
@@ -935,7 +943,6 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // }
   std::vector<int> matches(keyframes.size()-1);
   std::iota(matches.begin(), matches.end(), 0);
-
 
   // Step 5: Compare the embeddings and see if there is a match as well.
   // Find the closest embedding in all the matches to our new keyframe.
@@ -957,7 +964,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     }
   }
   
-  if (closest_index == -1 || best_match < 0.35) {
+  if (closest_index == -1 || best_match < LC_MATCH_THRESHOLD) {
     #if DEBUG
     printf("Out of %lu keyframes, none were sufficient for LC\n",
             matches.size());
@@ -967,20 +974,19 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
 
   #if DEBUG
   printf("timestamps: %f, %f\n\n", problem_.nodes[keyframes[closest_index].node_idx].timestamp, problem_.nodes[new_keyframe.node_idx].timestamp);
-  // Step 6: Perform loop closure between these poses if there is a LC.
-  std::vector<WrappedImage> images = {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud), DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
-  WaitForClose(images);
+  // std::vector<WrappedImage> images = {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud), DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
+  // WaitForClose(images);
 
-  double width = furthest_point(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud).norm();
-  SaveImage("LC_1.png", GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud, width, 0.03));
-  width = furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
-  SaveImage("LC_2.png", GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud, width, 0.03));
+  SaveImage(lc_output_dir_ + "/lc_match_" + std::to_string(new_keyframe.node_idx) + "_" + std::to_string(keyframes[closest_index].node_idx) + "_a.png", GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud, img_width, 0.03));
+  double key_img_width = furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
+  SaveImage(lc_output_dir_ + "/lc_match_" + std::to_string(new_keyframe.node_idx) + "_" + std::to_string(keyframes[closest_index].node_idx) + "_b.png", GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud, key_img_width, 0.03));
   #endif
 
   printf("Found match of pose %lu to %lu\n",
           keyframes[closest_index].node_idx,
           new_keyframe.node_idx);
 
+  // Step 6: Perform loop closure between these poses if there is a LC.
   LearnedKeyframe best_match_keyframe = keyframes[closest_index];
   LCKeyframes(best_match_keyframe, new_keyframe);
 }

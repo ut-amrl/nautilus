@@ -80,6 +80,10 @@ DEFINE_string(
     pose_output_file,
     "poses.txt",
     "The file to output the finalized poses into");
+DEFINE_string(
+    lc_output_dir,
+    "lc_outputs",
+    "The directory to output LC debugging images etc.");
 
 
 SLAMProblem2D ProcessBagFile(const char* bag_path,
@@ -185,6 +189,7 @@ int main(int argc, char** argv) {
                 FLAGS_max_lidar_range,
                 FLAGS_auto_lc,
                 FLAGS_pose_output_file,
+                FLAGS_lc_output_dir,
                 n);
   LearnedLoopClosure(slam_problem, solver);
   std::cout << "Waiting for Loop Closure input" << std::endl;
