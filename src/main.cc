@@ -112,7 +112,7 @@ void LearnedLoopClosure(SLAMProblem2D& slam_problem, Solver& solver) {
   // But only if automatic loop closure is enabled.
   if (CONFIG_auto_lc) {
     std::cout << "Automatically loop closing" << std::endl;
-    for (SLAMNode2D node : slam_problem.nodes) {
+    for (SLAMNode2D& node : slam_problem.nodes) {
       solver.CheckForLearnedLC(node);
     }
     solver.SolveSLAM();

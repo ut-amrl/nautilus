@@ -66,14 +66,6 @@ struct LineSegment {
   }
 };
 
-struct LearnedKeyframe {
-  Eigen::Matrix<double, 32, 1> embedding;
-  const size_t node_idx;
-  LearnedKeyframe(const Eigen::Matrix<double, 32, 1>& embedding,
-                  const size_t node_idx)
-      : embedding(embedding), node_idx(node_idx) {}
-};
-
 struct LCPose {
   uint64_t node_idx;
   vector<Vector2f> points_on_feature;
@@ -220,6 +212,11 @@ inline Eigen::MatrixXd CRSToEigen(const ceres::CRSMatrix& crs_matrix) {
   }
   return matrix;
 }
+struct LearnedKeyframe {
+    const size_t node_idx;
+    LearnedKeyframe(const size_t node_idx) :
+                        node_idx(node_idx) {}
+};
 
 // Returns if val is between a and b.
 template <typename T>
@@ -588,7 +585,7 @@ class Solver {
   void AddHITLResiduals(ceres::Problem* problem);
   void RemoveResiduals(vector<ResidualDesc> descs);
   void AddKeyframe(SLAMNode2D& node);
-  Eigen::Matrix<double, 32, 1> GetEmbedding(SLAMNode2D& node);
+  float GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe);
   bool AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
                             LearnedKeyframe& key_frame_b);
   void LCKeyframes(LearnedKeyframe& key_frame_a, LearnedKeyframe& key_frame_b);
@@ -606,8 +603,8 @@ class Solver {
   vector<LCConstraint> loop_closure_constraints_;
   vector<LCConstraint> hitl_constraints_;
   std::unique_ptr<VisualizationCallback> vis_callback_ = nullptr;
-  vector<LearnedKeyframe> keyframes_;
-  ros::ServiceClient embedding_client;
+  vector<LearnedKeyframe> keyframes;
+  ros::ServiceClient matcher_client;
   CorrelativeScanMatcher scan_matcher;
   CeresInformation ceres_information;
   SolverConfig config_;

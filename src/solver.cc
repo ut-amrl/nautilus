@@ -18,7 +18,7 @@
 #include "./math_util.h"
 #include "lidar_slam/HitlSlamInputMsg.h"
 #include "lidar_slam/WriteMsg.h"
-#include "point_cloud_embedder/GetPointCloudEmbedding.h"
+#include "laser_scan_matcher/MatchLaserScans.h"
 #include "timer.h"
 
 #include "./solver.h"
@@ -37,8 +37,7 @@ using lidar_slam::HitlSlamInputMsg;
 using lidar_slam::HitlSlamInputMsgConstPtr;
 using lidar_slam::WriteMsgConstPtr;
 using math_util::NormalsSimilar;
-using point_cloud_embedder::GetPointCloudEmbedding;
-using pointcloud_helpers::EigenPointcloudToRos;
+using laser_scan_matcher::MatchLaserScans;
 using slam_types::LidarFactor;
 using slam_types::OdometryFactor2D;
 using slam_types::SLAMNode2D;
@@ -199,10 +198,10 @@ struct PointToLineResidual {
  * information*/
 // TODO: Upped the Scanmatcher resolution to 0.01 for ChiSquare.
 Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(30, 2, 0.3, 0.01) {
-  embedding_client =
-      n_.serviceClient<GetPointCloudEmbedding>("embed_point_cloud");
+  matcher_client =
+      n_.serviceClient<MatchLaserScans>("laser_scan_matcher");
   vis_callback_ = std::unique_ptr<VisualizationCallback>(
-      new VisualizationCallback(keyframes_, n_));
+      new VisualizationCallback(keyframes, n_));
 }
 
 void Solver::AddSLAMNodeOdom(SLAMNode2D& node,
@@ -863,30 +862,22 @@ bool Solver::SimilarScans(const uint64_t node_a, const uint64_t node_b,
   return chi_num < upper_critical_value;
 }
 
-Eigen::Matrix<double, 32, 1> Solver::GetEmbedding(SLAMNode2D& node) {
-  point_cloud_embedder::GetPointCloudEmbedding srv;
-  // TODO actually pass the range down here
-  // std::vector<Eigen::Vector2f> normalized =
-  //   pointcloud_helpers::normalizePointCloud(node.lidar_factor.pointcloud,
-  //   config_.CONFIG_max_lidar_range);
-  srv.request.cloud = EigenPointcloudToRos(node.lidar_factor.pointcloud);
-  if (embedding_client.call(srv)) {
-    vector<float> embedding = srv.response.embedding;
-    Eigen::Matrix<float, 32, 1> mat(embedding.data());
-    return mat.cast<double>();
+float Solver::GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe) {
+  laser_scan_matcher::MatchLaserScans srv;
+  srv.request.scan = node.lidar_factor.scan;
+  srv.request.alt_scan = keyframe.lidar_factor.scan;
+  if (matcher_client.call(srv)) {
+    float score = srv.response.match_prob;
+    return score;
   } else {
-    std::cerr << "Failed to call service embed_point_cloud" << std::endl;
+    std::cerr << "Failed to call service match_laser_scans" << std::endl;
     exit(100);
   }
 }
 
 void Solver::AddKeyframe(SLAMNode2D& node) {
-  Eigen::Matrix<double, 32, 1> embedding = GetEmbedding(node);
   node.is_keyframe = true;
-  LearnedKeyframe kf(embedding, node.node_idx);
-  keyframes_.push_back(kf);
-  vis_callback_->AddKeyframe(kf);
-  vis_callback_->PubVisualization();
+  keyframes.emplace_back(node.node_idx);
 }
 
 bool Solver::AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
@@ -912,12 +903,12 @@ void Solver::LCKeyframes(LearnedKeyframe& key_frame_a,
 
 vector<size_t> Solver::GetMatchingKeyframeIndices(size_t keyframe_index) {
   vector<size_t> matches;
-  for (size_t i = 0; i < keyframes_.size(); i++) {
+  for (size_t i = 0; i < keyframes.size(); i++) {
     if (i == keyframe_index) {
       continue;
     }
-    if (SimilarScans(keyframes_[i].node_idx,
-                     keyframes_[keyframe_index].node_idx, 0.95)) {
+    if (SimilarScans(keyframes[i].node_idx,
+                     keyframes[keyframe_index].node_idx, 0.95)) {
       matches.push_back(i);
     }
   }
@@ -928,10 +919,11 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // TODO: Used to add first node as keyframe,
   // now its the 2nd node as the first is constant and therefore
   // has 0 covariance with anything else.
-  if (keyframes_.size() == 0 && problem_.nodes.size() > 1) {
+  printf("keyframes %ld node %ld\n", keyframes.size(), node.node_idx);
+  if (keyframes.size() == 0 && problem_.nodes.size() > 1) {
     AddKeyframe(problem_.nodes[1]);
     return;
-  } else if (keyframes_.size() == 0) {
+  } else if (keyframes.size() == 0) {
     // Keyframes is empty, but we don't have the 2nd node yet.
     // But we don't want to even check the 1st node, because
     // constant.
@@ -939,15 +931,16 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   }
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
   // basically is it different than the last keyframe.
-  if (!SimilarScans(keyframes_[keyframes_.size() - 1].node_idx, node.node_idx,
+  if (!SimilarScans(keyframes[keyframes.size() - 1].node_idx, node.node_idx,
                     0.95)) {
 #if DEBUG
     printf("Not a keyframe from chi^2\n");
 #endif
     return;
   }
-  std::cout << "Adding Keyframe # " << keyframes_.size() << std::endl;
+  std::cout << "Adding Keyframe # " << keyframes.size() << std::endl;
   AddKeyframe(node);
+  std::cout << "Finished adding Keyframe # " << keyframes.size() - 1 << std::endl;
   return;  // TODO: Remove, using for testing ChiSquared
 
   // Step 2: Check if this is a valid scan for loop closure by sub sampling from
@@ -985,30 +978,29 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   //    #endif
   //    return;
   //  }
-  //  // Step 5: Compare the embeddings and see if there is a match as well.
-  //  // Find the closest embedding in all the matches to our new keyframe.
-  //  LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
-  //  int64_t closest_index = -1;
-  //  double closest_distance = INFINITY;
-  //  for (size_t match_index : matches) {
-  //    LearnedKeyframe matched_keyframe = keyframes[match_index];
-  //    #if DEBUG
-  //    printf("EMBEDDINGS\n");
-  //    std::cout << matched_keyframe.embedding.transpose() << std::endl;
-  //    std::cout << new_keyframe.embedding.transpose() << std::endl;
-  //    #endif
-  //    double distance =
-  //      (matched_keyframe.embedding - new_keyframe.embedding).norm();
-  //    if (distance < closest_distance) {
-  //      #if DEBUG
-  //      printf("New minimum embedding distance found: %f\n", distance);
-  //      #endif
-  //      closest_distance = distance;
-  //      closest_index = match_index;
-  //    }
-  //  }
+  
+  // Step 5: Compare the embeddings and see if there is a match as well.
+  // Find the closest embedding in all the matches to our new keyframe.
+  // LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
+  // int64_t closest_index = -1;
+  // float best_match = 0.0;
+
+  // for (size_t match_index : matches) {
+  //   LearnedKeyframe matched_keyframe = keyframes[match_index];
+
+  //   float match_score = GetMatchScores(problem_.nodes[new_keyframe.node_idx], problem_.nodes[matched_keyframe.node_idx]);
+
+  //   if (match_score > best_match) {
+  //     #if DEBUG
+  //     printf("New best match found: %f\n", match_score);
+  //     #endif
+  //     best_match = match_score;
+  //     closest_index = match_index;
+  //   }
+  // }
+  
   //  if (closest_index == -1 ||
-  //      closest_distance > config_.CONFIG_embedding_threshold) {
+  //      best_match < best_thresh) {
   //    #if DEBUG
   //    printf("Out of %lu keyframes, none were sufficient for LC\n",
   //            matches.size());

@@ -42,8 +42,8 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
                            ? laser_scan.range_max
                            : config_.CONFIG_max_lidar_range;
     std::vector<Vector2f> pointcloud =
-        LaserScanToPointCloud(laser_scan, max_range);
-    LidarFactor lidar_factor(pose_id_, pointcloud);
+      LaserScanToPointCloud(laser_scan, max_range);
+    LidarFactor lidar_factor(pose_id_, laser_scan, pointcloud);
     RobotPose2D pose;
     // Reset the initial values for everything,
     // we should start at 0 for everything.

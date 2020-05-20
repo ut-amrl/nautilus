@@ -25,12 +25,11 @@ INCLUDE_DIRECTORIES(${OpenCV_INCLUDE_DIRS})
 FIND_PACKAGE(OpenMP REQUIRED)
 
 INCLUDE($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
-
 add_subdirectory(third_party)
 
 INCLUDE_DIRECTORIES(third_party/csm/src)
 INCLUDE_DIRECTORIES(third_party/vector_maps/src)
-INCLUDE_DIRECTORIES(third_party/learning-loop-closure/point_cloud_embedder/srv_gen/cpp/include)
+INCLUDE_DIRECTORIES(third_party/learning-loop-closure/laser_scan_matcher/srv_gen/cpp/include)
 INCLUDE_DIRECTORIES(third_party/config-reader/include)
 
 rosbuild_init()
