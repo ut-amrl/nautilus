@@ -887,7 +887,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // First node is always a keyframe for simplicity.
   if (keyframes.size() == 0) {
     AddKeyframe(node);
-    SaveImage(lc_output_dir_ + "/key_frame_" + std::to_string(node.node_idx) + ".png", GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud, img_width, 0.03));
+    SaveImage(lc_output_dir_ + "/key_frame_" + std::to_string(node.node_idx) + ".bmp", GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud, img_width, 0.03));
     return;
   } 
 
@@ -895,7 +895,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // basically is it different than the last keyframe.
   // if (SimilarScans(keyframes[keyframes.size() - 1].node_idx,
   //                  node.node_idx,
-  //                  0.65)) {
+  //                  0.98)) {
   //   #if DEBUG
   //   printf("Not a keyframe from chi^2\n");
   //   #endif
@@ -903,7 +903,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // }
 
   // Temporary hack to exmulate chiSquare
-  if (node.node_idx - keyframes[keyframes.size() - 1].node_idx < 7) {
+  if ((node.pose.loc - problem_.nodes[keyframes[keyframes.size() - 1].node_idx].pose.loc).norm() < 1.5 && node.node_idx - keyframes[keyframes.size() - 1].node_idx < 15) {
     return;
   }
 
@@ -919,7 +919,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   if (uncertainty.first > LOCAL_UNCERTAINTY_CONDITION_THRESHOLD || uncertainty.second > LOCAL_UNCERTAINTY_SCALE_THRESHOLD) {
     #if DEBUG
     printf("Not a keyframe due to lack of local invariance...Computed Uncertainty: %f, %f\n", uncertainty.first, uncertainty.second);
-    // SaveImage(lc_output_dir_ + "/rejected_uncertainty_" + std::to_string(node.node_idx) + ".png", GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud, img_width, 0.03));
+    // SaveImage(lc_output_dir_ + "/rejected_uncertainty_" + std::to_string(node.node_idx) + ".bmp", GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud, img_width, 0.03));
     #endif
     return;
   }
@@ -928,7 +928,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // embedding network and store that embedding as well.
   #if DEBUG
   printf("Adding Keyframe\n");
-  SaveImage(lc_output_dir_ + "/key_frame_" + std::to_string(node.node_idx) + ".png", GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud, img_width, 0.03));
+  SaveImage(lc_output_dir_ + "/key_frame_" + std::to_string(node.node_idx) + ".bmp", GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud, img_width, 0.03));
   #endif
   AddKeyframe(node);
 
@@ -976,10 +976,10 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   printf("timestamps: %f, %f\n\n", problem_.nodes[keyframes[closest_index].node_idx].timestamp, problem_.nodes[new_keyframe.node_idx].timestamp);
   // std::vector<WrappedImage> images = {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud), DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
   // WaitForClose(images);
-
-  SaveImage(lc_output_dir_ + "/lc_match_" + std::to_string(new_keyframe.node_idx) + "_" + std::to_string(keyframes[closest_index].node_idx) + "_a.png", GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud, img_width, 0.03));
-  double key_img_width = furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
-  SaveImage(lc_output_dir_ + "/lc_match_" + std::to_string(new_keyframe.node_idx) + "_" + std::to_string(keyframes[closest_index].node_idx) + "_b.png", GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud, key_img_width, 0.03));
+  std::ofstream outfile;
+  outfile.open(lc_output_dir_ + "/closures.txt", std::ios::out | std::ios::app );
+  outfile << "LC MATCH " <<  std::to_string(new_keyframe.node_idx) << " " << std::to_string(keyframes[closest_index].node_idx) << std::endl;
+  outfile.close();
   #endif
 
   printf("Found match of pose %lu to %lu\n",
