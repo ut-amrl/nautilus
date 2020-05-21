@@ -16,3 +16,5 @@ msg_gen/*
 Testing/*
 Testing
 map_lines.txt
+third_party/ceres
+third_party/eigen
