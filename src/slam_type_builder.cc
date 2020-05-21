@@ -41,8 +41,22 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
     double max_range = (config_.CONFIG_max_lidar_range <= 0)
                            ? laser_scan.range_max
                            : config_.CONFIG_max_lidar_range;
+
+    // TODO wrap in a config-based if
+    const size_t truncation_size = 55;
+    size_t num_ranges = (laser_scan.angle_max - laser_scan.angle_min) / laser_scan.angle_increment;
+    // printf("NUM ranges %ld\n", num_ranges);
+    
+    for(size_t i = 0; i < num_ranges; i++) {
+      if (i < truncation_size || i > num_ranges - truncation_size) {
+        laser_scan.ranges[i] = max_range + 1.0;
+      }
+    }
+
     std::vector<Vector2f> pointcloud =
       LaserScanToPointCloud(laser_scan, max_range);
+    // laser scan truncation
+
     LidarFactor lidar_factor(pose_id_, laser_scan, pointcloud);
     RobotPose2D pose;
     // Reset the initial values for everything,

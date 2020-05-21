@@ -85,7 +85,7 @@ rotation_standard_deviation = translation_scaling_2 * translation_change_for_lid
 hitl_lc_topic="/hitl_slam_input"
 
 -- Above this threshold and the CSM transformation is deemed successful.
-csm_score_threshold=-2.5
+csm_score_threshold=-3.5
 
 -- Points further than this will not count as falling on the HITL LC line.
 hitl_line_width=0.05
@@ -100,7 +100,7 @@ auto_lc=false
 
 -- All scans with local uncertainty less than this threshold are
 -- one step closer to being used for automatic lc.
-local_uncertainty_condition_threshold=9.5
+local_uncertainty_condition_threshold=12.5
 
 -- All scans with local uncertainty scale less than this threshold
 -- are one step closer to being used for automatic lc.
@@ -111,6 +111,15 @@ local_uncertainty_prev_scans=2
 
 -- threshold used in automatic loop closure.
 lc_match_threshold=0.5
+
+-- base max range to consider a loop closure
+lc_base_max_range = 3.0
+
+-- how much max range to consider a loop closure increases as nodes get more distant
+lc_max_range_scaling = 0.05
+
+-- used to dump images from auto-lc
+lc_debug_output_dir="auto_lc_debug"
 
 --[[ Normal Computation Variables ]]--
 

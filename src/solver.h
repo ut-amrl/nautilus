@@ -133,6 +133,9 @@ struct SolverConfig {
   CONFIG_DOUBLE(rotation_weight, "rotation_weight");
   CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
   CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
+  CONFIG_DOUBLE(lc_base_max_range, "lc_base_max_range");
+  CONFIG_DOUBLE(lc_max_range_scaling, "lc_max_range_scaling");
+  CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
   CONFIG_STRING(pose_output_file, "pose_output_file");
   CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
   CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
@@ -405,7 +408,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   void PubKeyframes() {
     vector<Vector2f> poses;
     for (LearnedKeyframe frame : keyframes) {
-      std::cout << "Frame #: " << frame.node_idx << std::endl;
+      // std::cout << "Frame #: " << frame.node_idx << std::endl;
       const double* pose_arr = (*solution)[frame.node_idx].pose;
       Vector2f pose_point(pose_arr[0], pose_arr[1]);
       poses.push_back(pose_point);

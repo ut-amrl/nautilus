@@ -705,14 +705,13 @@ bool Solver::AddColinearConstraints(const LCConstraint& constraint) {
     // Then this was a badly chosen LC, let's not continue with it
     // TODO figure out if short circuiting in the middle of this loop is OK
     // Doesn't work for hallways as there is a lot of possible transformations.
-    //    if (trans_prob_pair.first < config_.CONFIG_csm_score_threshold) {
-    //#if DEBUG
-    //      std::cout << "Failed to find valid transformation for pose, got
-    //      score: "
-    //                << trans_prob_pair.first << std::endl;
-    //#endif
-    //      continue;
-    //    }
+    if (trans_prob_pair.first < config_.CONFIG_csm_score_threshold) {
+      #if DEBUG
+      std::cout << "Failed to find valid transformation for pose, got score: "
+                << trans_prob_pair.first << std::endl;
+      #endif
+      continue;
+    }
 
     auto closest_pose_arr = solution_[closest_pose].pose;
     solution_[pose_a.node_idx].pose[0] = closest_pose_arr[0] + trans.first.x();
@@ -928,8 +927,13 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // now its the 2nd node as the first is constant and therefore
   // has 0 covariance with anything else.
   printf("keyframes %ld node %ld\n", keyframes.size(), node.node_idx);
+
+  double img_width = furthest_point(problem_.nodes[node.node_idx].lidar_factor.pointcloud).norm();
   if (keyframes.size() == 0 && problem_.nodes.size() > 1) {
     AddKeyframe(problem_.nodes[1]);
+    SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_1.bmp",
+    GetTable(problem_.nodes[1].lidar_factor.pointcloud,
+    img_width, 0.03));
     return;
   } else if (keyframes.size() == 0) {
     // Keyframes is empty, but we don't have the 2nd node yet.
@@ -970,6 +974,9 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   std::cout << "Adding Keyframe # " << keyframes.size() << std::endl;
   #endif
   AddKeyframe(node);
+  SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_" + std::to_string(node.node_idx) + ".bmp",
+  GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud,
+  img_width, 0.03));
   // Step 4: Compare against all previous keyframes and see if there is a
   // or is similar using Chi^2
   // vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
@@ -988,7 +995,13 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
 
   for (size_t match_index = 0; match_index < keyframes.size() - 1; match_index++) {
     LearnedKeyframe matched_keyframe = keyframes[match_index];
-    float match_score = GetMatchScores(problem_.nodes[new_keyframe.node_idx], problem_.nodes[matched_keyframe.node_idx]);
+    SLAMNode2D& keyframe_node = problem_.nodes[matched_keyframe.node_idx];
+    if ((node.pose.loc - keyframe_node.pose.loc).norm() > config_.CONFIG_lc_base_max_range + config_.CONFIG_lc_max_range_scaling * (node.node_idx - matched_keyframe.node_idx)) {
+      printf("Too far away, not considering LC between %ld and %ld\n", node.node_idx, matched_keyframe.node_idx);
+      continue;
+    }
+
+    float match_score = GetMatchScores(node, keyframe_node);
 
     if (match_score > best_match) {
       #if DEBUG
@@ -1015,22 +1028,28 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
           problem_.nodes[keyframes[closest_index].node_idx].timestamp,
           problem_.nodes[new_keyframe.node_idx].timestamp);
   printf("This is a LC by key frame matcher!\n\n\n\n");
+
+  std::cout << "Writing LC Info" << std::endl;
+  std::ofstream lc_output_file;
+  lc_output_file.open(config_.CONFIG_lc_debug_output_dir + "/lc_matches.txt", std::ios::app);
+  lc_output_file << "Loop Closed " << new_keyframe.node_idx << " " << keyframes[closest_index].node_idx << std::endl;;
+  lc_output_file.close();
   #if DEBUG
   // Step 6: Perform loop closure between these poses if there is a LC.
-  std::vector<WrappedImage> images =
-    {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud),
-    DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
-  WaitForClose(images);
+  // std::vector<WrappedImage> images =
+  //   {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud),
+  //   DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
+  // WaitForClose(images);
 
-  double width =
-  furthest_point(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud).norm();
-  SaveImage("LC_1",
-  GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud,
-  width, 0.03)); width =
-  furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
-  SaveImage("LC_2",
-  GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud,
-  width, 0.03));
+  // double width =
+  // furthest_point(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud).norm();
+  // SaveImage("LC_1",
+  // GetTable(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud,
+  // width, 0.03)); width =
+  // furthest_point(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud).norm();
+  // SaveImage("LC_2",
+  // GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud,
+  // width, 0.03));
   #endif
 
   LearnedKeyframe best_match_keyframe = keyframes[closest_index];
