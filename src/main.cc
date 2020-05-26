@@ -29,6 +29,7 @@ CONFIG_BOOL(auto_lc, "auto_lc");
 CONFIG_STRING(lidar_topic, "lidar_topic");
 CONFIG_STRING(odom_topic, "odom_topic");
 CONFIG_STRING(hitl_lc_topic, "hitl_lc_topic");
+CONFIG_BOOL(differential_odom, "differential_odom");
 
 DEFINE_string(config_file, "", "The path to the config file to use.");
 
@@ -40,7 +41,7 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
    * and the odometry data. Keeps track of the current pose and produces
    * a list of poses / pointclouds. Also keeps a list of the odometry data.
    */
-  printf("Loading bag file... ");
+  printf("Loading bag file...\n");
   fflush(stdout);
   rosbag::Bag bag;
   try {
@@ -77,6 +78,10 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
       lidar_slam::CobotOdometryMsgPtr odom =
           message.instantiate<CobotOdometryMsg>();
       if (odom != nullptr) {
+        if (!CONFIG_differential_odom) {
+          printf("Error: Recieved Cobot odometry message, but differential odometry is not enabled.\n");
+          exit(1);
+        }
         slam_builder.OdometryCallback(*odom);
       }
     }

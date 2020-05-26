@@ -100,11 +100,11 @@ auto_lc=false
 
 -- All scans with local uncertainty less than this threshold are
 -- one step closer to being used for automatic lc.
-local_uncertainty_condition_threshold=12.5
+local_uncertainty_condition_threshold=8.5
 
 -- All scans with local uncertainty scale less than this threshold
 -- are one step closer to being used for automatic lc.
-local_uncertainty_scale_threshold=0.35
+local_uncertainty_scale_threshold=0.3
 
 -- The amount of previous scans to use for calculating local uncertainty.
 local_uncertainty_prev_scans=2
