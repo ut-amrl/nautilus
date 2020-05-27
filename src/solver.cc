@@ -710,7 +710,8 @@ bool Solver::AddColinearConstraints(const LCConstraint& constraint) {
       std::cout << "Failed to find valid transformation for pose, got score: "
                 << trans_prob_pair.first << std::endl;
       #endif
-      continue;
+      // This assumes there was only 1 pose per constraint
+      return false;
     }
 
     auto closest_pose_arr = solution_[closest_pose].pose;
@@ -926,8 +927,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // TODO: Used to add first node as keyframe,
   // now its the 2nd node as the first is constant and therefore
   // has 0 covariance with anything else.
-  printf("keyframes %ld node %ld\n", keyframes.size(), node.node_idx);
-
+  printf("Processing node %ld\n", node.node_idx);
   double img_width = furthest_point(problem_.nodes[node.node_idx].lidar_factor.pointcloud).norm();
   if (keyframes.size() == 0 && problem_.nodes.size() > 1) {
     AddKeyframe(problem_.nodes[1]);
@@ -951,8 +951,12 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   //     return;
   //   }
 
-  // Weak emulation of chi^2....only add keyframes after enough time has passed
-  if (node.node_idx - keyframes[keyframes.size() - 1].node_idx < 10) {
+  // Weak emulation of chi^2....only add keyframes after enough time has passed or we have moved far enough
+  SLAMNode2D& prev_key_node = problem_.nodes[keyframes[keyframes.size() - 1].node_idx];
+  int node_diff = node.node_idx - keyframes[keyframes.size() - 1].node_idx;
+  double pose_dist = (node.pose.loc - prev_key_node.pose.loc).norm();
+  if (node_diff < 10 || pose_dist < 3) {
+    printf("Not a keyframe due to lack of pose uncertainty. node diff %d, distance %f \n", node_diff, pose_dist);
     return;
   }
 
