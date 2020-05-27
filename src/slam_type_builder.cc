@@ -4,14 +4,14 @@
 
 #include "eigen3/Eigen/Dense"
 
-#include "lidar_slam/CobotOdometryMsg.h"
+#include "nautilus/CobotOdometryMsg.h"
 #include "math_util.h"
 #include "pointcloud_helpers.h"
 #include "slam_type_builder.h"
 
 using Eigen::Rotation2Df;
 using Eigen::Vector2f;
-using lidar_slam::CobotOdometryMsg;
+using nautilus::CobotOdometryMsg;
 using math_util::AngleDist;
 using pointcloud_helpers::LaserScanToPointCloud;
 using slam_types::LidarFactor;
@@ -110,8 +110,7 @@ slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
   return slam_problem;
 }
 
-void DifferentialOdometryTracking::OdometryCallback(
-    lidar_slam::CobotOdometryMsg& odometry) {
+void DifferentialOdometryTracking::OdometryCallback(CobotOdometryMsg& odometry) {
   if (!odom_initialized_) {
     odom_initialized_ = true;
     pending_rotation_ = 0;

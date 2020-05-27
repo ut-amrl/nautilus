@@ -12,7 +12,7 @@
 
 /* Normal computation is based on this paper
  * http://imagine.enpc.fr/~marletr/publi/SGP-2012-Boulch-Marlet.pdf
- * Fast and Robust Normal Estimation for Point Cloudswith Sharp Features
+ * Fast and Robust Normal Estimation for Point Clouds with Sharp Features
  * By Boulch et al.
  */
 
@@ -65,7 +65,6 @@ vector<double> LargestClusterWithinThreshold(const vector<double> normal_angles,
 }
 
 vector<Vector2f> NormalComputation::GetNormals(const vector<Vector2f>& points) {
-  // TODO: Fix the bug that doesn't let config-reader have static vars.
   // For each point we have to randomly sample points within its neighborhood.
   // Then when we either reach the upper limit of samples, or pass the
   // threshold of confidence and stop.

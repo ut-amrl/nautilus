@@ -16,14 +16,12 @@
 #include "./kdtree.h"
 #include "./line_extraction.h"
 #include "./math_util.h"
-#include "lidar_slam/HitlSlamInputMsg.h"
-#include "lidar_slam/WriteMsg.h"
+#include "nautilus/HitlSlamInputMsg.h"
+#include "nautilus/WriteMsg.h"
 #include "laser_scan_matcher/MatchLaserScans.h"
 #include "timer.h"
 
 #include "./solver.h"
-
-#include <DEBUG.h>
 
 #define DEBUG true
 
@@ -33,9 +31,9 @@ using Eigen::Matrix2f;
 using Eigen::Rotation2D;
 using Eigen::Vector2f;
 using Eigen::Vector3f;
-using lidar_slam::HitlSlamInputMsg;
-using lidar_slam::HitlSlamInputMsgConstPtr;
-using lidar_slam::WriteMsgConstPtr;
+using nautilus::HitlSlamInputMsg;
+using nautilus::HitlSlamInputMsgConstPtr;
+using nautilus::WriteMsgConstPtr;
 using math_util::NormalsSimilar;
 using laser_scan_matcher::MatchLaserScans;
 using slam_types::LidarFactor;
@@ -107,7 +105,7 @@ struct LIDARPointBlobResidual {
     const Affine2T world_to_target =
         PoseArrayToAffine(&target_pose[2], &target_pose[0]).inverse();
     const Affine2T source_to_target = world_to_target * source_to_world;
-#pragma omp parallel for default(none) shared(residuals)
+    #pragma omp parallel for shared(residuals, source_to_target)
     for (size_t index = 0; index < source_points.size(); index++) {
       Vector2T source_pointT = source_points[index].cast<T>();
       Vector2T target_pointT = target_points[index].cast<T>();
@@ -162,7 +160,7 @@ struct PointToLineResidual {
     Vector2T line_start = line_to_world * line_segment_.start.cast<T>();
     Vector2T line_end = line_to_world * line_segment_.end.cast<T>();
     const LineSegment<T> TransformedLineSegment(line_start, line_end);
-#pragma omp parallel for default(none) shared(residuals)
+    #pragma omp parallel for shared(residuals, pose_to_world)
     for (size_t index = 0; index < points_.size(); index++) {
       Vector2T pointT = points_[index].cast<T>();
       // Transform source_point into the frame of the line
@@ -928,12 +926,12 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // has 0 covariance with anything else.
   printf("keyframes %ld node %ld\n", keyframes.size(), node.node_idx);
 
-  double img_width = furthest_point(problem_.nodes[node.node_idx].lidar_factor.pointcloud).norm();
+//  double img_width = furthest_point(problem_.nodes[node.node_idx].lidar_factor.pointcloud).norm();
   if (keyframes.size() == 0 && problem_.nodes.size() > 1) {
     AddKeyframe(problem_.nodes[1]);
-    SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_1.bmp",
-    GetTable(problem_.nodes[1].lidar_factor.pointcloud,
-    img_width, 0.03));
+//    SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_1.bmp",
+//    GetTable(problem_.nodes[1].lidar_factor.pointcloud,
+//    img_width, 0.03));
     return;
   } else if (keyframes.size() == 0) {
     // Keyframes is empty, but we don't have the 2nd node yet.
@@ -974,9 +972,9 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   std::cout << "Adding Keyframe # " << keyframes.size() << std::endl;
   #endif
   AddKeyframe(node);
-  SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_" + std::to_string(node.node_idx) + ".bmp",
-  GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud,
-  img_width, 0.03));
+//  SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_" + std::to_string(node.node_idx) + ".bmp",
+//  GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud,
+//  img_width, 0.03));
   // Step 4: Compare against all previous keyframes and see if there is a
   // or is similar using Chi^2
   // vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);

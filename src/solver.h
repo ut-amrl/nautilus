@@ -22,8 +22,8 @@
 #include "./pointcloud_helpers.h"
 #include "./slam_types.h"
 #include "config_reader/config_reader.h"
-#include "lidar_slam/HitlSlamInputMsg.h"
-#include "lidar_slam/WriteMsg.h"
+#include "nautilus/HitlSlamInputMsg.h"
+#include "nautilus/WriteMsg.h"
 
 using boost::math::chi_squared;
 using boost::math::complement;
@@ -31,9 +31,9 @@ using boost::math::quantile;
 using Eigen::Affine2f;
 using Eigen::Vector2f;
 using Eigen::Vector3f;
-using lidar_slam::HitlSlamInputMsg;
-using lidar_slam::HitlSlamInputMsgConstPtr;
-using lidar_slam::WriteMsgConstPtr;
+using nautilus::HitlSlamInputMsg;
+using nautilus::HitlSlamInputMsgConstPtr;
+using nautilus::WriteMsgConstPtr;
 using slam_types::OdometryFactor2D;
 using slam_types::SLAMNode2D;
 using slam_types::SLAMNodeSolution2D;

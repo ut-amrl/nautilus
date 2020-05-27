@@ -6,7 +6,7 @@
 #define LIDAR_SLAM_SLAM_TYPE_BUILDER_H
 
 #include "eigen3/Eigen/Dense"
-#include "lidar_slam/CobotOdometryMsg.h"
+#include "nautilus/CobotOdometryMsg.h"
 #include "nav_msgs/Odometry.h"
 #include "sensor_msgs/LaserScan.h"
 
@@ -16,6 +16,7 @@
 using Eigen::Vector2f;
 using slam_types::OdometryFactor2D;
 using slam_types::RobotPose2D;
+using nautilus::CobotOdometryMsg;
 
 struct SlamTypeBuilderConfig {
   CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
@@ -31,7 +32,7 @@ class DifferentialOdometryTracking {
  public:
   DifferentialOdometryTracking(SlamTypeBuilderConfig config)
       : config_(config) {}
-  void OdometryCallback(lidar_slam::CobotOdometryMsg& odometry);
+  void OdometryCallback(CobotOdometryMsg& odometry);
   RobotPose2D GetPose();
   bool ReadyForLidar() {
     return pending_rotation_ >= config_.CONFIG_rotation_change ||
@@ -95,7 +96,7 @@ class SLAMTypeBuilder {
   SLAMTypeBuilder() : odom_tracking_(config_), diff_tracking_(config_) {}
   void LidarCallback(sensor_msgs::LaserScan& laser_scan);
   void OdometryCallback(nav_msgs::Odometry& odometry);
-  void OdometryCallback(lidar_slam::CobotOdometryMsg& odometry);
+  void OdometryCallback(CobotOdometryMsg& odometry);
   slam_types::SLAMProblem2D GetSlamProblem();
   bool Done();
 

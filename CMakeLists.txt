@@ -6,7 +6,8 @@ MESSAGE(STATUS "Using compiler: ${CMAKE_CXX_COMPILER}")
 MESSAGE(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 MESSAGE(STATUS "Arch: ${CMAKE_SYSTEM_PROCESSOR}")
 
-SET(CMAKE_CXX_FLAGS "-std=c++17 -Wall -Werror")
+# TODO: Remove no-deprecated-copy once Eigen 3.4 stable is released.
+SET(CMAKE_CXX_FLAGS "-std=c++17 -Wall -Werror -Wno-deprecated-copy")
 
 IF(${CMAKE_BUILD_TYPE} MATCHES "Release")
     option(TESTING "Build tests" OFF)

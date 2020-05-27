@@ -13,11 +13,12 @@
 #include "./slam_types.h"
 #include "./solver.h"
 #include "config_reader/config_reader.h"
-#include "lidar_slam/CobotOdometryMsg.h"
+#include "nautilus/CobotOdometryMsg.h"
 
-using lidar_slam::CobotOdometryMsg;
-using lidar_slam::HitlSlamInputMsg;
-using lidar_slam::WriteMsg;
+using nautilus::CobotOdometryMsg;
+using nautilus::CobotOdometryMsgPtr;
+using nautilus::HitlSlamInputMsg;
+using nautilus::WriteMsg;
 using slam_types::SLAMNode2D;
 using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
@@ -75,7 +76,7 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
       }
     }
     {
-      lidar_slam::CobotOdometryMsgPtr odom =
+      CobotOdometryMsgPtr odom =
           message.instantiate<CobotOdometryMsg>();
       if (odom != nullptr) {
         if (!CONFIG_differential_odom) {
@@ -136,7 +137,7 @@ int main(int argc, char** argv) {
     printf("Must specify an input bag!\n");
     exit(1);
   }
-  ros::init(argc, argv, "lidar_slam");
+  ros::init(argc, argv, "nautilus");
   ros::NodeHandle n;
   signal(SIGINT, SignalHandler);
   // Load and pre-process the data.
