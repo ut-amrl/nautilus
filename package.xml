@@ -1,0 +1,32 @@
+<package>
+  <name>nautilus</name>
+  <version>0.0.1</version>
+  <description>
+    Map curation using SLAM and Autonomous Loop Closure
+  </description>
+  <maintainer email="jbachman@umass.edu">Jack Bachman</maintainer>
+  <license>BSD</license>
+
+  <url>http://ros.org/wiki/foo_core</url>
+  <author email="jbachman@umass.edu">Jack Bachman</author>
+  <author email="kvsikand@utexas.edu">Kavan Sikand</author>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <build_depend>message_generation</build_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>rosbag</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>laser_scan_matcher</build_depend>
+
+  <run_depend>sensor_msgs</run_depend>
+  <run_depend>geometry_msgs</run_depend>
+  <run_depend>message_runtime</run_depend>
+  <run_depend>roscpp</run_depend>
+  <run_depend>std_msgs</run_depend>
+  <run_depend>rosbag</run_depend>
+  <run_depend>laser_scan_matcher</run_depend>
+</package>
