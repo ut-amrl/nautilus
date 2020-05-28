@@ -1,10 +1,11 @@
-PROJECT(lidar_slam)
-CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
+CMAKE_MINIMUM_REQUIRED(VERSION 2.8.3)
+PROJECT(nautilus)
 
-MESSAGE(STATUS "Compiling Lidar SLAM Implementation")
-MESSAGE(STATUS "Using compiler: ${CMAKE_CXX_COMPILER}")
-MESSAGE(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
-MESSAGE(STATUS "Arch: ${CMAKE_SYSTEM_PROCESSOR}")
+##########################
+# Setting compiler flags #
+##########################
+
+SET(CMAKE_BUILD_TYPE Debug)
 
 # TODO: Remove no-deprecated-copy once Eigen 3.4 stable is released.
 SET(CMAKE_CXX_FLAGS "-std=c++17 -Wall -Werror -Wno-deprecated-copy")
@@ -19,64 +20,66 @@ ELSEIF(${CMAKE_BUILD_TYPE} MATCHES "Debug")
     SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -fopenmp -g -O0")
 ENDIF()
 
-FIND_PACKAGE(Ceres REQUIRED)
-INCLUDE_DIRECTORIES(${CERES_INCLUDE_DIRS})
-FIND_PACKAGE(OpenMP REQUIRED)
-INCLUDE_DIRECTORIES(third_party/eigen)
+#####################
+# Find Dependencies #
+#####################
 
-INCLUDE($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
+FIND_PACKAGE(Ceres REQUIRED)
+FIND_PACKAGE(OpenMP REQUIRED)
+FIND_PACKAGE(Boost REQUIRED COMPONENTS system)
+FIND_PACKAGE(catkin REQUIRED COMPONENTS roscpp rosbag std_msgs sensor_msgs geometry_msgs message_generation)
+
+SET(third_party_includes ${CMAKE_CURRENT_SOURCE_DIR}/third_party/csm/src
+                         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/vector_maps/src
+                         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/config-reader/include
+                         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen)
+
+######################
+# Message Generation #
+######################
+
+add_message_files(DIRECTORY msg FILES CobotOdometryMsg.msg HitlSlamInputMsg.msg WriteMsg.msg)
+generate_messages(DEPENDENCIES std_msgs sensor_msgs geometry_msgs)
+
+########################
+# Catkin Configuration #
+########################
+
+catkin_package(
+  INCLUDE_DIRS ${third_party_includes} ${CERES_INCLUDE_DIRS} 
+  LIBRARIES amrl_shared
+  CATKIN_DEPENDS message_runtime std_msgs sensor_msgs geometry_msgs)
+
+INCLUDE_DIRECTORIES(include ${Boost_INCLUDE_DIRS}
+                            ${catkin_INCLUDE_DIRS}
+                            ${third_party_includes})
+
+#####################
+# Configure Targets #
+#####################
+
+# Make sure all our dependecies get built
 add_subdirectory(third_party)
 
-INCLUDE_DIRECTORIES(third_party/csm/src)
-INCLUDE_DIRECTORIES(third_party/vector_maps/src)
-INCLUDE_DIRECTORIES(third_party/learning-loop-closure/laser_scan_matcher/srv_gen/cpp/include)
-INCLUDE_DIRECTORIES(third_party/config-reader/include)
+add_executable(${PROJECT_NAME} src/main.cc
+                               src/pointcloud_helpers.cc
+                               src/solver.cc
+                               src/slam_type_builder.cc
+                               src/kdtree.cc
+                               src/normal_computation.cc)
 
-rosbuild_init()
+add_library(amrl_shared src/gui_helpers.cc
+                        src/timer.cc)
 
-SET(ROS_BUILD_STATIC_LIBS true)
-SET(ROS_BUILD_SHARED_LIBS false)
+                      set(non_findable_libs gflags glog X11 m lua5.1 pthread csm vector_maps Boost::system)
 
-MESSAGE(STATUS "ROS-Overrride Build Type: ${CMAKE_BUILD_TYPE}")
-MESSAGE(STATUS "CXX Flags: ${CMAKE_CXX_FLAGS}")
-
-SET(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
-SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
-
-rosbuild_genmsg()
-
-SET(libs roslib
-         roscpp
-         rosbag
-         console_bridge
-         cv_bridge
-         gflags
-         glog
-         boost_system
-         X11
-         m
-         OpenMP::OpenMP_CXX
-         csm
-         vector_maps
-         lua5.1
-         pthread)
-
-ROSBUILD_ADD_EXECUTABLE(lidar_slam
-                        src/main.cc
-                        src/pointcloud_helpers.cc
-                        src/solver.cc
-                        src/slam_type_builder.cc
-                        src/kdtree.cc
-                        src/normal_computation.cc)
-
-ADD_LIBRARY(shared_library
-            src/gui_helpers.cc
-            src/timer.cc)
-
-TARGET_LINK_LIBRARIES(lidar_slam
-                      shared_library
-                      ${libs}
-                      ${CERES_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES}
+                                       amrl_shared
+                                       ${CERES_LIBRARIES}
+                                       ${OpenMP_CXX_LIBRARIES}
+                                       ${non_findable_libs})
+# We need the second Exported Targets because Laser_scan_matcher should be built first.
+add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 #if (TESTING)
 # enable_testing()
