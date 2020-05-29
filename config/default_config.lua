@@ -85,7 +85,7 @@ rotation_standard_deviation = translation_scaling_2 * translation_change_for_lid
 hitl_lc_topic="/hitl_slam_input"
 
 -- Above this threshold and the CSM transformation is deemed successful.
-csm_score_threshold=-3.5
+csm_score_threshold=-5.0
 
 -- Points further than this will not count as falling on the HITL LC line.
 hitl_line_width=0.05
@@ -100,7 +100,7 @@ auto_lc=false
 
 -- All scans with local uncertainty less than this threshold are
 -- one step closer to being used for automatic lc.
-local_uncertainty_condition_threshold=8.5
+local_uncertainty_condition_threshold=9.5
 
 -- All scans with local uncertainty scale less than this threshold
 -- are one step closer to being used for automatic lc.
