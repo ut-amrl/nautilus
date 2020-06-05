@@ -22,7 +22,7 @@
 #include "timer.h"
 
 #include "./solver.h"
-#include "./cimg_debug.h"
+// #include "./cimg_debug.h"
 
 #define DEBUG true
 
