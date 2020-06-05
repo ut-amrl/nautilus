@@ -105,7 +105,7 @@ struct LIDARPointBlobResidual {
     const Affine2T world_to_target =
         PoseArrayToAffine(&target_pose[2], &target_pose[0]).inverse();
     const Affine2T source_to_target = world_to_target * source_to_world;
-    #pragma omp parallel for shared(residuals, source_to_target)
+    #pragma omp parallel for shared(residuals)
     for (size_t index = 0; index < source_points.size(); index++) {
       Vector2T source_pointT = source_points[index].cast<T>();
       Vector2T target_pointT = target_points[index].cast<T>();
@@ -160,7 +160,7 @@ struct PointToLineResidual {
     Vector2T line_start = line_to_world * line_segment_.start.cast<T>();
     Vector2T line_end = line_to_world * line_segment_.end.cast<T>();
     const LineSegment<T> TransformedLineSegment(line_start, line_end);
-    #pragma omp parallel for shared(residuals, pose_to_world)
+    #pragma omp parallel for shared(residuals)
     for (size_t index = 0; index < points_.size(); index++) {
       Vector2T pointT = points_[index].cast<T>();
       // Transform source_point into the frame of the line
@@ -971,7 +971,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     #endif
     return;
   }
-  
+
   #if DEBUG
   std::cout << "Adding Keyframe # " << keyframes.size() << std::endl;
   #endif
@@ -988,7 +988,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   //   #endif
   //   return;
   // }
-  
+
   // Step 5: Compare the embeddings and see if there is a match as well.
   // Find the closest embedding in all the matches to our new keyframe.
   LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
@@ -1013,7 +1013,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
       closest_index = match_index;
     }
   }
-  
+
   if (closest_index == -1 ||
       best_match < config_.CONFIG_lc_match_threshold) {
     #if DEBUG
