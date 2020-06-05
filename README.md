@@ -49,7 +49,7 @@ If you are using auto loop closure detection and solving (on by default) you wil
 <Starting in the root of the project>
 cd third_party/learning-loop-closure/laser_scan_matcher
 source build/devel/setup.sh
-rosrun laser_scan_matcher laser_scan_matcher.py <model filename>
+rosrun laser_scan_matcher laser_scan_matcher.py <model filename> <model epoch>
 ```
 
 Then in another terminal window continue the following instructions.
