@@ -31,9 +31,14 @@ sudo make install
 ```
 (Here is the tutorial this is from: https://www.eriksmistad.no/getting-started-with-google-test-on-ubuntu/)
 
-Then Just run:
+Then run:
 
-```make```
+```
+cd third_party/learning-loop-closure/laser_scan_matcher
+make
+cd ../../..
+make
+```
 
 Do not run cmake directly.
 
@@ -42,9 +47,9 @@ Do not run cmake directly.
 If you are using auto loop closure detection and solving (on by default) you will have to use the following command to start the embedding generation node.
 ```
 <Starting in the root of the project>
-cd third_party/learning-loop-closure/point_cloud_embedder
+cd third_party/learning-loop-closure/laser_scan_matcher
 source build/devel/setup.sh
-rosrun point_cloud_embedder point_cloud_embedder.py <model filename>
+rosrun laser_scan_matcher laser_scan_matcher.py <model filename>
 ```
 
 Then in another terminal window continue the following instructions.
