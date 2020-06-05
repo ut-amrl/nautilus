@@ -38,6 +38,7 @@ using slam_types::OdometryFactor2D;
 using slam_types::SLAMNode2D;
 using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
+using slam_types::LidarFactor;
 using std::vector;
 
 /*----------------------------------------------------------------------------*
@@ -86,8 +87,8 @@ struct HitlLCConstraint {
 };
 
 struct AutoLCConstraint {
-  SLAMNode2D node_a;
-  SLAMNode2D node_b;
+  const SLAMNode2D* node_a;
+  const SLAMNode2D* node_b;
   Vector3f relative_transformation;
 };
 
@@ -561,11 +562,8 @@ class Solver {
  public:
   Solver(ros::NodeHandle& n);
   vector<SLAMNodeSolution2D> SolveSLAM();
-  double GetPointCorrespondences(const SLAMProblem2D& problem,
-                                 vector<SLAMNodeSolution2D>* solution_ptr,
-                                 PointCorrespondences* point_correspondences,
-                                 size_t source_node_index,
-                                 size_t target_node_index);
+  double GetPointCorrespondences(const LidarFactor& source_lidar, const LidarFactor& target_lidar,
+    double* source_pose, double* target_pose, PointCorrespondences* point_correspondences);
   void AddOdomFactors(ceres::Problem* ceres_problem,
                       vector<OdometryFactor2D> factors, double trans_weight,
                       double rot_weight);

@@ -21,7 +21,7 @@ using std::pair;
 using std::vector;
 
 // TODO: Throw out this method for stf filtering.
-#define GLANCING_THRESHOLD 0.10
+#define GLANCING_THRESHOLD 0.25
 
 vector<Vector2f> FilterGlancing(
     const float angle_min, const float angle_step,

@@ -264,8 +264,9 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
                                               node_i_index, node_j_index);
           // Get the correspondences between these two poses.
           difference +=
-              GetPointCorrespondences(problem_, &solution_, &correspondence,
-                                      node_i_index, node_j_index);
+              GetPointCorrespondences(problem_.nodes[node_i_index].lidar_factor, problem_.nodes[node_j_index].lidar_factor,
+                                      solution_[node_i_index].pose, solution_[node_j_index].pose,
+                                      &correspondence);
           problem_mutex.lock();
           vis_callback_->UpdateLastCorrespondence(correspondence);
           problem_mutex.unlock();
@@ -318,23 +319,16 @@ void Solver::AddOdomFactors(ceres::Problem* ceres_problem,
 }
 
 // Source moves to target.
-double Solver::GetPointCorrespondences(
-    const SLAMProblem2D& problem, vector<SLAMNodeSolution2D>* solution_ptr,
-    PointCorrespondences* point_correspondences, size_t source_node_index,
-    size_t target_node_index) {
+double Solver::GetPointCorrespondences(const LidarFactor& source_lidar, const LidarFactor& target_lidar,
+  double* source_pose, double* target_pose, PointCorrespondences* point_correspondences) {
   // Summed differences between point correspondences.
   double difference = 0.0;
-  vector<SLAMNodeSolution2D>& solution = *solution_ptr;
-  SLAMNodeSolution2D& source_solution = solution[source_node_index];
-  SLAMNodeSolution2D& target_solution = solution[target_node_index];
-  LidarFactor source_lidar = problem.nodes[source_node_index].lidar_factor;
-  LidarFactor target_lidar = problem.nodes[target_node_index].lidar_factor;
   // Affine transformations from the two pose's reference frames.
   Affine2f source_to_world =
-      PoseArrayToAffine(&source_solution.pose[2], &source_solution.pose[0])
+      PoseArrayToAffine(&source_pose[2], &source_pose[0])
           .cast<float>();
   Affine2f target_to_world =
-      PoseArrayToAffine(&target_solution.pose[2], &target_solution.pose[0])
+      PoseArrayToAffine(&target_pose[2], &target_pose[0])
           .cast<float>();
   // Loop over all the points in the source pointcloud,
   // match each point to the closest point in the target pointcloud
@@ -408,9 +402,11 @@ double Solver::GetPointCorrespondences(
       // If no target point was found to correspond to our source point then
       // don't match this source point to anything.
       if (dist >= config_.CONFIG_outlier_threshold) {
+        difference += dist;
         continue;
       }
     }
+
     // Add the distance between the source point and it's matching target
     // point.
     difference += dist;
@@ -588,12 +584,13 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
 
 bool Solver::AddAutoLCConstraint(uint64_t node_a_idx, uint64_t node_b_idx) {
   AutoLCConstraint constraint;
+  // Compute the transformation necessary to go from node a to node b, in a's reference frame
   std::pair<double, std::pair<Vector2f, float>> trans_prob_pair =
       scan_matcher.GetTransformation(
           problem_.nodes[node_a_idx].lidar_factor.pointcloud,
           problem_.nodes[node_b_idx].lidar_factor.pointcloud,
-          problem_.nodes[node_a_idx].pose.angle,
-          problem_.nodes[node_b_idx].pose.angle,
+          solution_[node_a_idx].pose[2],
+          solution_[node_b_idx].pose[2],
           math_util::DegToRad(180));
   auto trans = trans_prob_pair.second;
   #if DEBUG
@@ -603,85 +600,136 @@ bool Solver::AddAutoLCConstraint(uint64_t node_a_idx, uint64_t node_b_idx) {
             << trans.first << std::endl
             << trans.second << std::endl;
   #endif
+
+  constraint.node_a = &problem_.nodes[node_a_idx];
+  constraint.node_b = &problem_.nodes[node_b_idx];
+
+  double source_pose[3];
+  double* target_pose = solution_[node_b_idx].pose;
+
+  // get the relative transformation between the poses in the global reference frame
+  Vector2f relativeTranslation = Eigen::Rotation2Df(target_pose[2]) * trans.first;
+  constraint.relative_transformation[0] = relativeTranslation.x();
+  constraint.relative_transformation[1] = relativeTranslation.y();
+  constraint.relative_transformation[2] = trans.second;
+
+  source_pose[0] = solution_[node_b_idx].pose[0] + constraint.relative_transformation[0];
+  source_pose[1] = solution_[node_b_idx].pose[1] + constraint.relative_transformation[1];
+  source_pose[2] = solution_[node_b_idx].pose[2] + constraint.relative_transformation[2];
+
+  // Check the point correspondences to make sure the match is good enough
+  PointCorrespondences correspondence(source_pose,
+                                      target_pose,
+                                      constraint.node_a->node_idx, constraint.node_b->node_idx);
+  double temp_diff = GetPointCorrespondences(
+      constraint.node_a->lidar_factor, constraint.node_b->lidar_factor, source_pose, target_pose, &correspondence);
+
+  temp_diff = temp_diff / constraint.node_a->lidar_factor.pointcloud.size();
+
+  #if DEBUG
+  printf("matched %ld of %ld\n", correspondence.source_points.size(), constraint.node_a->lidar_factor.pointcloud.size());
+  printf("temp_diff %f\n", temp_diff);
+  printf("poses (%f %f %f) (%f %f %f)\n", source_pose[0], source_pose[1], source_pose[2], target_pose[0], target_pose[1], target_pose[2]);
+  #endif
+
+  // #if DEBUG
+  // std::vector<Vector2f> global_a;
+  // std::vector<Vector2f> global_b;
+  // Affine2f target_to_world =
+  //   PoseArrayToAffine(&target_pose[2], &target_pose[0])
+  //       .cast<float>();
+  // Affine2f source_to_world =
+  //   PoseArrayToAffine(&source_pose[2], &source_pose[0])
+  //       .cast<float>();
+  
+  // for(const Vector2f& pt : problem_.nodes[constraint.node_a->node_idx].lidar_factor.pointcloud) {
+  //   global_a.push_back(source_to_world * pt);
+  // }
+  
+  // for(const Vector2f& pt : problem_.nodes[constraint.node_b->node_idx].lidar_factor.pointcloud) {
+  //   global_b.push_back(target_to_world * pt);
+  // }
+
+  // WaitForClose({GetTable(global_a, 100.0, 0.1), GetTable(global_b, 100.0, 0.1)});
+  // #endif
+
   // Then this was a badly chosen LC, let's not continue with it
-  // TODO figure out if short circuiting in the middle of this loop is OK
-  // Doesn't work for hallways as there is a lot of possible transformations.
-  if (trans_prob_pair.first < config_.CONFIG_csm_score_threshold) {
+  // TODO: Decide if we want to use this or the CSM score as the threshold
+  if (temp_diff > config_.CONFIG_stopping_accuracy) {
     #if DEBUG
-    std::cout << "Failed to find valid transformation for pose, got score: "
-              << trans_prob_pair.first << std::endl;
+    std::cout << "Failed to find valid transformation for pose, matched: "
+              << correspondence.source_points.size() << " points of " << constraint.node_a->lidar_factor.pointcloud.size() << std::endl;
     #endif
-    // This assumes there was only 1 pose per constraint
+
     return false;
   }
-
-  constraint.node_a = problem_.nodes[node_a_idx];
-  constraint.node_b = problem_.nodes[node_b_idx];
-
-  constraint.relative_transformation[0] = trans.first.x();
-  constraint.relative_transformation[1] = trans.first.y();
-  constraint.relative_transformation[2] = (problem_.nodes[node_b_idx].pose.angle - problem_.nodes[node_a_idx].pose.angle) + trans.second;
-
-  solution_[node_a_idx].pose[0] = solution_[node_b_idx].pose[0] + trans.first.x();
-  solution_[node_a_idx].pose[1] = solution_[node_b_idx].pose[1] + trans.first.y();
-  solution_[node_a_idx].pose[2] += trans.second;
+  
+  // Update our solution
+  solution_[node_a_idx].pose[0] = source_pose[0];
+  solution_[node_a_idx].pose[1] = source_pose[1];
+  solution_[node_a_idx].pose[2] = source_pose[2];
 
   std::cout << "Writing LC Info" << std::endl;
   std::ofstream lc_output_file;
   lc_output_file.open(config_.CONFIG_lc_debug_output_dir + "/lc_matches.txt", std::ios::app);
-  lc_output_file << "Loop Closed " << constraint.node_a.node_idx << " " << constraint.node_b.node_idx
+  lc_output_file << "Loop Closed " << constraint.node_a->node_idx << " " << constraint.node_b->node_idx
                  << ", transformation: " << constraint.relative_transformation.transpose() << std::endl;
   lc_output_file.close();
 
+  // add constraint
   auto_lc_constraints_.push_back(constraint);
   return true;
 }
 
 double Solver::AddResidualsForAutoLC(ceres::Problem& problem) {
   double difference = 0.0;
-  printf("LC Constraints %ld\n", auto_lc_constraints_.size());
+
   for (const AutoLCConstraint&  constraint : auto_lc_constraints_) {
     // add the odometry residual; Here we assume the `solution_` has already been updated with csm-aligned poses
     ceres::ResidualBlockId odom_id;
     odom_id = ceres_information.problem->AddResidualBlock(
-        OdometryResidual::create(GetDifferenceOdom(constraint.node_a.node_idx, constraint.node_b.node_idx, constraint.relative_transformation),
+        OdometryResidual::create(GetDifferenceOdom(constraint.node_a->node_idx, constraint.node_b->node_idx, constraint.relative_transformation),
                                 config_.CONFIG_lc_translation_weight,
                                 config_.CONFIG_lc_rotation_weight),
-        NULL, solution_[constraint.node_a.node_idx].pose, solution_[constraint.node_b.node_idx].pose);
-    ceres_information.res_descriptors.emplace_back(constraint.node_a.node_idx, constraint.node_b.node_idx, odom_id);
+        NULL, solution_[constraint.node_a->node_idx].pose, solution_[constraint.node_b->node_idx].pose);
+    ceres_information.res_descriptors.emplace_back(constraint.node_a->node_idx, constraint.node_b->node_idx, odom_id);
+
+    #if DEBUG
     printf("Poses: (%f %f %f) (%f %f %f) ... trans (%f %f %f)\n",
-      solution_[constraint.node_a.node_idx].pose[0],
-      solution_[constraint.node_a.node_idx].pose[1],
-      solution_[constraint.node_a.node_idx].pose[2],
-      solution_[constraint.node_b.node_idx].pose[0],
-      solution_[constraint.node_b.node_idx].pose[1],
-      solution_[constraint.node_b.node_idx].pose[2],
+      solution_[constraint.node_a->node_idx].pose[0],
+      solution_[constraint.node_a->node_idx].pose[1],
+      solution_[constraint.node_a->node_idx].pose[2],
+      solution_[constraint.node_b->node_idx].pose[0],
+      solution_[constraint.node_b->node_idx].pose[1],
+      solution_[constraint.node_b->node_idx].pose[2],
       constraint.relative_transformation[0],
       constraint.relative_transformation[1],
       constraint.relative_transformation[2]
     );
-
+    #endif
+    
     // add the lidar residuals; Here we assume the `solution_` has already been updated with csm-aligned poses
-    PointCorrespondences correspondence(solution_[constraint.node_a.node_idx].pose,
-                                        solution_[constraint.node_b.node_idx].pose,
-                                        constraint.node_a.node_idx, constraint.node_b.node_idx);
+    PointCorrespondences correspondence(solution_[constraint.node_a->node_idx].pose,
+                                        solution_[constraint.node_b->node_idx].pose,
+                                        constraint.node_a->node_idx, constraint.node_b->node_idx);
     double temp_diff = GetPointCorrespondences(
-        problem_, &solution_, &correspondence, constraint.node_a.node_idx, constraint.node_b.node_idx);
+        constraint.node_a->lidar_factor, constraint.node_b->lidar_factor, solution_[constraint.node_a->node_idx].pose, solution_[constraint.node_b->node_idx].pose, &correspondence);
+    
     // Add the correspondences as constraints in the optimization problem.
     ceres::ResidualBlockId id = problem.AddResidualBlock(
         LIDARPointBlobResidual::create(
             correspondence.source_points, correspondence.target_points,
             correspondence.source_normals, correspondence.target_normals),
         NULL, correspondence.source_pose, correspondence.target_pose);
-    ceres_information.res_descriptors.emplace_back(constraint.node_a.node_idx,
-                                                    constraint.node_b.node_idx, id);
+    ceres_information.res_descriptors.emplace_back(constraint.node_a->node_idx,
+                                                    constraint.node_b->node_idx, id);
+
     difference +=
         temp_diff /
-        problem_.nodes[constraint.node_a.node_idx].lidar_factor.pointcloud.size();
+        problem_.nodes[constraint.node_a->node_idx].lidar_factor.pointcloud.size();
 
-    // TODO: do I need to add residual for node_b -> node_a...just the mirror of the one I just added
+    // TODO: do I need to add residual for node_b -> node_a...just the mirror of the one I just added?
   }
-  printf("difference %f\n", difference);
 
   return difference;
 }
@@ -774,8 +822,9 @@ vector<ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
                                       solution_[second_node].pose, first_node,
                                       second_node);
   // Get the correspondences between these two poses.
-  GetPointCorrespondences(problem_, &solution_, &correspondence, first_node,
-                          second_node);
+  GetPointCorrespondences(problem_.nodes[first_node].lidar_factor, problem_.nodes[second_node].lidar_factor,
+                          solution_[first_node].pose, solution_[second_node].pose,
+                          &correspondence);
   // Add the correspondences as constraints in the optimization problem.
   ceres::ResidualBlockId lidar_id;
   lidar_id = ceres_information.problem->AddResidualBlock(
@@ -958,7 +1007,9 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     LearnedKeyframe matched_keyframe = keyframes[match_index];
     SLAMNode2D& keyframe_node = problem_.nodes[matched_keyframe.node_idx];
     if ((node.pose.loc - keyframe_node.pose.loc).norm() > config_.CONFIG_lc_base_max_range + config_.CONFIG_lc_max_range_scaling * (node.node_idx - matched_keyframe.node_idx)) {
-      printf("Too far away, not considering LC between %ld and %ld\n", node.node_idx, matched_keyframe.node_idx);
+      // #if DEBUG
+      // printf("Too far away, not considering LC between %ld and %ld\n", node.node_idx, matched_keyframe.node_idx);
+      // #endif
       continue;
     }
 
