@@ -935,7 +935,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // now its the 2nd node as the first is constant and therefore
   // has 0 covariance with anything else.
   printf("Processing node %ld\n", node.node_idx);
-  double img_width = furthest_point(problem_.nodes[node.node_idx].lidar_factor.pointcloud).norm();
+  // double img_width = furthest_point(problem_.nodes[node.node_idx].lidar_factor.pointcloud).norm();
   if (keyframes.size() == 0 && problem_.nodes.size() > 1) {
     AddKeyframe(problem_.nodes[1]);
 //    SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_1.bmp",
@@ -984,9 +984,9 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   std::cout << "Adding Keyframe # " << keyframes.size() << std::endl;
   #endif
   AddKeyframe(node);
-  SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_" + std::to_string(node.node_idx) + ".bmp",
-    GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud,
-    img_width, 0.03));
+  // SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_" + std::to_string(node.node_idx) + ".bmp",
+  //   GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud,
+  //   img_width, 0.03));
   // Step 4: Compare against all previous keyframes and see if there is a
   // or is similar using Chi^2
   // vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
