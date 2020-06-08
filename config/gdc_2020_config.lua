@@ -1,10 +1,10 @@
 require("config.default_config")
-bag_path="../bags/2020-03-09-19-02-17-GDC3-long-rewritten.bag"
+bag_path="../bags/2020-03-05-17-51-12-GDC1-south.bag"
 lidar_topic="/Cobot/Laser"
 odom_topic="/Cobot/Odometry"
 auto_lc=true
-pose_number=1000
-differential_odom=false
+pose_number=400
+differential_odom=true
 rotation_weight=2
-translation_weight=3
-max_lidar_range=8.5
+translation_weight=10
+lc_debug_output_dir="auto_lc_debug_gdc1"

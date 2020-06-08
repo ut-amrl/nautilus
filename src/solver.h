@@ -38,6 +38,7 @@ using slam_types::OdometryFactor2D;
 using slam_types::SLAMNode2D;
 using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
+using slam_types::LidarFactor;
 using std::vector;
 
 /*----------------------------------------------------------------------------*
@@ -73,16 +74,22 @@ struct LCPose {
       : node_idx(node_idx), points_on_feature(points_on_feature) {}
 };
 
-struct LCConstraint {
+struct HitlLCConstraint {
   vector<LCPose> line_a_poses;
   vector<LCPose> line_b_poses;
   const LineSegment<float> line_a;
   const LineSegment<float> line_b;
   double chosen_line_pose[3]{0, 0, 0};
-  LCConstraint(const LineSegment<float>& line_a,
+  HitlLCConstraint(const LineSegment<float>& line_a,
                const LineSegment<float>& line_b)
       : line_a(line_a), line_b(line_b) {}
-  LCConstraint() {}
+  HitlLCConstraint() {}
+};
+
+struct AutoLCConstraint {
+  const SLAMNode2D* node_a;
+  const SLAMNode2D* node_b;
+  Vector3f relative_transformation;
 };
 
 struct PointCorrespondences {
@@ -358,7 +365,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   void PubConstraintVisualization() {
     const vector<SLAMNodeSolution2D>& solution_c = *solution;
     vector<Vector2f> line_a_poses;
-    for (const LCConstraint& hitl_constraint : constraints) {
+    for (const HitlLCConstraint& hitl_constraint : constraints) {
       vector<Vector2f> a_points;
       vector<Vector2f> b_points;
       for (const LCPose& pose : hitl_constraint.line_a_poses) {
@@ -430,7 +437,7 @@ class VisualizationCallback : public ceres::IterationCallback {
 
   void PubConstraintPointclouds() {
     vector<Vector2f> pointclouds;
-    for (const LCConstraint& hitl_constraint : constraints) {
+    for (const HitlLCConstraint& hitl_constraint : constraints) {
       for (const LCPose& pose : hitl_constraint.line_a_poses) {
         AddPosePointcloud(pointclouds, pose);
       }
@@ -475,7 +482,7 @@ class VisualizationCallback : public ceres::IterationCallback {
     last_correspondences.push_back(point_correspondence);
   }
 
-  void AddConstraint(const LCConstraint& constraint) {
+  void AddConstraint(const HitlLCConstraint& constraint) {
     constraints.push_back(constraint);
   }
 
@@ -544,7 +551,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   // All the correspondences were the source is the same
   // (will be the last pointcloud aligned and all of its targets).
   vector<PointCorrespondences> last_correspondences;
-  vector<LCConstraint> constraints;
+  vector<HitlLCConstraint> constraints;
 };
 
 /*----------------------------------------------------------------------------*
@@ -555,11 +562,8 @@ class Solver {
  public:
   Solver(ros::NodeHandle& n);
   vector<SLAMNodeSolution2D> SolveSLAM();
-  double GetPointCorrespondences(const SLAMProblem2D& problem,
-                                 vector<SLAMNodeSolution2D>* solution_ptr,
-                                 PointCorrespondences* point_correspondences,
-                                 size_t source_node_index,
-                                 size_t target_node_index);
+  double GetPointCorrespondences(const LidarFactor& source_lidar, const LidarFactor& target_lidar,
+    double* source_pose, double* target_pose, PointCorrespondences* point_correspondences);
   void AddOdomFactors(ceres::Problem* ceres_problem,
                       vector<OdometryFactor2D> factors, double trans_weight,
                       double rot_weight);
@@ -567,11 +571,9 @@ class Solver {
   void WriteCallback(const WriteMsgConstPtr& msg);
   void Vectorize(const WriteMsgConstPtr& msg);
   vector<SLAMNodeSolution2D> GetSolution() { return solution_; }
-  LCConstraint GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg);
-  bool AddColinearConstraints(const LCConstraint& constraint);
+  HitlLCConstraint GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg);
   void SolveForLC();
-  void AddCollinearResiduals(ceres::Problem* problem);
-  double AddLidarResidualsForLC(ceres::Problem& problem);
+  double AddResidualsForAutoLC(ceres::Problem& problem);
   void AddPointCloudResiduals(ceres::Problem* problem);
   vector<OdometryFactor2D> GetSolvedOdomFactors();
   void AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node);
@@ -583,6 +585,9 @@ class Solver {
   double GetChiSquareCost(uint64_t node_a, uint64_t node_b);
   OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
                                      const uint64_t node_b);
+  OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
+                                     const uint64_t node_b,
+                                     Vector3f trans);
   vector<ResidualDesc> AddLCResiduals(const uint64_t node_a,
                                       const uint64_t node_b);
   void AddHITLResiduals(ceres::Problem* problem);
@@ -591,6 +596,7 @@ class Solver {
   float GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe);
   bool AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
                             LearnedKeyframe& key_frame_b);
+  bool AddAutoLCConstraint(const uint64_t node_a, const uint64_t node_b);
   void LCKeyframes(LearnedKeyframe& key_frame_a, LearnedKeyframe& key_frame_b);
   OdometryFactor2D GetTotalOdomChange(const uint64_t node_a,
                                       const uint64_t node_b);
@@ -603,8 +609,8 @@ class Solver {
   vector<OdometryFactor2D> initial_odometry_factors;
   vector<SLAMNodeSolution2D> solution_;
   ros::NodeHandle n_;
-  vector<LCConstraint> loop_closure_constraints_;
-  vector<LCConstraint> hitl_constraints_;
+  vector<AutoLCConstraint> auto_lc_constraints_;
+  vector<HitlLCConstraint> hitl_constraints_;
   std::unique_ptr<VisualizationCallback> vis_callback_ = nullptr;
   vector<LearnedKeyframe> keyframes;
   ros::ServiceClient matcher_client;
