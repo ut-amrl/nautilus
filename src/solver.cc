@@ -609,13 +609,13 @@ bool Solver::AddAutoLCConstraint(uint64_t node_a_idx, uint64_t node_b_idx) {
 
   // get the relative transformation between the poses in the global reference frame
   Vector2f relativeTranslation = Eigen::Rotation2Df(target_pose[2]) * trans.first;
-  constraint.relative_transformation[0] = relativeTranslation.x();
-  constraint.relative_transformation[1] = relativeTranslation.y();
-  constraint.relative_transformation[2] = trans.second;
+  constraint.relative_transformation[0] = -relativeTranslation.x();
+  constraint.relative_transformation[1] = -relativeTranslation.y();
+  constraint.relative_transformation[2] = -trans.second;
 
-  source_pose[0] = solution_[node_b_idx].pose[0] + constraint.relative_transformation[0];
-  source_pose[1] = solution_[node_b_idx].pose[1] + constraint.relative_transformation[1];
-  source_pose[2] = solution_[node_b_idx].pose[2] + constraint.relative_transformation[2];
+  source_pose[0] = solution_[node_b_idx].pose[0] - constraint.relative_transformation[0];
+  source_pose[1] = solution_[node_b_idx].pose[1] - constraint.relative_transformation[1];
+  source_pose[2] = solution_[node_b_idx].pose[2] - constraint.relative_transformation[2];
 
   // Check the point correspondences to make sure the match is good enough
   PointCorrespondences correspondence(source_pose,
@@ -627,7 +627,7 @@ bool Solver::AddAutoLCConstraint(uint64_t node_a_idx, uint64_t node_b_idx) {
   temp_diff = temp_diff / constraint.node_a->lidar_factor.pointcloud.size();
 
   #if DEBUG
-  printf("matched %ld of %ld\n", correspondence.source_points.size(), constraint.node_a->lidar_factor.pointcloud.size());
+  printf("matched %ld of %ld, %ld\n", correspondence.source_points.size(), constraint.node_a->lidar_factor.pointcloud.size(), constraint.node_b->lidar_factor.pointcloud.size());
   printf("temp_diff %f\n", temp_diff);
   printf("poses (%f %f %f) (%f %f %f)\n", source_pose[0], source_pose[1], source_pose[2], target_pose[0], target_pose[1], target_pose[2]);
   #endif
@@ -648,16 +648,20 @@ bool Solver::AddAutoLCConstraint(uint64_t node_a_idx, uint64_t node_b_idx) {
   
   // for(const Vector2f& pt : problem_.nodes[constraint.node_b->node_idx].lidar_factor.pointcloud) {
   //   global_b.push_back(target_to_world * pt);
-  // }
+  }
 
-  // WaitForClose({GetTable(global_a, 100.0, 0.1), GetTable(global_b, 100.0, 0.1)});
+  // Draw local points
+  // WaitForClose({DrawPoints(problem_.nodes[constraint.node_a->node_idx].lidar_factor.pointcloud), DrawPoints(problem_.nodes[constraint.node_b->node_idx].lidar_factor.pointcloud)});
+  // Draw global points
+  // WaitForClose({GetTable(global_a, 80.0, 0.15), GetTable(global_b, 80.0, 0.15)});
   // #endif
 
   // Then this was a badly chosen LC, let's not continue with it
   // TODO: Decide if we want to use this or the CSM score as the threshold
-  if (temp_diff > config_.CONFIG_stopping_accuracy) {
+  // temp_diff > config_.CONFIG_stopping_accuracy
+  if (trans_prob_pair.first < config_.CONFIG_csm_score_threshold) {
     #if DEBUG
-    std::cout << "Failed to find valid transformation for pose, matched: "
+    std::cout << "Failed to find valid transformation for pose, score " << trans_prob_pair.first << ", matched: "
               << correspondence.source_points.size() << " points of " << constraint.node_a->lidar_factor.pointcloud.size() << std::endl;
     #endif
 
@@ -965,20 +969,6 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     printf("Not a keyframe due to lack of pose uncertainty. total distance %f \n", pose_dist);
     return;
   }
-
-  // Step 2: Check if this is a valid scan for loop closure by sub sampling from
-  // the scans close to it using local invariance.
-  // auto uncertainty = GetLocalUncertainty(node.node_idx);
-  // if (uncertainty.first > config_.CONFIG_local_uncertainty_condition_threshold ||
-  //     uncertainty.second > config_.CONFIG_local_uncertainty_scale_threshold)
-  //     {
-  //   #if DEBUG
-  //   printf("Not a keyframe due to lack of local invariance... Computed Uncertainty: %f, %f\n",
-  //           uncertainty.first,
-  //           uncertainty.second);
-  //   #endif
-  //   return;
-  // }
   
   #if DEBUG
   std::cout << "Adding Keyframe # " << keyframes.size() << std::endl;
@@ -1033,6 +1023,20 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     return;
   }
 
+  // Step X: Check if this is a valid scan for loop closure by sub sampling from
+  // the scans close to it using local invariance.
+  // auto uncertainty = GetLocalUncertainty(node.node_idx);
+  // if (uncertainty.first > config_.CONFIG_local_uncertainty_condition_threshold ||
+  //     uncertainty.second > config_.CONFIG_local_uncertainty_scale_threshold)
+  //     {
+  //   #if DEBUG
+  //   printf("Not a keyframe due to lack of local invariance... Computed Uncertainty: %f, %f\n",
+  //           uncertainty.first,
+  //           uncertainty.second);
+  //   #endif
+  //   return;
+  // }
+
   printf("Found match of pose %lu to %lu\n",
           keyframes[closest_index].node_idx,
           new_keyframe.node_idx);
@@ -1046,7 +1050,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   lc_output_file.open(config_.CONFIG_lc_debug_output_dir + "/lc_matches.txt", std::ios::app);
   lc_output_file << "Matched " << new_keyframe.node_idx << " " << keyframes[closest_index].node_idx << std::endl;;
   lc_output_file.close();
-  #if DEBUG
+  // #if DEBUG
   // Step 6: Perform loop closure between these poses if there is a LC.
   // std::vector<WrappedImage> images =
   //   {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud),
@@ -1062,7 +1066,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // SaveImage("LC_2",
   // GetTable(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud,
   // width, 0.03));
-  #endif
+  // #endif
 
   LearnedKeyframe best_match_keyframe = keyframes[closest_index];
   LCKeyframes(best_match_keyframe, new_keyframe);
