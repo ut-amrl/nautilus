@@ -55,6 +55,8 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
   vector<string> topics;
   topics.emplace_back(CONFIG_odom_topic.c_str());
   topics.emplace_back(CONFIG_lidar_topic.c_str());
+  bool found_odom = false;
+  bool found_lidar = false;
   rosbag::View view(bag, rosbag::TopicQuery(topics));
   SLAMTypeBuilder slam_builder;
   // Iterate through the bag
@@ -66,12 +68,14 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
       sensor_msgs::LaserScanPtr laser_scan =
           message.instantiate<sensor_msgs::LaserScan>();
       if (laser_scan != nullptr) {
+        found_lidar = true;
         slam_builder.LidarCallback(*laser_scan);
       }
     }
     {
       nav_msgs::OdometryPtr odom = message.instantiate<nav_msgs::Odometry>();
       if (odom != nullptr) {
+        found_odom = true;
         slam_builder.OdometryCallback(*odom);
       }
     }
@@ -83,9 +87,20 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
           printf("Error: Recieved Cobot odometry message, but differential odometry is not enabled.\n");
           exit(1);
         }
+        found_odom = true;
         slam_builder.OdometryCallback(*odom);
       }
     }
+  }
+  if (!found_lidar) {
+    printf("Did not find any lidar scans! Please check your specified topics.\n");
+  } else {
+    printf("Successfully found lidar messages.\n");
+  }
+  if (!found_odom) {
+    printf("Did not find any odometry messages! Please check your specified topics.\n");
+  } else {
+    printf("Successfully found odometry messages.\n");
   }
   bag.close();
   printf("Done.\n");

@@ -31,6 +31,8 @@ differential_odom=false
 -- The filename to output the finished poses to.
 pose_output_file="poses.txt"
 
+-- The filename to output the vectorized map to.
+map_output_file="map.txt"
 
 --[[ Performance Tuning Variables ]]--
 
@@ -47,14 +49,6 @@ stopping_accuracy=0.05
 -- Any point past this range in the lidar scan is truncated out.
 max_lidar_range=30
 
--- Loop closure translation multiplier, used during loop closure for
--- odometry residuals.
-lc_translation_weight=1
-
--- Loop closure rotation multiplier, used during loop closure for
--- odometry residuals.
-lc_rotation_weight=1
-
 -- The amount of rotation needed to signal a lidar scan capture.
 rotation_change_for_lidar=math.pi / 18
 
@@ -62,7 +56,7 @@ rotation_change_for_lidar=math.pi / 18
 translation_change_for_lidar=0.25
 
 -- The amount of previous lidar scans that each lidar scan will be compared against.
-lidar_constraint_amount=10
+lidar_constraint_amount=7
 
 -- Points further than this distance from each other cannot be counted
 -- as the same point during ICL / ICP.
@@ -98,15 +92,24 @@ hitl_pose_point_threshold=10
 -- Automatically loop close or not
 auto_lc=false
 
+-- whether or not to use chi_squared test for keyframes
+keyframe_chi_squared_test=false
+
+-- distance between keyframes if chi^2 is not in use
+keyframe_min_odom_distance=0.5
+
+-- whether or not to use local uncertainty filtering for keyframes
+keyframe_local_uncertainty_filtering=false
+
 -- All scans with local uncertainty less than this threshold are
--- one step closer to being used for automatic lc.
+-- one step closer to being used for automatic lc, if keyframe_local_uncertainty_filtering is on
 local_uncertainty_condition_threshold=9.5
 
 -- All scans with local uncertainty scale less than this threshold
--- are one step closer to being used for automatic lc.
+-- are one step closer to being used for automatic lc, if keyframe_local_uncertainty_filtering is on
 local_uncertainty_scale_threshold=0.3
 
--- The amount of previous scans to use for calculating local uncertainty.
+-- The amount of previous scans to use for calculating local uncertainty  if keyframe_local_uncertainty_filtering is on
 local_uncertainty_prev_scans=2
 
 -- threshold used in automatic loop closure.
@@ -117,6 +120,17 @@ lc_base_max_range = 3.0
 
 -- how much max range to consider a loop closure increases as nodes get more distant
 lc_max_range_scaling = 0.05
+
+-- Loop closure translation multiplier, used during loop closure for
+-- odometry residuals.
+lc_translation_weight=1
+
+-- Loop closure rotation multiplier, used during loop closure for
+-- odometry residuals.
+lc_rotation_weight=1
+
+-- minimum number of keyframes that must exist between loop closures.
+lc_min_keyframes=10
 
 -- used to dump images from auto-lc
 lc_debug_output_dir="auto_lc_debug"

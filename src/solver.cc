@@ -993,32 +993,49 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   }
 
   printf("Processing node %ld\n", node.node_idx);
-  if (node.node_idx != 41 && node.node_idx != 271) {
-    return;
-  }
-
+  
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
   // basically is it different than the last keyframe.
-  //   if (!SimilarScans(keyframes[keyframes.size() - 1].node_idx, node.node_idx,
-  //                     0.95)) {
-  // #if DEBUG
-  //     printf("Not a keyframe from chi^2\n");
-  // #endif
-  //     return;
-  //   }
+  if (config_.CONFIG_keyframe_chi_squared_test) {
+    if (!SimilarScans(keyframes[keyframes.size() - 1].node_idx, node.node_idx,
+                      0.95)) {
+      #if DEBUG
+      printf("Not a keyframe from chi^2\n");
+      #endif
+      return;
+    }
+  } else {
+    // Weak emulation of chi^2....only add keyframes after enough time has passed or we have moved far enough
+    SLAMNode2D& prev_key_node = problem_.nodes[keyframes[keyframes.size() - 1].node_idx];
+    double pose_dist = GetDifferenceOdom(node.node_idx, prev_key_node.node_idx).translation.norm();
+    if (pose_dist < config_.CONFIG_keyframe_min_odom_distance) {
+      printf("Not a keyframe due to lack of pose uncertainty. total distance %f \n", pose_dist);
+      return;
+    }
+  }
 
-  // Weak emulation of chi^2....only add keyframes after enough time has passed or we have moved far enough
-  SLAMNode2D& prev_key_node = problem_.nodes[keyframes[keyframes.size() - 1].node_idx];
-  double pose_dist = GetDifferenceOdom(node.node_idx, prev_key_node.node_idx).translation.norm();
-  if (pose_dist < 0.5) {
-    printf("Not a keyframe due to lack of pose uncertainty. total distance %f \n", pose_dist);
-    return;
+  // Step X: Check if this is a valid scan for loop closure by sub sampling from
+  // the scans close to it using local invariance.
+  if (config_.CONFIG_keyframe_local_uncertainty_filtering) {
+    auto uncertainty = GetLocalUncertainty(node.node_idx);
+    if (uncertainty.first > config_.CONFIG_local_uncertainty_condition_threshold ||
+        uncertainty.second > config_.CONFIG_local_uncertainty_scale_threshold)
+        {
+      #if DEBUG
+      printf("Not a keyframe due to lack of local invariance... Computed Uncertainty: %f, %f\n",
+              uncertainty.first,
+              uncertainty.second);
+      #endif
+      return;
+    }
   }
   
   #if DEBUG
   std::cout << "Adding Keyframe # " << keyframes.size() << std::endl;
   #endif
   AddKeyframe(node);
+
+
   // SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_" + std::to_string(node.node_idx) + ".bmp",
   //   GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud,
   //   img_width, 0.03));
@@ -1038,8 +1055,8 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   int64_t closest_index = -1;
   float best_match = 0.0;
 
-  // for (size_t match_index = 0; match_index < keyframes.size() - std::min(10, (int)keyframes.size()); match_index++) {
-  for (size_t match_index = 0; match_index < keyframes.size() - 1; match_index++) {
+  for (size_t match_index = 0; match_index < keyframes.size() - std::min(config_.CONFIG_lc_min_keyframes, (int)keyframes.size()); match_index++) {
+  // for (size_t match_index = 0; match_index < keyframes.size() - 1; match_index++) {
     LearnedKeyframe matched_keyframe = keyframes[match_index];
     SLAMNode2D& keyframe_node = problem_.nodes[matched_keyframe.node_idx];
     if ((node.pose.loc - keyframe_node.pose.loc).norm() > config_.CONFIG_lc_base_max_range + config_.CONFIG_lc_max_range_scaling * (node.node_idx - matched_keyframe.node_idx)) {
@@ -1070,20 +1087,6 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     return;
   }
 
-  // Step X: Check if this is a valid scan for loop closure by sub sampling from
-  // the scans close to it using local invariance.
-  // auto uncertainty = GetLocalUncertainty(node.node_idx);
-  // if (uncertainty.first > config_.CONFIG_local_uncertainty_condition_threshold ||
-  //     uncertainty.second > config_.CONFIG_local_uncertainty_scale_threshold)
-  //     {
-  //   #if DEBUG
-  //   printf("Not a keyframe due to lack of local invariance... Computed Uncertainty: %f, %f\n",
-  //           uncertainty.first,
-  //           uncertainty.second);
-  //   #endif
-  //   return;
-  // }
-
   printf("Found match of pose %lu to %lu\n",
           keyframes[closest_index].node_idx,
           new_keyframe.node_idx);
@@ -1097,8 +1100,8 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   lc_output_file.open(config_.CONFIG_lc_debug_output_dir + "/lc_matches.txt", std::ios::app);
   lc_output_file << "Matched " << new_keyframe.node_idx << " " << keyframes[closest_index].node_idx << std::endl;;
   lc_output_file.close();
+
   // #if DEBUG
-  // Step 6: Perform loop closure between these poses if there is a LC.
   // std::vector<WrappedImage> images =
   //   {DrawPoints(problem_.nodes[new_keyframe.node_idx].lidar_factor.pointcloud),
   //   DrawPoints(problem_.nodes[keyframes[closest_index].node_idx].lidar_factor.pointcloud)};
@@ -1115,6 +1118,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // width, 0.03));
   // #endif
 
+  // Step 6: Perform loop closure between these poses if there is a LC.
   LearnedKeyframe best_match_keyframe = keyframes[closest_index];
   LCKeyframes(best_match_keyframe, new_keyframe);
 }
@@ -1162,8 +1166,20 @@ void Solver::Vectorize(const WriteMsgConstPtr& msg) {
     gui_helpers::AddLine(line_start, line_end, gui_helpers::Color4f::kWhite,
                          &line_mark);
   }
-  std::cout << "Pointcloud size: " << whole_pointcloud.size() << std::endl;
-  std::cout << "Lines size: " << lines.size() << std::endl;
+  
+  std::cout << "Created map: Pointcloud size: " << whole_pointcloud.size() << "\tLines size: " << lines.size() << std::endl;
+  
+  if (config_.CONFIG_map_output_file.compare("") != 0) {
+    std::cout << "Writing map to file..." << std::endl;
+    std::ofstream output_file;
+    output_file.open(config_.CONFIG_map_output_file);
+    for(auto line : lines) {
+      output_file << line.start_point.x() << "," << line.start_point.y() << "," << line.end_point.x() << "," << line.end_point.y() << std::endl;
+    }
+    output_file.close();
+  }
+
+  std::cout << "Publishing map..." << std::endl;
   for (int i = 0; i < 5; i++) {
     lines_pub.publish(line_mark);
     sleep(1);

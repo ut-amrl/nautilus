@@ -1,0 +1,10 @@
+require("config.default_config")
+bag_path="/home/kavan/Research/bags/sim/airsim-lidar-scan-2020-06-05-21-32-08.bag"
+lidar_topic="/scan"
+odom_topic="/airsim_node/PhysXCar/odom"
+auto_lc=false
+pose_number=400
+differential_odom=false
+rotation_weight=2
+translation_weight=10
+lc_debug_output_dir="auto_lc_airsim"

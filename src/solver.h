@@ -145,6 +145,7 @@ struct SolverConfig {
   CONFIG_DOUBLE(lc_max_range_scaling, "lc_max_range_scaling");
   CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
   CONFIG_STRING(pose_output_file, "pose_output_file");
+  CONFIG_STRING(map_output_file, "map_output_file");
   CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
   CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
   CONFIG_DOUBLE(lc_match_threshold, "lc_match_threshold");
@@ -152,11 +153,17 @@ struct SolverConfig {
   CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
   CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
   CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
+
+  // Auto LC configs
+  CONFIG_BOOL(keyframe_local_uncertainty_filtering, "keyframe_local_uncertainty_filtering");
+  CONFIG_BOOL(keyframe_chi_squared_test, "keyframe_chi_squared_test");
+  CONFIG_DOUBLE(keyframe_min_odom_distance, "keyframe_min_odom_distance");
   CONFIG_DOUBLE(local_uncertainty_condition_threshold,
                 "local_uncertainty_condition_threshold");
   CONFIG_DOUBLE(local_uncertainty_scale_threshold,
                 "local_uncertainty_scale_threshold");
   CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
+  CONFIG_INT(lc_min_keyframes, "lc_min_keyframes");
   CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
   CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
   CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
@@ -639,7 +646,6 @@ class Solver {
                     const double certainty);
   std::pair<double, double> GetLocalUncertainty(const uint64_t node_idx);
   vector<size_t> GetMatchingKeyframeIndices(size_t keyframe_index);
-  std::string pose_output_file_;
   SLAMProblem2D problem_;
   vector<OdometryFactor2D> initial_odometry_factors;
   vector<SLAMNodeSolution2D> solution_;
