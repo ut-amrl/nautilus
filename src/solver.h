@@ -16,6 +16,7 @@
 #include "ros/package.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "visualization_msgs/Marker.h"
+#include "geometry_msgs/PoseArray.h"
 
 #include "./gui_helpers.h"
 #include "./kdtree.h"
@@ -269,15 +270,12 @@ class VisualizationCallback : public ceres::IterationCallback {
     all_points.clear();
     point_pub = n.advertise<sensor_msgs::PointCloud2>("/all_points", 10);
     new_point_pub = n.advertise<sensor_msgs::PointCloud2>("/new_points", 10);
-    pose_pub = n.advertise<visualization_msgs::Marker>("/poses", 10);
+    pose_pub = n.advertise<geometry_msgs::PoseArray>("/poses", 10);
     keyframe_poses_pub =
         n.advertise<visualization_msgs::Marker>("/keyframe_poses", 10);
     match_pub = n.advertise<visualization_msgs::Marker>("/matches", 10);
     normals_pub = n.advertise<visualization_msgs::Marker>("/normals", 10);
     keyframe_pub = n.advertise<sensor_msgs::PointCloud2>("/keyframes", 10);
-    gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_STRIP,
-                                  gui_helpers::Color4f::kGreen, 0.002, 0.0, 0.0,
-                                  &pose_array);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
                                   gui_helpers::Color4f::kBlue, 0.003, 0.0, 0.0,
                                   &match_line_list);
@@ -287,11 +285,16 @@ class VisualizationCallback : public ceres::IterationCallback {
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
                                   gui_helpers::Color4f::kRed, 0.003, 0.0, 0.0,
                                   &key_pose_array);
+    gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
+                                  gui_helpers::Color4f::kCyan, 0.002, 0.0, 0.0,
+                                  &auto_lc_pose_array);
+    pose_array.header.frame_id = "map";
     constraint_a_pose_pub = n.advertise<PointCloud2>("/hitl_poses_line_a", 10);
     constraint_b_pose_pub = n.advertise<PointCloud2>("/hitl_poses_line_b", 10);
     hitl_pointclouds = n.advertise<PointCloud2>("/hitl_pointclouds", 10);
     point_a_pub = n.advertise<PointCloud2>("/hitl_a_points", 100);
     point_b_pub = n.advertise<PointCloud2>("/hitl_b_points", 100);
+    auto_lc_poses_pub = n.advertise<visualization_msgs::Marker>("/auto_lc_poses", 10);
     line_pub = n.advertise<visualization_msgs::Marker>("/line_a", 10);
     pointcloud_helpers::InitPointcloud(&pose_a_point_marker);
     pointcloud_helpers::InitPointcloud(&pose_b_point_marker);
@@ -306,8 +309,8 @@ class VisualizationCallback : public ceres::IterationCallback {
   void PubVisualization() {
     const vector<SLAMNodeSolution2D>& solution_c = *solution;
     vector<Vector2f> new_points;
-    gui_helpers::ClearMarker(&pose_array);
     gui_helpers::ClearMarker(&key_pose_array);
+    pose_array.poses.clear();
     for (size_t i = 0; i < solution_c.size(); i++) {
       if (new_points.size() > 0) {
         all_points.insert(all_points.end(), new_points.begin(),
@@ -319,7 +322,13 @@ class VisualizationCallback : public ceres::IterationCallback {
           PoseArrayToAffine(&(solution_c[i].pose[2]), &(solution_c[i].pose[0]))
               .cast<float>();
       Eigen::Vector3f pose(solution_c[i].pose[0], solution_c[i].pose[1], 0.0);
-      gui_helpers::AddPoint(pose, gui_helpers::Color4f::kGreen, &pose_array);
+      // gui_helpers::AddPoint(pose, gui_helpers::Color4f::kGreen, &pose_array);
+      geometry_msgs::Pose p;
+      p.position.x = solution_c[i].pose[0];
+      p.position.y = solution_c[i].pose[1];
+      p.orientation.z = sin(solution_c[i].pose[2]/2);
+      p.orientation.w = cos(solution_c[i].pose[2]/2);
+      pose_array.poses.push_back(p);
       if (solution_c[i].is_keyframe) {
         gui_helpers::AddPoint(pose, gui_helpers::Color4f::kRed,
                               &key_pose_array);
@@ -360,12 +369,13 @@ class VisualizationCallback : public ceres::IterationCallback {
     }
     all_points.clear();
     PubConstraintVisualization();
+    PubAutoConstraints();
   }
 
   void PubConstraintVisualization() {
     const vector<SLAMNodeSolution2D>& solution_c = *solution;
     vector<Vector2f> line_a_poses;
-    for (const HitlLCConstraint& hitl_constraint : constraints) {
+    for (const HitlLCConstraint& hitl_constraint : hitl_constraints) {
       vector<Vector2f> a_points;
       vector<Vector2f> b_points;
       for (const LCPose& pose : hitl_constraint.line_a_poses) {
@@ -437,7 +447,7 @@ class VisualizationCallback : public ceres::IterationCallback {
 
   void PubConstraintPointclouds() {
     vector<Vector2f> pointclouds;
-    for (const HitlLCConstraint& hitl_constraint : constraints) {
+    for (const HitlLCConstraint& hitl_constraint : hitl_constraints) {
       for (const LCPose& pose : hitl_constraint.line_a_poses) {
         AddPosePointcloud(pointclouds, pose);
       }
@@ -447,6 +457,23 @@ class VisualizationCallback : public ceres::IterationCallback {
     }
     pointcloud_helpers::PublishPointcloud(pointclouds, hitl_points_marker,
                                           hitl_pointclouds);
+  }
+
+  void PubAutoConstraints() {
+    vector<Vector3f> poses;
+    gui_helpers::ClearMarker(&auto_lc_pose_array);
+    for (const AutoLCConstraint& auto_constraint : auto_constraints) {
+      // std::cout << "Frame #: " << frame.node_idx << std::endl;
+      const double* pose_arr_a = (*solution)[auto_constraint.node_a->node_idx].pose;
+      Vector3f pose_a(pose_arr_a[0], pose_arr_a[1], 0.0);
+      gui_helpers::AddPoint(pose_a, gui_helpers::Color4f::kCyan, &auto_lc_pose_array);
+      const double* pose_arr_b = (*solution)[auto_constraint.node_b->node_idx].pose;
+      Vector3f pose_b(pose_arr_b[0], pose_arr_b[1], 0.0);
+      gui_helpers::AddPoint(pose_b, gui_helpers::Color4f::kCyan, &auto_lc_pose_array);
+    }
+    if (auto_constraints.size() > 0) {
+      auto_lc_poses_pub.publish(auto_lc_pose_array);
+    }
   }
 
   void ClearNormals() { gui_helpers::ClearMarker(&normals_marker); }
@@ -483,7 +510,11 @@ class VisualizationCallback : public ceres::IterationCallback {
   }
 
   void AddConstraint(const HitlLCConstraint& constraint) {
-    constraints.push_back(constraint);
+    hitl_constraints.push_back(constraint);
+  }
+
+  void AddAutoLCConstraint(const AutoLCConstraint& constraint) {
+    auto_constraints.push_back(constraint);
   }
 
   void AddKeyframe(const LearnedKeyframe& keyframe) {
@@ -532,13 +563,15 @@ class VisualizationCallback : public ceres::IterationCallback {
   ros::Publisher constraint_a_pose_pub;
   ros::Publisher constraint_b_pose_pub;
   ros::Publisher keyframe_poses_pub;
+  ros::Publisher auto_lc_poses_pub;
   ros::Publisher point_a_pub;
   ros::Publisher point_b_pub;
   ros::Publisher line_pub;
   ros::Publisher hitl_pointclouds;
   ros::Publisher keyframe_pub;
-  visualization_msgs::Marker pose_array;
+  geometry_msgs::PoseArray pose_array;
   visualization_msgs::Marker key_pose_array;
+  visualization_msgs::Marker auto_lc_pose_array;
   visualization_msgs::Marker match_line_list;
   visualization_msgs::Marker normals_marker;
   PointCloud2 pose_a_point_marker;
@@ -551,7 +584,8 @@ class VisualizationCallback : public ceres::IterationCallback {
   // All the correspondences were the source is the same
   // (will be the last pointcloud aligned and all of its targets).
   vector<PointCorrespondences> last_correspondences;
-  vector<HitlLCConstraint> constraints;
+  vector<HitlLCConstraint> hitl_constraints;
+  vector<AutoLCConstraint> auto_constraints;
 };
 
 /*----------------------------------------------------------------------------*
@@ -562,6 +596,7 @@ class Solver {
  public:
   Solver(ros::NodeHandle& n);
   vector<SLAMNodeSolution2D> SolveSLAM();
+  vector<SLAMNodeSolution2D> SolvePoseSLAM();
   double GetPointCorrespondences(const LidarFactor& source_lidar, const LidarFactor& target_lidar,
     double* source_pose, double* target_pose, PointCorrespondences* point_correspondences);
   void AddOdomFactors(ceres::Problem* ceres_problem,
@@ -573,7 +608,7 @@ class Solver {
   vector<SLAMNodeSolution2D> GetSolution() { return solution_; }
   HitlLCConstraint GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg);
   void SolveForLC();
-  double AddResidualsForAutoLC(ceres::Problem& problem);
+  double AddResidualsForAutoLC(ceres::Problem* problem, bool include_lidar);
   void AddPointCloudResiduals(ceres::Problem* problem);
   vector<OdometryFactor2D> GetSolvedOdomFactors();
   void AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node);
