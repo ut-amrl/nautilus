@@ -27,6 +27,7 @@ using std::vector;
 
 CONFIG_STRING(bag_path, "bag_path");
 CONFIG_BOOL(auto_lc, "auto_lc");
+CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
 CONFIG_STRING(lidar_topic, "lidar_topic");
 CONFIG_STRING(odom_topic, "odom_topic");
 CONFIG_STRING(hitl_lc_topic, "hitl_lc_topic");
@@ -133,6 +134,9 @@ void LearnedLoopClosure(SLAMProblem2D& slam_problem, Solver& solver) {
   // But only if automatic loop closure is enabled.
   if (CONFIG_auto_lc) {
     std::cout << "Automatically loop closing" << std::endl;
+    std::ofstream lc_output_file;
+    lc_output_file.open(CONFIG_lc_debug_output_dir + "/lc_matches.txt", std::ios::trunc);
+    lc_output_file.close();
     for (SLAMNode2D& node : slam_problem.nodes) {
       solver.CheckForLearnedLC(node);
     }

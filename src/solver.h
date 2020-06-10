@@ -90,6 +90,9 @@ struct HitlLCConstraint {
 struct AutoLCConstraint {
   const SLAMNode2D* node_a;
   const SLAMNode2D* node_b;
+  double source_pose[3];
+  double target_pose[3];
+  float match_ratio;
   Vector3f relative_transformation;
 };
 
@@ -638,7 +641,8 @@ class Solver {
   float GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe);
   bool AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
                             LearnedKeyframe& key_frame_b);
-  bool AddAutoLCConstraint(const uint64_t node_a, const uint64_t node_b);
+  AutoLCConstraint computeAutoLCConstraint(const uint64_t node_a, const uint64_t node_b);
+  bool AddAutoLCConstraint(const AutoLCConstraint& constraint);
   void LCKeyframes(LearnedKeyframe& key_frame_a, LearnedKeyframe& key_frame_b);
   OdometryFactor2D GetTotalOdomChange(const uint64_t node_a,
                                       const uint64_t node_b);

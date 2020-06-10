@@ -612,7 +612,7 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
  *                        AUTONOMOUS LOOP CLOSURE                             |
  *----------------------------------------------------------------------------*/
 
-bool Solver::AddAutoLCConstraint(uint64_t node_a_idx, uint64_t node_b_idx) {
+AutoLCConstraint Solver::computeAutoLCConstraint(uint64_t node_a_idx, uint64_t node_b_idx) {
   AutoLCConstraint constraint;
   // Compute the transformation necessary to go from node a to node b, in b's reference frame
   std::pair<double, std::pair<Vector2f, float>> trans_prob_pair =
@@ -623,57 +623,48 @@ bool Solver::AddAutoLCConstraint(uint64_t node_a_idx, uint64_t node_b_idx) {
           solution_[node_b_idx].pose[2],
           math_util::DegToRad(90));
   auto trans = trans_prob_pair.second;
-  #if DEBUG
-  std::cout << "Original angle estimates: " << solution_[node_a_idx].pose[2] <<  " " << solution_[node_b_idx].pose[2]
-            << std::endl;
-  std::cout << "Found trans with prob: " << trans_prob_pair.first
-            << std::endl;
-  std::cout << "Transformation: " << std::endl
-            << trans.first << std::endl
-            << trans.second << std::endl;
-  #endif
 
   constraint.node_a = &problem_.nodes[node_a_idx];
   constraint.node_b = &problem_.nodes[node_b_idx];
 
-  double source_pose[3];
-  double* target_pose = solution_[node_b_idx].pose;
+  constraint.target_pose[0] = solution_[node_b_idx].pose[0];
+  constraint.target_pose[1] = solution_[node_b_idx].pose[1];
+  constraint.target_pose[2] = solution_[node_b_idx].pose[2];
 
   // get the relative transformation between the poses in the global reference frame
-  Vector2f relativeTranslation = Eigen::Rotation2Df(target_pose[2]) * trans.first;
+  Vector2f relativeTranslation = Eigen::Rotation2Df(constraint.target_pose[2]) * trans.first;
   constraint.relative_transformation[0] = -relativeTranslation.x();
   constraint.relative_transformation[1] = -relativeTranslation.y();
   constraint.relative_transformation[2] = -trans.second;
 
-  source_pose[0] = solution_[node_b_idx].pose[0] - constraint.relative_transformation[0];
-  source_pose[1] = solution_[node_b_idx].pose[1] - constraint.relative_transformation[1];
-  source_pose[2] = solution_[node_b_idx].pose[2] - constraint.relative_transformation[2];
+  constraint.source_pose[0] = solution_[node_b_idx].pose[0] - constraint.relative_transformation[0];
+  constraint.source_pose[1] = solution_[node_b_idx].pose[1] - constraint.relative_transformation[1];
+  constraint.source_pose[2] = solution_[node_b_idx].pose[2] - constraint.relative_transformation[2];
 
   // Check the point correspondences to make sure the match is good enough
-  PointCorrespondences correspondence(source_pose,
-                                      target_pose,
+  PointCorrespondences correspondence(constraint.source_pose,
+                                      constraint.target_pose,
                                       constraint.node_a->node_idx, constraint.node_b->node_idx);
-  double temp_diff = GetPointCorrespondences(
-      constraint.node_a->lidar_factor, constraint.node_b->lidar_factor, source_pose, target_pose, &correspondence);
+  double temp_diff =  GetPointCorrespondences(constraint.node_a->lidar_factor,
+                                              constraint.node_b->lidar_factor,
+                                              constraint.source_pose, constraint.target_pose, &correspondence);
 
   temp_diff = temp_diff / constraint.node_a->lidar_factor.pointcloud.size();
 
-  double match_ratio = (double)correspondence.source_points.size() / std::min(constraint.node_a->lidar_factor.pointcloud.size(), constraint.node_b->lidar_factor.pointcloud.size());
+  constraint.match_ratio = (double)correspondence.source_points.size() / std::min(constraint.node_a->lidar_factor.pointcloud.size(), constraint.node_b->lidar_factor.pointcloud.size());
 
-  #if DEBUG
-  printf("matched %ld of %ld, %ld\n", correspondence.source_points.size(), constraint.node_a->lidar_factor.pointcloud.size(), constraint.node_b->lidar_factor.pointcloud.size());
-  printf("temp_diff %f\n", temp_diff);
-  printf("poses (%f %f %f) (%f %f %f)\n", source_pose[0], source_pose[1], source_pose[2], target_pose[0], target_pose[1], target_pose[2]);
-  #endif
+  return constraint;
+}
 
+bool Solver::AddAutoLCConstraint(const AutoLCConstraint& constraint) {
   #if DEBUG
   std::vector<Vector2f> global_a;
   std::vector<Vector2f> global_b;
   Affine2f target_to_world =
-    PoseArrayToAffine(&target_pose[2], &target_pose[0])
+    PoseArrayToAffine(&constraint.target_pose[2], &constraint.target_pose[0])
         .cast<float>();
   Affine2f source_to_world =
-    PoseArrayToAffine(&source_pose[2], &source_pose[0])
+    PoseArrayToAffine(&constraint.source_pose[2], &constraint.source_pose[0])
         .cast<float>();
   
   for(const Vector2f& pt : problem_.nodes[constraint.node_a->node_idx].lidar_factor.pointcloud) {
@@ -690,23 +681,20 @@ bool Solver::AddAutoLCConstraint(uint64_t node_a_idx, uint64_t node_b_idx) {
   WaitForClose({GetTable(global_a, 80.0, 0.15), GetTable(global_b, 80.0, 0.15)});
   #endif
 
+  #if DEBUG
+  printf("match ratio %f\n", constraint.match_ratio);
+  printf("poses (%f %f %f) (%f %f %f)\n", constraint.source_pose[0], constraint.source_pose[1], constraint.source_pose[2], constraint.target_pose[0], constraint.target_pose[1], constraint.target_pose[2]);
+  #endif
+
   // Then this was a badly chosen LC, let's not continue with it
   // TODO: Decide if we want to use this or the CSM score as the threshold
-  // temp_diff > config_.CONFIG_stopping_accuracy
-
-  if (match_ratio < 0.5) {
+  if (constraint.match_ratio < 0.5) {
     #if DEBUG
-    std::cout << "Failed to find valid transformation for pose, score " << trans_prob_pair.first << ", matched: "
-              << correspondence.source_points.size() << " points of " << constraint.node_a->lidar_factor.pointcloud.size() << std::endl;
+    std::cout << "Failed to find valid transformation for pose, match ratio: " << constraint.match_ratio << std::endl;
     #endif
 
     return false;
   }
-  
-  // Update our solution
-  // solution_[node_a_idx].pose[0] = source_pose[0];
-  // solution_[node_a_idx].pose[1] = source_pose[1];
-  // solution_[node_a_idx].pose[2] = source_pose[2];
 
   std::cout << "Writing LC Info" << std::endl;
   std::ofstream lc_output_file;
@@ -718,6 +706,14 @@ bool Solver::AddAutoLCConstraint(uint64_t node_a_idx, uint64_t node_b_idx) {
   // add constraint
   auto_lc_constraints_.push_back(constraint);
   vis_callback_->AddAutoLCConstraint(constraint);
+
+  // Solve the pose graph problem
+  std::cout << "Solving pose problem" << std::endl;
+  SolvePoseSLAM();
+  std::cout << "Solved pose problem" << std::endl;
+  sleep(10);
+  // problem_.odometry_factors = initial_odometry_factors;
+  SolveSLAM();
   return true;
 }
 
@@ -941,25 +937,6 @@ void Solver::AddKeyframe(SLAMNode2D& node) {
   keyframes.emplace_back(node.node_idx);
 }
 
-bool Solver::AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
-                                  LearnedKeyframe& key_frame_b) {
-  return AddAutoLCConstraint(key_frame_a.node_idx, key_frame_b.node_idx);
-}
-
-void Solver::LCKeyframes(LearnedKeyframe& key_frame_a,
-                         LearnedKeyframe& key_frame_b) {
-  // Solve the pose graph problem
-  if (AddKeyframeResiduals(key_frame_a, key_frame_b)) {
-    std::cout << "Solving pose problem" << std::endl;
-    SolvePoseSLAM();
-    std::cout << "Solved pose problem" << std::endl;
-    sleep(10);
-    // problem_.odometry_factors = initial_odometry_factors;
-    SolveSLAM();
-    // std::cout << "Solved SLAM problem" << std::endl;
-  }
-}
-
 vector<size_t> Solver::GetMatchingKeyframeIndices(size_t keyframe_index) {
   vector<size_t> matches;
   for (size_t i = 0; i < keyframes.size(); i++) {
@@ -1034,11 +1011,10 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   std::cout << "Adding Keyframe # " << keyframes.size() << std::endl;
   #endif
   AddKeyframe(node);
-
-
   // SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_" + std::to_string(node.node_idx) + ".bmp",
   //   GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud,
   //   img_width, 0.03));
+
   // Step 4: Compare against all previous keyframes and see if there is a
   // or is similar using Chi^2
   // vector<size_t> matches = GetMatchingKeyframeIndices(keyframes.size() - 1);
@@ -1052,8 +1028,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // Step 5: Compare the embeddings and see if there is a match as well.
   // Find the closest embedding in all the matches to our new keyframe.
   LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
-  int64_t closest_index = -1;
-  float best_match = 0.0;
+  vector<size_t> matches;
 
   for (size_t match_index = 0; match_index < keyframes.size() - std::min(config_.CONFIG_lc_min_keyframes, (int)keyframes.size()); match_index++) {
   // for (size_t match_index = 0; match_index < keyframes.size() - 1; match_index++) {
@@ -1068,37 +1043,25 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
 
     float match_score = GetMatchScores(node, keyframe_node);
 
-    if (match_score > best_match) {
-      #if DEBUG
-      printf("New best match found: %f\n", match_score);
-      #endif
-      best_match = match_score;
-      closest_index = match_index;
+    if (match_score > config_.CONFIG_lc_match_threshold) {
+      matches.push_back(match_index);
     }
   }
 
-  printf("BEST %f\n", best_match);
-  if (closest_index == -1 ||
-      best_match < config_.CONFIG_lc_match_threshold) {
-    #if DEBUG
-    printf("Out of %lu keyframes, none were sufficient for LC\n",
-            keyframes.size() - 1);
-    #endif
+  if (matches.size() == 0) {
     return;
   }
 
-  printf("Found match of pose %lu to %lu\n",
-          keyframes[closest_index].node_idx,
-          new_keyframe.node_idx);
-  printf("timestamps: %f, %f\n\n",
-          problem_.nodes[keyframes[closest_index].node_idx].timestamp,
-          problem_.nodes[new_keyframe.node_idx].timestamp);
-  printf("This is a LC by key frame matcher!\n\n\n\n");
-
-  std::cout << "Writing LC Info" << std::endl;
   std::ofstream lc_output_file;
   lc_output_file.open(config_.CONFIG_lc_debug_output_dir + "/lc_matches.txt", std::ios::app);
-  lc_output_file << "Matched " << new_keyframe.node_idx << " " << keyframes[closest_index].node_idx << std::endl;;
+  std::vector<AutoLCConstraint> constraints;
+  for(auto idx : matches) {
+    printf("Found match of pose %lu to %lu\n",
+            keyframes[idx].node_idx,
+            new_keyframe.node_idx);
+    lc_output_file << "Matched " << new_keyframe.node_idx << " " << keyframes[idx].node_idx << std::endl; 
+    constraints.push_back(computeAutoLCConstraint(keyframes[idx].node_idx, new_keyframe.node_idx));
+  }
   lc_output_file.close();
 
   // #if DEBUG
@@ -1118,9 +1081,17 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // width, 0.03));
   // #endif
 
+  size_t best_idx;
+  float best_match = -1;
+  for(size_t i = 0; i < constraints.size(); i++) {
+    if (constraints[i].match_ratio > best_match) {
+      best_idx = i;
+      best_match = constraints[i].match_ratio;
+    }
+  }
+
   // Step 6: Perform loop closure between these poses if there is a LC.
-  LearnedKeyframe best_match_keyframe = keyframes[closest_index];
-  LCKeyframes(best_match_keyframe, new_keyframe);
+  AddAutoLCConstraint(constraints[best_idx]);
 }
 
 /*----------------------------------------------------------------------------*
