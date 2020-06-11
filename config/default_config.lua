@@ -60,7 +60,7 @@ lidar_constraint_amount=7
 
 -- Points further than this distance from each other cannot be counted
 -- as the same point during ICL / ICP.
-outlier_threshold=0.25
+outlier_threshold=0.15
 
 -- Translational and Rotational standard deviation, proportional to the translational and rotational change.
 -- See these slides for more information:
@@ -99,7 +99,7 @@ keyframe_chi_squared_test=false
 keyframe_min_odom_distance=0.5
 
 -- whether or not to use local uncertainty filtering for keyframes
-keyframe_local_uncertainty_filtering=false
+keyframe_local_uncertainty_filtering=true
 
 -- All scans with local uncertainty less than this threshold are
 -- one step closer to being used for automatic lc, if keyframe_local_uncertainty_filtering is on
@@ -116,10 +116,10 @@ local_uncertainty_prev_scans=2
 lc_match_threshold=0.5
 
 -- base max range to consider a loop closure
-lc_base_max_range = 3.0
+lc_base_max_range = 2.0
 
 -- how much max range to consider a loop closure increases as nodes get more distant
-lc_max_range_scaling = 0.05
+lc_max_range_scaling = 0.01
 
 -- Loop closure translation multiplier, used during loop closure for
 -- odometry residuals.

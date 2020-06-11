@@ -296,7 +296,7 @@ class VisualizationCallback : public ceres::IterationCallback {
                                   gui_helpers::Color4f::kRed, 0.003, 0.0, 0.0,
                                   &key_pose_array);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
-                                  gui_helpers::Color4f::kCyan, 0.002, 0.0, 0.0,
+                                  gui_helpers::Color4f::kCyan, 0.01, 0.0, 0.0,
                                   &auto_lc_pose_array);
     pose_array.header.frame_id = "map";
     constraint_a_pose_pub = n.advertise<PointCloud2>("/hitl_poses_line_a", 10);

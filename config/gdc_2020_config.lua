@@ -7,5 +7,3 @@ pose_number=400
 differential_odom=true
 lc_debug_output_dir="auto_lc_debug_gdc1"
 map_output_file="gdc1_map.txt"
-lc_rotation_weight=0
-lc_translation_weight=0

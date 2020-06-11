@@ -24,7 +24,7 @@
 #include "./solver.h"
 #include "./cimg_debug.h"
 
-#define DEBUG true
+#define DEBUG false
 
 using ceres::AutoDiffCostFunction;
 using Eigen::Affine2f;
@@ -706,14 +706,15 @@ bool Solver::AddAutoLCConstraint(const AutoLCConstraint& constraint) {
   // add constraint
   auto_lc_constraints_.push_back(constraint);
   vis_callback_->AddAutoLCConstraint(constraint);
+  vis_callback_->PubVisualization();
 
-  // Solve the pose graph problem
-  std::cout << "Solving pose problem" << std::endl;
-  SolvePoseSLAM();
-  std::cout << "Solved pose problem" << std::endl;
-  sleep(10);
-  // problem_.odometry_factors = initial_odometry_factors;
-  SolveSLAM();
+  // // Solve the pose graph problem
+  // std::cout << "Solving pose problem" << std::endl;
+  // SolvePoseSLAM();
+  // std::cout << "Solved pose problem" << std::endl;
+  // sleep(10);
+  // // problem_.odometry_factors = initial_odometry_factors;
+  // SolveSLAM();
   return true;
 }
 
@@ -969,8 +970,9 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     return;
   }
 
+  # if DEBUG
   printf("Processing node %ld\n", node.node_idx);
-  
+  #endif
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
   // basically is it different than the last keyframe.
   if (config_.CONFIG_keyframe_chi_squared_test) {
@@ -986,7 +988,9 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     SLAMNode2D& prev_key_node = problem_.nodes[keyframes[keyframes.size() - 1].node_idx];
     double pose_dist = GetDifferenceOdom(node.node_idx, prev_key_node.node_idx).translation.norm();
     if (pose_dist < config_.CONFIG_keyframe_min_odom_distance) {
+      #if DEBUG
       printf("Not a keyframe due to lack of pose uncertainty. total distance %f \n", pose_dist);
+      #endif     
       return;
     }
   }
@@ -1007,9 +1011,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
     }
   }
   
-  #if DEBUG
-  std::cout << "Adding Keyframe # " << keyframes.size() << std::endl;
-  #endif
+  std::cout << "Adding Keyframe # " << keyframes.size() << " at node " << node.node_idx << std::endl;
   AddKeyframe(node);
   // SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_" + std::to_string(node.node_idx) + ".bmp",
   //   GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud,
@@ -1056,9 +1058,11 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   lc_output_file.open(config_.CONFIG_lc_debug_output_dir + "/lc_matches.txt", std::ios::app);
   std::vector<AutoLCConstraint> constraints;
   for(auto idx : matches) {
+    #if DEBUG
     printf("Found match of pose %lu to %lu\n",
             keyframes[idx].node_idx,
             new_keyframe.node_idx);
+    #endif
     lc_output_file << "Matched " << new_keyframe.node_idx << " " << keyframes[idx].node_idx << std::endl; 
     constraints.push_back(computeAutoLCConstraint(keyframes[idx].node_idx, new_keyframe.node_idx));
   }
@@ -1089,6 +1093,13 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
       best_match = constraints[i].match_ratio;
     }
   }
+
+  printf("Adding Loop Closure constraint %ld %ld. (%f %f %f)\n",
+    constraints[best_idx].node_a->node_idx, 
+    constraints[best_idx].node_b->node_idx,
+    constraints[best_idx].relative_transformation[0],
+    constraints[best_idx].relative_transformation[1],
+    constraints[best_idx].relative_transformation[2]);
 
   // Step 6: Perform loop closure between these poses if there is a LC.
   AddAutoLCConstraint(constraints[best_idx]);
