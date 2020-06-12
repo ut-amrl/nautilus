@@ -644,10 +644,10 @@ class Solver {
   AutoLCConstraint computeAutoLCConstraint(const uint64_t node_a, const uint64_t node_b);
   bool AddAutoLCConstraint(const AutoLCConstraint& constraint);
   void LCKeyframes(LearnedKeyframe& key_frame_a, LearnedKeyframe& key_frame_b);
-  OdometryFactor2D GetTotalOdomChange(const uint64_t node_a,
-                                      const uint64_t node_b);
+  OdometryFactor2D GetTotalOdomChange(const std::vector<OdometryFactor2D>& factors);
   bool SimilarScans(const uint64_t node_a, const uint64_t node_b,
                     const double certainty);
+  vector<OdometryFactor2D> GetSolvedOdomFactorsBetweenNodes(uint64_t node_a, uint64_t node_b);
   std::pair<double, double> GetLocalUncertainty(const uint64_t node_idx);
   vector<size_t> GetMatchingKeyframeIndices(size_t keyframe_index);
   SLAMProblem2D problem_;
