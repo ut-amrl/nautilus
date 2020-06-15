@@ -56,11 +56,11 @@ rotation_change_for_lidar=math.pi / 18
 translation_change_for_lidar=0.25
 
 -- The amount of previous lidar scans that each lidar scan will be compared against.
-lidar_constraint_amount=7
+lidar_constraint_amount=10
 
 -- Points further than this distance from each other cannot be counted
 -- as the same point during ICL / ICP.
-outlier_threshold=0.15
+outlier_threshold=0.25
 
 -- Translational and Rotational standard deviation, proportional to the translational and rotational change.
 -- See these slides for more information:

@@ -20,12 +20,13 @@
 #include "nautilus/HitlSlamInputMsg.h"
 #include "nautilus/WriteMsg.h"
 #include "laser_scan_matcher/MatchLaserScans.h"
+#include "local_uncertainty_estimator/EstimateLocalUncertainty.h"
 #include "timer.h"
 
 #include "./solver.h"
 #include "./cimg_debug.h"
 
-#define DEBUG false
+#define DEBUG true
 
 using ceres::AutoDiffCostFunction;
 using Eigen::Affine2f;
@@ -38,6 +39,7 @@ using nautilus::HitlSlamInputMsgConstPtr;
 using nautilus::WriteMsgConstPtr;
 using math_util::NormalsSimilar;
 using laser_scan_matcher::MatchLaserScans;
+using local_uncertainty_estimator::EstimateLocalUncertainty;
 using slam_types::LidarFactor;
 using slam_types::OdometryFactor2D;
 using slam_types::SLAMNode2D;
@@ -200,6 +202,8 @@ struct PointToLineResidual {
 Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(30, 2, 0.3, 0.01) {
   matcher_client =
       n_.serviceClient<MatchLaserScans>("match_laser_scans");
+  local_uncertainty_client =
+      n_.serviceClient<EstimateLocalUncertainty>("estimate_local_uncertainty");
   vis_callback_ = std::unique_ptr<VisualizationCallback>(
       new VisualizationCallback(keyframes, n_));
 }
@@ -272,8 +276,8 @@ vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
     std::cout << (A_Mi * A_chain).matrix() << std::endl;
 
     // Now do COP-SLAM
-
     uint64_t N = j - i;
+
     // compute weights;
     // for now, all 1?
     std::vector<double> weights;
@@ -281,7 +285,7 @@ vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
       weights.push_back(1.0 / N);
     }
 
-    Eigen::Matrix3f jarg = (A_Mj.inverse() * A_Mj_star).matrix();
+    Eigen::Matrix3f jarg = (A_chain.inverse() * A_Mj_star).matrix();
     Eigen::Matrix3f jarg_log = jarg.log();
 
     printf("computed jargs\n");
@@ -307,9 +311,8 @@ vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
       Affine2f update_local = J_1.inverse() * J_2;
       // Compute distributed update (14)
       Eigen::Affine2f A_k = Eigen::Translation2f(solution_[i + k].pose[0], solution_[i + k].pose[1]) * Eigen::Rotation2Df(solution_[i + k].pose[2]);
-      Affine2f update_distributed = A_k.inverse() * A_chain * update_local * A_chain.inverse() * A_k;
-      
-      
+      Affine2f update_distributed = A_k.inverse() * A_Mj_star * update_local * A_Mj_star.inverse() * A_k;
+
       solution_[i+k].pose[0] += update_distributed.translation().x();
       solution_[i+k].pose[1] += update_distributed.translation().y();
       solution_[i+k].pose[2] += Eigen::Rotation2Df(update_distributed.rotation()).angle();
@@ -701,12 +704,12 @@ bool Solver::AddAutoLCConstraint(const AutoLCConstraint& constraint) {
   vis_callback_->AddAutoLCConstraint(constraint);
   vis_callback_->PubVisualization();
 
-  // // Solve the pose graph problem
-  // std::cout << "Solving pose problem" << std::endl;
+  // Solve the pose graph problem
+  std::cout << "Solving pose problem" << std::endl;
   SolvePoseSLAM();
-  // std::cout << "Solved pose problem" << std::endl;
+  std::cout << "Solved pose problem" << std::endl;
   // sleep(10);
-  // // problem_.odometry_factors = initial_odometry_factors;
+  // problem_.odometry_factors = initial_odometry_factors;
   // SolveSLAM();
   return true;
 }
@@ -852,7 +855,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   // Step X: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
   if (config_.CONFIG_keyframe_local_uncertainty_filtering) {
-    auto uncertainty = GetLocalUncertainty(node.node_idx);
+    auto uncertainty = GetLocalUncertaintyEstimate(node.node_idx);
     if (uncertainty.first > config_.CONFIG_local_uncertainty_condition_threshold ||
         uncertainty.second > config_.CONFIG_local_uncertainty_scale_threshold)
         {
@@ -863,10 +866,16 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
       #endif
       return;
     }
+    WaitForClose({DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud)});
   }
   
   std::cout << "Adding Keyframe # " << keyframes.size() << " at node " << node.node_idx << std::endl;
   AddKeyframe(node);
+
+  // only LC this one place
+  if (node.node_idx < 200) {
+    return;
+  }
   // SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_" + std::to_string(node.node_idx) + ".bmp",
   //   GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud,
   //   img_width, 0.03));
@@ -1117,13 +1126,25 @@ float Solver::GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe) {
   srv.request.scan = node.lidar_factor.scan;
   srv.request.alt_scan = keyframe.lidar_factor.scan;
 
-  printf("COMPARING %ld %ld\n", node.node_idx, keyframe.node_idx);
   int response = matcher_client.call(srv);
   if (response) {
     float score = srv.response.match_prob;
     return score;
   } else {
     std::cerr << "Failed to call service match_laser_scans: "  << response  << "\t" << srv.response.match_prob << std::endl;
+    exit(100);
+  }
+}
+
+std::pair<double, double> Solver::GetLocalUncertaintyEstimate(const uint64_t node_idx) {
+  local_uncertainty_estimator::EstimateLocalUncertainty srv;
+  srv.request.scan = problem_.nodes[node_idx].lidar_factor.scan;
+
+  int response = local_uncertainty_client.call(srv);
+  if (response) {
+    return std::pair<double, double>(srv.response.condition_num, srv.response.scale);
+  } else {
+    std::cerr << "Failed to call service match_laser_scans: "  << response << std::endl;
     exit(100);
   }
 }
@@ -1216,6 +1237,7 @@ void Solver::Vectorize(const WriteMsgConstPtr& msg) {
     pc = TransformPointcloud(solution_[n.node_idx].pose, pc);
     whole_pointcloud.insert(whole_pointcloud.begin(), pc.begin(), pc.end());
   }
+  
   vector<LineSegment> lines = VectorMaps::ExtractLines(whole_pointcloud);
   // --- Visualize ---
   visualization_msgs::Marker line_mark;

@@ -27,10 +27,12 @@ INCLUDE_DIRECTORIES(third_party/eigen)
 INCLUDE($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
 add_subdirectory(third_party)
 
+set(CONFIG_READER_INCLUDE_DIR third_party/config-reader/include)
+INCLUDE_DIRECTORIES(third_party/config-reader/include)
 INCLUDE_DIRECTORIES(third_party/csm/src)
 INCLUDE_DIRECTORIES(third_party/vector_maps/src)
 INCLUDE_DIRECTORIES(third_party/learning-loop-closure/laser_scan_matcher/srv_gen/cpp/include)
-INCLUDE_DIRECTORIES(third_party/config-reader/include)
+INCLUDE_DIRECTORIES(third_party/learning-loop-closure/local_uncertainty_estimator/srv_gen/cpp/include)
 
 rosbuild_init()
 

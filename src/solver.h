@@ -649,6 +649,7 @@ class Solver {
                     const double certainty);
   vector<OdometryFactor2D> GetSolvedOdomFactorsBetweenNodes(uint64_t node_a, uint64_t node_b);
   std::pair<double, double> GetLocalUncertainty(const uint64_t node_idx);
+  std::pair<double, double> GetLocalUncertaintyEstimate(const uint64_t node_idx);
   vector<size_t> GetMatchingKeyframeIndices(size_t keyframe_index);
   SLAMProblem2D problem_;
   vector<OdometryFactor2D> initial_odometry_factors;
@@ -659,6 +660,7 @@ class Solver {
   std::unique_ptr<VisualizationCallback> vis_callback_ = nullptr;
   vector<LearnedKeyframe> keyframes;
   ros::ServiceClient matcher_client;
+  ros::ServiceClient local_uncertainty_client;
   CorrelativeScanMatcher scan_matcher;
   CeresInformation ceres_information;
   SolverConfig config_;
