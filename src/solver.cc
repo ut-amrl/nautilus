@@ -251,14 +251,15 @@ vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
   // }
   
   // Apply Loop closures to current solution
+  // This is COP SLAM
   for(auto constraint : auto_lc_constraints_) {
     uint64_t i = constraint.node_a->node_idx;
     uint64_t j = constraint.node_b->node_idx;
     SLAMNodeSolution2D sol_i = solution_[constraint.node_a->node_idx];
     SLAMNodeSolution2D sol_j = solution_[constraint.node_b->node_idx];
-    Eigen::Affine2f A_Mi = Eigen::Translation2f(sol_i.pose[0], sol_i.pose[1]) * Eigen::Rotation2Df(sol_i.pose[2]);
-    Eigen::Affine2f A_Mj = Eigen::Translation2f(sol_j.pose[0], sol_j.pose[1]) * Eigen::Rotation2Df(sol_j.pose[2]);
-    Eigen::Affine2f A_Mj_star = A_Mi * Eigen::Affine2f(Eigen::Translation2f(constraint.relative_transformation[0], constraint.relative_transformation[1]) * Eigen::Rotation2Df(constraint.relative_transformation[2]));
+    Eigen::Affine2d A_Mi = Eigen::Translation2d(sol_i.pose[0], sol_i.pose[1]) * Eigen::Rotation2Dd(sol_i.pose[2]);
+    Eigen::Affine2d A_Mj = Eigen::Translation2d(sol_j.pose[0], sol_j.pose[1]) * Eigen::Rotation2Dd(sol_j.pose[2]);
+    Eigen::Affine2d A_Mj_star = A_Mi * Eigen::Affine2d(Eigen::Translation2d(constraint.relative_transformation[0], constraint.relative_transformation[1]) * Eigen::Rotation2Dd(constraint.relative_transformation[2]));
 
     std::cout << "Mi" << std::endl;
     std::cout << A_Mi.matrix() << std::endl;
@@ -267,26 +268,50 @@ vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
     std::cout << "Mj_star" << std::endl;
     std::cout << A_Mj_star.matrix() << std::endl;
 
-    std::vector<OdometryFactor2D> factors = GetSolvedOdomFactorsBetweenNodes(i, j);
-    OdometryFactor2D chainFactor = GetTotalOdomChange(factors);
-    Eigen::Affine2f A_chain = Eigen::Translation2f(chainFactor.translation) * Eigen::Rotation2Df(chainFactor.rotation);
+    // std::vector<OdometryFactor2D> factors = GetSolvedOdomFactorsBetweenNodes(i, j);
+    // OdometryFactor2D chainFactor = GetTotalOdomChange(factors);
+    // Eigen::Affine2d A_chain = Eigen::Translation2f(chainFactor.translation) * Eigen::Rotation2Df(chainFactor.rotation);
 
-    // Validated that A_Mi * A_chain = A_Mj, as expected!
-    std::cout << "Composite" << std::endl;
-    std::cout << (A_Mi * A_chain).matrix() << std::endl;
+    // // Validated that A_Mi * A_chain = A_Mj, as expected!
+    // std::cout << "Composite" << std::endl;
+    // std::cout << (A_Mi * A_chain).matrix() << std::endl;
 
     // Now do COP-SLAM
     uint64_t N = j - i;
 
-    // compute weights;
-    // for now, all 1?
-    std::vector<double> weights;
-    for(uint64_t k = 0; k < N; k++) {
-      weights.push_back(1.0 / N);
+    Eigen::Affine2d DeltaA = A_Mj_star.inverse() * A_Mj;
+    std::cout << "DELTA A\t" << DeltaA.matrix() << std::endl;
+
+    Eigen::Matrix3d deltaAMat = DeltaA.matrix().pow(1.0 / N);
+
+    std::cout << "dalta A\t" << deltaAMat.matrix() << std::endl;
+
+    // update poses involved in LC
+    for(uint64_t k = 1; k < N; k++) {
+      Eigen::Matrix3d poseUpdateMat = DeltaA.matrix().pow((double)k / N);
+      Eigen::Affine2d poseUpdate(poseUpdateMat);
+      solution_[i+k].pose[0] += poseUpdate.translation().x();
+      solution_[i+k].pose[1] += poseUpdate.translation().y();
+      solution_[i+k].pose[2] += Eigen::Rotation2Dd(poseUpdate.rotation()).angle();
     }
 
-    Eigen::Matrix3f jarg = (A_chain.inverse() * A_Mj_star).matrix();
-    Eigen::Matrix3f jarg_log = jarg.log();
+    // Update all subsequent poses
+    for(uint64_t k = 0; k < solution_.size() - j; k++) {
+      solution_[j+k].pose[0] += DeltaA.translation().x();
+      solution_[j+k].pose[1] += DeltaA.translation().y();
+      solution_[j+k].pose[2] += Eigen::Rotation2Dd(DeltaA.rotation()).angle();
+    }
+
+    // compute weights;
+    // for now, all 1?
+    /*
+    std::vector<double> weights;
+    for(uint64_t k = 0; k < N; k++) {
+      weights.push_back(0.1);
+    }
+
+    Eigen::Matrix3f jarg = (A_Mj.inverse() * A_Mj_star).matrix();
+    Eigen::Matrix3f jarg_log = jarg.log().matrix();
 
     printf("computed jargs\n");
     std::cout << jarg << std::endl;
@@ -313,11 +338,13 @@ vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
       Eigen::Affine2f A_k = Eigen::Translation2f(solution_[i + k].pose[0], solution_[i + k].pose[1]) * Eigen::Rotation2Df(solution_[i + k].pose[2]);
       Affine2f update_distributed = A_k.inverse() * A_Mj_star * update_local * A_Mj_star.inverse() * A_k;
 
+      std::cout << "UPDATE" << update_distributed.matrix() << std::endl;
+
       solution_[i+k].pose[0] += update_distributed.translation().x();
       solution_[i+k].pose[1] += update_distributed.translation().y();
       solution_[i+k].pose[2] += Eigen::Rotation2Df(update_distributed.rotation()).angle();
-    }
-  }
+    }*/
+  } 
 
   // Call the visualization once more to see the finished optimization.
   for (int i = 0; i < 5; i++) {
@@ -665,9 +692,9 @@ bool Solver::AddAutoLCConstraint(const AutoLCConstraint& constraint) {
   }
 
   // Draw local points
-  WaitForClose({DrawPoints(problem_.nodes[constraint.node_a->node_idx].lidar_factor.pointcloud), DrawPoints(problem_.nodes[constraint.node_b->node_idx].lidar_factor.pointcloud)});
+  // WaitForClose({DrawPoints(problem_.nodes[constraint.node_a->node_idx].lidar_factor.pointcloud), DrawPoints(problem_.nodes[constraint.node_b->node_idx].lidar_factor.pointcloud)});
   // Draw global points
-  WaitForClose({GetTable(global_a, 80.0, 0.15), GetTable(global_b, 80.0, 0.15)});
+  // WaitForClose({GetTable(global_a, 80.0, 0.15), GetTable(global_b, 80.0, 0.15)});
   #endif
 
   #if DEBUG
@@ -708,9 +735,9 @@ bool Solver::AddAutoLCConstraint(const AutoLCConstraint& constraint) {
   std::cout << "Solving pose problem" << std::endl;
   SolvePoseSLAM();
   std::cout << "Solved pose problem" << std::endl;
-  // sleep(10);
-  // problem_.odometry_factors = initial_odometry_factors;
-  // SolveSLAM();
+  sleep(10);
+  problem_.odometry_factors = GetSolvedOdomFactors();
+  SolveSLAM();
   return true;
 }
 
@@ -866,16 +893,12 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
       #endif
       return;
     }
-    WaitForClose({DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud)});
+    // WaitForClose({DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud)});
   }
   
   std::cout << "Adding Keyframe # " << keyframes.size() << " at node " << node.node_idx << std::endl;
   AddKeyframe(node);
 
-  // only LC this one place
-  if (node.node_idx < 200) {
-    return;
-  }
   // SaveImage(config_.CONFIG_lc_debug_output_dir + "/keyframe_" + std::to_string(node.node_idx) + ".bmp",
   //   GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud,
   //   img_width, 0.03));
@@ -1144,7 +1167,7 @@ std::pair<double, double> Solver::GetLocalUncertaintyEstimate(const uint64_t nod
   if (response) {
     return std::pair<double, double>(srv.response.condition_num, srv.response.scale);
   } else {
-    std::cerr << "Failed to call service match_laser_scans: "  << response << std::endl;
+    std::cerr << "Failed to call service estimate_local_uncertainty: "  << response << std::endl;
     exit(100);
   }
 }
