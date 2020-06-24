@@ -27,6 +27,7 @@ using std::vector;
 
 CONFIG_STRING(bag_path, "bag_path");
 CONFIG_BOOL(auto_lc, "auto_lc");
+CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
 CONFIG_STRING(lidar_topic, "lidar_topic");
 CONFIG_STRING(odom_topic, "odom_topic");
 CONFIG_STRING(hitl_lc_topic, "hitl_lc_topic");
@@ -55,6 +56,8 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
   vector<string> topics;
   topics.emplace_back(CONFIG_odom_topic.c_str());
   topics.emplace_back(CONFIG_lidar_topic.c_str());
+  bool found_odom = false;
+  bool found_lidar = false;
   rosbag::View view(bag, rosbag::TopicQuery(topics));
   SLAMTypeBuilder slam_builder;
   // Iterate through the bag
@@ -66,12 +69,14 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
       sensor_msgs::LaserScanPtr laser_scan =
           message.instantiate<sensor_msgs::LaserScan>();
       if (laser_scan != nullptr) {
+        found_lidar = true;
         slam_builder.LidarCallback(*laser_scan);
       }
     }
     {
       nav_msgs::OdometryPtr odom = message.instantiate<nav_msgs::Odometry>();
       if (odom != nullptr) {
+        found_odom = true;
         slam_builder.OdometryCallback(*odom);
       }
     }
@@ -83,9 +88,20 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
           printf("Error: Recieved Cobot odometry message, but differential odometry is not enabled.\n");
           exit(1);
         }
+        found_odom = true;
         slam_builder.OdometryCallback(*odom);
       }
     }
+  }
+  if (!found_lidar) {
+    printf("Did not find any lidar scans! Please check your specified topics.\n");
+  } else {
+    printf("Successfully found lidar messages.\n");
+  }
+  if (!found_odom) {
+    printf("Did not find any odometry messages! Please check your specified topics.\n");
+  } else {
+    printf("Successfully found odometry messages.\n");
   }
   bag.close();
   printf("Done.\n");
@@ -118,6 +134,9 @@ void LearnedLoopClosure(SLAMProblem2D& slam_problem, Solver& solver) {
   // But only if automatic loop closure is enabled.
   if (CONFIG_auto_lc) {
     std::cout << "Automatically loop closing" << std::endl;
+    std::ofstream lc_output_file;
+    lc_output_file.open(CONFIG_lc_debug_output_dir + "/lc_matches.txt", std::ios::trunc);
+    lc_output_file.close();
     for (SLAMNode2D& node : slam_problem.nodes) {
       solver.CheckForLearnedLC(node);
     }

@@ -5,6 +5,5 @@ odom_topic="/Cobot/Odometry"
 auto_lc=true
 pose_number=400
 differential_odom=true
-rotation_weight=2
-translation_weight=10
 lc_debug_output_dir="auto_lc_debug_gdc1"
+map_output_file="gdc1_map.txt"
