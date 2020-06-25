@@ -1,4 +1,4 @@
-PROJECT(lidar_slam)
+PROJECT(nautilus)
 CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
 
 MESSAGE(STATUS "Compiling Lidar SLAM Implementation")
