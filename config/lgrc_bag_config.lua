@@ -1,5 +1,5 @@
 require("config.default_config")
-bag_path="data/00010_2019-Timestamps-Correct.bag"
+bag_path="data/00010_2019-05-16-03-59-04_0.bag"
 lidar_topic="/velodyne_2dscan_high_beams"
 odom_topic="/odometry/filtered"
 auto_lc=false

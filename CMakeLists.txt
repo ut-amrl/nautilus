@@ -63,7 +63,7 @@ SET(libs roslib
          lua5.1
          pthread)
 
-ROSBUILD_ADD_EXECUTABLE(lidar_slam
+ROSBUILD_ADD_EXECUTABLE(${CMAKE_PROJECT_NAME}
                         src/main.cc
                         src/pointcloud_helpers.cc
                         src/solver.cc
@@ -75,7 +75,7 @@ ADD_LIBRARY(shared_library
             src/gui_helpers.cc
             src/timer.cc)
 
-TARGET_LINK_LIBRARIES(lidar_slam
+TARGET_LINK_LIBRARIES(${CMAKE_PROJECT_NAME}
                       shared_library
                       ${libs}
                       ${CERES_LIBRARIES})
