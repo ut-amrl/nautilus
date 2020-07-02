@@ -702,16 +702,6 @@ bool Solver::AddAutoLCConstraint(const AutoLCConstraint& constraint) {
   printf("poses (%f %f %f) (%f %f %f)\n", constraint.source_pose[0], constraint.source_pose[1], constraint.source_pose[2], constraint.target_pose[0], constraint.target_pose[1], constraint.target_pose[2]);
   #endif
 
-  // Then this was a badly chosen LC, let's not continue with it
-  // TODO: Decide if we want to use this or the CSM score as the threshold
-  if (constraint.match_ratio < 0.5) {
-    #if DEBUG
-    std::cout << "Failed to find valid transformation for pose, match ratio: " << constraint.match_ratio << std::endl;
-    #endif
-
-    return false;
-  }
-
   printf("Adding Loop Closure constraint %ld %ld. (%f %f %f)\n",
     constraint.node_a->node_idx, 
     constraint.node_b->node_idx,
@@ -725,18 +715,22 @@ bool Solver::AddAutoLCConstraint(const AutoLCConstraint& constraint) {
   lc_output_file << "Loop Closed " << constraint.node_a->node_idx << " " << constraint.node_b->node_idx
                  << ", transformation: " << constraint.relative_transformation.transpose() << std::endl;
   lc_output_file.close();
-
   // add constraint
   auto_lc_constraints_.push_back(constraint);
   vis_callback_->AddAutoLCConstraint(constraint);
   vis_callback_->PubVisualization();
+
+  #define DEBUG_AUTO_LC
+
+  #ifdef DEBUG_AUTO_LC
+  return true;
+  #endif
 
   // Solve the pose graph problem
   std::cout << "Solving pose problem" << std::endl;
   SolvePoseSLAM();
   std::cout << "Solved pose problem" << std::endl;
   sleep(10);
-  problem_.odometry_factors = GetSolvedOdomFactors();
   SolveSLAM();
   return true;
 }
@@ -937,6 +931,9 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   }
 
   if (matches.size() == 0) {
+    #if DEBUG
+    printf("No matches found, continuing\n");
+    #endif
     return;
   }
 
@@ -949,8 +946,38 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
             keyframes[idx].node_idx,
             new_keyframe.node_idx);
     #endif
-    lc_output_file << "Matched " << new_keyframe.node_idx << " " << keyframes[idx].node_idx << std::endl; 
-    constraints.push_back(computeAutoLCConstraint(keyframes[idx].node_idx, new_keyframe.node_idx));
+    lc_output_file << "Matched " << new_keyframe.node_idx << " " << keyframes[idx].node_idx << std::endl;
+
+    if (config_.CONFIG_lc_match_window_size % 2 != 1) {
+      std::cerr << "lc_match_window_size must be odd" << std::endl;
+      exit(1);
+    }
+
+    size_t window_offset = config_.CONFIG_lc_match_window_size / 2;
+
+    size_t start = std::max(new_keyframe.node_idx - window_offset, (size_t)0);
+    size_t end = std::min(new_keyframe.node_idx + window_offset, problem_.nodes.size());
+
+    printf("checking from %ld to %ld\n", start, end);
+
+    bool windowMatched = true;
+    AutoLCConstraint keyframeConstraint;
+    for(auto i = start; i < end; i++) {
+      AutoLCConstraint constraint = computeAutoLCConstraint(keyframes[idx].node_idx, i);
+      if (i == new_keyframe.node_idx) {
+        keyframeConstraint = constraint;
+      }
+      if (constraint.match_ratio < 0.75) {
+        windowMatched = false;
+        printf("Failed to match %ld to %ld\n", keyframes[idx].node_idx, i);
+        break;
+      }
+    }
+
+    if (windowMatched) {
+      constraints.push_back(keyframeConstraint);
+      lc_output_file << "Validated match " << new_keyframe.node_idx << " " << keyframes[idx].node_idx << std::endl;
+    }
   }
   lc_output_file.close();
 
@@ -981,7 +1008,9 @@ void Solver::CheckForLearnedLC(SLAMNode2D& node) {
   }
 
   // Step 6: Perform loop closure between these poses if there is a LC.
-  AddAutoLCConstraint(constraints[best_idx]);
+  if (best_match > -1) {
+    AddAutoLCConstraint(constraints[best_idx]);
+  }
 }
 
 /*----------------------------------------------------------------------------*
@@ -1152,6 +1181,7 @@ float Solver::GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe) {
   int response = matcher_client.call(srv);
   if (response) {
     float score = srv.response.match_prob;
+    std::cout << "Match Score between " << node.node_idx << " and " << keyframe.node_idx << ": " << score << std::endl;
     return score;
   } else {
     std::cerr << "Failed to call service match_laser_scans: "  << response  << "\t" << srv.response.match_prob << std::endl;

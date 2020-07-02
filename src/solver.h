@@ -166,6 +166,7 @@ struct SolverConfig {
   CONFIG_DOUBLE(local_uncertainty_scale_threshold,
                 "local_uncertainty_scale_threshold");
   CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
+  CONFIG_INT(lc_match_window_size, "lc_match_window_size");
   CONFIG_INT(lc_min_keyframes, "lc_min_keyframes");
   CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
   CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");

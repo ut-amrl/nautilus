@@ -66,10 +66,10 @@ outlier_threshold=0.25
 -- See these slides for more information:
 -- https://docs.google.com/presentation/d/1BNHQwS6eHec8QiOcSBBNpA3mrDqHAYvrXJGju4lLUjU/edit#slide=id.g80de3824c7_0_308
 -- Scaling factors used in calculation.
-translation_scaling_1 = 1 / 10
-translation_scaling_2 = 1 / 10
-rotation_scaling_1 = 1 / 20
-rotation_scaling_2 = 1 / 20
+translation_scaling_1 = 1 / 10.0
+translation_scaling_2 = 1 / 10.0
+rotation_scaling_1 = 1 / 20.0
+rotation_scaling_2 = 1 / 20.0
 translation_standard_deviation = translation_scaling_1 * translation_change_for_lidar + rotation_scaling_1 * rotation_change_for_lidar
 rotation_standard_deviation = translation_scaling_2 * translation_change_for_lidar + rotation_scaling_2 * rotation_change_for_lidar
 
@@ -116,7 +116,7 @@ local_uncertainty_prev_scans=2
 lc_match_threshold=0.5
 
 -- base max range to consider a loop closure
-lc_base_max_range = 2.0
+lc_base_max_range = 3.5
 
 -- how much max range to consider a loop closure increases as nodes get more distant
 lc_max_range_scaling = 0.01
@@ -130,7 +130,10 @@ lc_translation_weight=1
 lc_rotation_weight=1
 
 -- minimum number of keyframes that must exist between loop closures.
-lc_min_keyframes=10
+lc_min_keyframes=7
+
+-- number of frames in the window around a keyframe to use to ensure a valid match
+lc_match_window_size=5
 
 -- used to dump images from auto-lc
 lc_debug_output_dir="auto_lc_debug"
