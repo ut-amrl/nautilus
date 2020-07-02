@@ -111,6 +111,13 @@ KDTree<T, K>::~KDTree() {
 
 template <typename T, unsigned int K>
 KDTree<T, K>* KDTree<T, K>::BuildKDTree(vector<KDNodeValue<T, K>> values) {
+  if (values.size() == 0) {
+      // Return an empty tree;
+      left_tree_ = nullptr;
+      right_tree_ = nullptr;
+      return this;
+  }
+
   // Determine splitting plane.
   splitting_dimension_ = GetSplittingPlane<T, K>(values);
   VectorComparator<T, K> comparator(splitting_dimension_);

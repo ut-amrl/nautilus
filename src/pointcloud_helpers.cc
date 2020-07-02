@@ -23,28 +23,9 @@ using std::vector;
 // TODO: Throw out this method for stf filtering.
 #define GLANCING_THRESHOLD 0.25
 
-vector<Vector2f> FilterGlancing(
-    const float angle_min, const float angle_step,
-    const vector<pair<size_t, Vector2f>> indexed_pointcloud) {
-  vector<Vector2f> pointcloud;
-  CHECK_GE(indexed_pointcloud.size(), 1);
-  Vector2f last_point = indexed_pointcloud[0].second;
-  // Throw out points that have a big distance between them and the last point,
-  // helps to filter out points at a glancing distance.
-  // TODO: We can rewrite this to use the normal once we have a way to find a
-  //  points normal
-  for (const pair<size_t, Vector2f>& indexed_point : indexed_pointcloud) {
-    if ((last_point - indexed_point.second).norm() <= GLANCING_THRESHOLD) {
-      pointcloud.push_back(indexed_point.second);
-    }
-    last_point = indexed_point.second;
-  }
-  return pointcloud;
-}
-
 vector<Vector2f> pointcloud_helpers::LaserScanToPointCloud(
     sensor_msgs::LaserScan& laser_scan, double max_range) {
-  vector<pair<size_t, Vector2f>> pointcloud;
+  vector<Vector2f> pointcloud;
   float angle_offset = laser_scan.range_min;
   for (size_t index = 0; index < laser_scan.ranges.size(); index++) {
     float range = laser_scan.ranges[index];
@@ -57,12 +38,11 @@ vector<Vector2f> pointcloud_helpers::LaserScanToPointCloud(
                             (laser_scan.angle_increment * index))
               .toRotationMatrix();
       point = rot_matrix * point;
-      pointcloud.emplace_back(index, point);
+      pointcloud.emplace_back(point);
     }
     angle_offset += laser_scan.angle_increment;
   }
-  return FilterGlancing(laser_scan.angle_min, laser_scan.angle_increment,
-                        pointcloud);
+  return pointcloud;
 }
 
 void pointcloud_helpers::InitPointcloud(PointCloud2* point) {
