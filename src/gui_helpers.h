@@ -25,8 +25,8 @@
 
 #include <cstdio>
 #include <vector>
-#include "eigen3/Eigen/Dense"
 
+#include "eigen3/Eigen/Dense"
 #include "glog/logging.h"
 #include "ros/ros.h"
 #include "visualization_msgs/Marker.h"

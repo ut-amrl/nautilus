@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <Eigen/Dense>
 
 #include "glog/logging.h"
 

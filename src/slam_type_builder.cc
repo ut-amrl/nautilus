@@ -2,26 +2,34 @@
 // Created by jack on 9/30/19.
 //
 
-#include "eigen3/Eigen/Dense"
-
-#include "nautilus/CobotOdometryMsg.h"
-#include "math_util.h"
-#include "pointcloud_helpers.h"
 #include "slam_type_builder.h"
+
+#include "eigen3/Eigen/Dense"
+#include "math_util.h"
+#include "nautilus/CobotOdometryMsg.h"
+#include "pointcloud_helpers.h"
+
+namespace nautilus {
 
 using Eigen::Rotation2Df;
 using Eigen::Vector2f;
-using nautilus::CobotOdometryMsg;
 using math_util::AngleDist;
-using pointcloud_helpers::LaserScanToPointCloud;
+using nautilus::CobotOdometryMsg;
+using nautilus::LaserScanToPointCloud;
 using slam_types::LidarFactor;
 using slam_types::OdometryFactor2D;
 using slam_types::RobotPose2D;
 using slam_types::SLAMNode2D;
 using slam_types::SLAMProblem2D;
 
+CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
+CONFIG_BOOL(diff_odom, "differential_odom");
+CONFIG_DOUBLE(max_pose_num, "pose_number");
+CONFIG_DOUBLE(rotation_change, "rotation_change_for_lidar");
+CONFIG_DOUBLE(translation_change, "translation_change_for_lidar");
+
 void SLAMTypeBuilder::AddOdomFactor(
-    std::vector<OdometryFactor2D>& odom_factors) {
+    std::vector<OdometryFactor2D> &odom_factors) {
   CHECK_GE(nodes_.size(), 2);
   auto node_i = nodes_[nodes_.size() - 1];
   auto node_j = nodes_[nodes_.size() - 2];
@@ -32,29 +40,30 @@ void SLAMTypeBuilder::AddOdomFactor(
   odom_factors.emplace_back(odom_factor);
 }
 
-void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
+void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan &laser_scan) {
   // We only want one odometry between each lidar callback.
-  if (((config_.CONFIG_diff_odom && diff_tracking_.ReadyForLidar()) ||
+  if (((CONFIG_diff_odom && diff_tracking_.ReadyForLidar()) ||
        odom_tracking_.ReadyForLidar()) &&
       !Done()) {
     // Transform this laser scan into a point cloud.s
-    double max_range = (config_.CONFIG_max_lidar_range <= 0)
+    double max_range = (CONFIG_max_lidar_range <= 0)
                            ? laser_scan.range_max
-                           : config_.CONFIG_max_lidar_range;
+                           : CONFIG_max_lidar_range;
 
     // TODO wrap in a config-based if
     const size_t truncation_size = 55;
-    size_t num_ranges = (laser_scan.angle_max - laser_scan.angle_min) / laser_scan.angle_increment;
+    size_t num_ranges = (laser_scan.angle_max - laser_scan.angle_min) /
+                        laser_scan.angle_increment;
     // printf("NUM ranges %ld\n", num_ranges);
-    
-    for(size_t i = 0; i < num_ranges; i++) {
+
+    for (size_t i = 0; i < num_ranges; i++) {
       if (i < truncation_size || i > num_ranges - truncation_size) {
         laser_scan.ranges[i] = max_range + 1.0;
       }
     }
 
     std::vector<Vector2f> pointcloud =
-      LaserScanToPointCloud(laser_scan, max_range);
+        LaserScanToPointCloud(laser_scan, max_range);
     // laser scan truncation
 
     LidarFactor lidar_factor(pose_id_, laser_scan, pointcloud);
@@ -62,13 +71,13 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
     // Reset the initial values for everything,
     // we should start at 0 for everything.
     if (pose_id_ == 0) {
-      if (config_.CONFIG_diff_odom) {
+      if (CONFIG_diff_odom) {
         diff_tracking_.ResetInits();
       } else {
         odom_tracking_.ResetInits();
       }
     }
-    if (config_.CONFIG_diff_odom) {
+    if (CONFIG_diff_odom) {
       pose = diff_tracking_.GetPose();
     } else {
       pose = odom_tracking_.GetPose();
@@ -83,7 +92,7 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
   }
 }
 
-float ZRadiansFromQuaterion(geometry_msgs::Quaternion& q) {
+float ZRadiansFromQuaterion(geometry_msgs::Quaternion &q) {
   // Protect against case of gimbal lock which will give us a singular
   // transformation.
   // http://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/
@@ -97,11 +106,11 @@ float ZRadiansFromQuaterion(geometry_msgs::Quaternion& q) {
   return atan2(first_arg, second_arg);
 }
 
-void SLAMTypeBuilder::OdometryCallback(nav_msgs::Odometry& odometry) {
+void SLAMTypeBuilder::OdometryCallback(nav_msgs::Odometry &odometry) {
   odom_tracking_.OdometryCallback(odometry);
 }
 
-void SLAMTypeBuilder::OdometryCallback(CobotOdometryMsg& odometry) {
+void SLAMTypeBuilder::OdometryCallback(CobotOdometryMsg &odometry) {
   diff_tracking_.OdometryCallback(odometry);
 }
 
@@ -110,7 +119,8 @@ slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
   return slam_problem;
 }
 
-void DifferentialOdometryTracking::OdometryCallback(CobotOdometryMsg& odometry) {
+void DifferentialOdometryTracking::OdometryCallback(
+    CobotOdometryMsg &odometry) {
   if (!odom_initialized_) {
     odom_initialized_ = true;
     pending_rotation_ = 0;
@@ -131,7 +141,12 @@ RobotPose2D DifferentialOdometryTracking::GetPose() {
   return RobotPose2D(total_translation, total_rotation);
 }
 
-void AbsoluteOdometryTracking::OdometryCallback(nav_msgs::Odometry& odometry) {
+bool DifferentialOdometryTracking::ReadyForLidar() {
+    return pending_rotation_ >= CONFIG_rotation_change ||
+           pending_translation_.norm() >= CONFIG_translation_change;
+}
+
+void AbsoluteOdometryTracking::OdometryCallback(nav_msgs::Odometry &odometry) {
   if (!odom_initialized_) {
     init_odom_translation_ =
         Vector2f(odometry.pose.pose.position.x, odometry.pose.pose.position.y);
@@ -166,6 +181,13 @@ RobotPose2D AbsoluteOdometryTracking::GetPose() {
   return RobotPose2D(total_translation, total_rotation);
 }
 
-bool SLAMTypeBuilder::Done() {
-  return pose_id_ >= static_cast<uint64_t>(config_.CONFIG_max_pose_num);
+bool AbsoluteOdometryTracking::ReadyForLidar() {
+    return pending_rotation_ >= CONFIG_rotation_change ||
+           pending_translation_.norm() >= CONFIG_translation_change;
 }
+
+bool SLAMTypeBuilder::Done() {
+  return pose_id_ >= static_cast<uint64_t>(CONFIG_max_pose_num);
+}
+
+}  // namespace nautilus

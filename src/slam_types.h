@@ -29,33 +29,30 @@
 
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
-
 #include "kdtree.h"
 #include "math_util.h"
 #include "sensor_msgs/LaserScan.h"
 
-namespace slam_types {
+namespace nautilus::slam_types {
 
 struct LidarFactor {
-    // IDs of the poses
-    uint64_t pose_id;
-    sensor_msgs::LaserScan scan;
-    std::vector<Eigen::Vector2f> pointcloud;
-    std::shared_ptr<KDTree<float, 2>> pointcloud_tree;
-    LidarFactor() {
-      pose_id = 0;
-      pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(nullptr);
-    }
-    LidarFactor(uint64_t pose_id,
-                sensor_msgs::LaserScan& laser_scan,
-                std::vector<Eigen::Vector2f>& pointcloud) :
-                pose_id(pose_id),
-                pointcloud(pointcloud) {
-      KDTree<float, 2>* tree_ptr =
-          new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(pointcloud));
-      pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(tree_ptr);
-      scan = laser_scan;
-    }
+  // IDs of the poses
+  uint64_t pose_id;
+  sensor_msgs::LaserScan scan;
+  std::vector<Eigen::Vector2f> pointcloud;
+  std::shared_ptr<KDTree<float, 2>> pointcloud_tree;
+  LidarFactor() {
+    pose_id = 0;
+    pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(nullptr);
+  }
+  LidarFactor(uint64_t pose_id, sensor_msgs::LaserScan& laser_scan,
+              std::vector<Eigen::Vector2f>& pointcloud)
+      : pose_id(pose_id), pointcloud(pointcloud) {
+    KDTree<float, 2>* tree_ptr =
+        new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(pointcloud));
+    pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(tree_ptr);
+    scan = laser_scan;
+  }
 };
 
 struct RobotPose2D {
@@ -160,6 +157,6 @@ struct SLAMNodeSolution2D {
   SLAMNodeSolution2D() = default;
 };
 
-}  // namespace slam_types
+}  // namespace nautilus::slam_types
 
 #endif  // __SLAM_TYPES_H__

@@ -5,59 +5,57 @@
 #ifndef ROS_DEBUG_TOOLS_CIMG_DEBUG_H
 #define ROS_DEBUG_TOOLS_CIMG_DEBUG_H
 
-#include "CImg.h"
 #include <vector>
+
+#include "CImg.h"
 
 using cimg_library::CImg;
 using cimg_library::CImgDisplay;
 
 struct WrappedImage {
-    const uint64_t width;
-    const uint64_t height;
-    double resolution;
-    CImg<double> values;
-    WrappedImage(const double range, const double resolution) :
-            width(floor((range * 2.0) / resolution)),
-            height(floor((range * 2.0) / resolution)),
-            resolution(resolution) {
-      // Construct a width x height image, with only 1 z level.
-      // And, only one double per color with default value 0.0.
-      values = CImg<double>(width, height, 1, 1, 0.0);
-    }
+  const uint64_t width;
+  const uint64_t height;
+  double resolution;
+  CImg<double> values;
+  WrappedImage(const double range, const double resolution)
+      : width(floor((range * 2.0) / resolution)),
+        height(floor((range * 2.0) / resolution)),
+        resolution(resolution) {
+    // Construct a width x height image, with only 1 z level.
+    // And, only one double per color with default value 0.0.
+    values = CImg<double>(width, height, 1, 1, 0.0);
+  }
 
-    WrappedImage() : width(0), height(0), resolution(1) {}
+  WrappedImage() : width(0), height(0), resolution(1) {}
 
-    inline uint64_t convertX(float x) const {
-      return width / 2 + floor(x / resolution);
-    }
+  inline uint64_t convertX(float x) const {
+    return width / 2 + floor(x / resolution);
+  }
 
-    inline uint64_t convertY(float y) const {
-      return height / 2 + floor(y / resolution);
-    }
+  inline uint64_t convertY(float y) const {
+    return height / 2 + floor(y / resolution);
+  }
 
-    inline double GetPointValue(Vector2f point) const {
-      uint64_t x = convertX(point.x());
-      uint64_t y = convertY(point.y());
-      return values(x, y);
-    }
+  inline double GetPointValue(Vector2f point) const {
+    uint64_t x = convertX(point.x());
+    uint64_t y = convertY(point.y());
+    return values(x, y);
+  }
 
-    void SetPointValue(Vector2f point, double value) {
-      uint64_t x = convertX(point.x());
-      uint64_t y = convertY(point.y());
-      if (x >= width || y >= height) {
-        return;
-      }
-      values(x, y) = value;
+  void SetPointValue(Vector2f point, double value) {
+    uint64_t x = convertX(point.x());
+    uint64_t y = convertY(point.y());
+    if (x >= width || y >= height) {
+      return;
     }
+    values(x, y) = value;
+  }
 
-    CImg<double> GetDebugImage() const {
-      return values;
-    }
+  CImg<double> GetDebugImage() const { return values; }
 };
 
-inline WrappedImage GetTable(const vector<Vector2f>& pointcloud,
-                      double range,
-                      double resolution) {
+inline WrappedImage GetTable(const vector<Vector2f>& pointcloud, double range,
+                             double resolution) {
   WrappedImage table(range, resolution);
   for (const Vector2f& point : pointcloud) {
     table.SetPointValue(point, 1);
@@ -84,13 +82,12 @@ inline WrappedImage DrawPoints(const vector<Vector2f>& points) {
   return table;
 }
 
-inline WrappedImage DrawLine(const Vector2f& start_point, const Vector2f& end_point, WrappedImage image) {
+inline WrappedImage DrawLine(const Vector2f& start_point,
+                             const Vector2f& end_point, WrappedImage image) {
   double color[] = {1.0};
-  image.values.draw_line(image.convertX(start_point.x()),
-                         image.convertY(start_point.y()),
-                         image.convertX(end_point.x()),
-                         image.convertY(end_point.y()),
-                         color);
+  image.values.draw_line(
+      image.convertX(start_point.x()), image.convertY(start_point.y()),
+      image.convertX(end_point.x()), image.convertY(end_point.y()), color);
   return image;
 }
 
@@ -103,7 +100,7 @@ inline void WaitForClose(WrappedImage image) {
 
 inline void WaitForClose(std::vector<WrappedImage> images) {
   std::vector<cimg_library::CImgDisplay> displays;
-  for(auto image : images) {
+  for (auto image : images) {
     displays.emplace_back(image.GetDebugImage());
     displays.at(displays.size() - 1).show();
   }
@@ -116,4 +113,4 @@ inline void SaveImage(std::string name, WrappedImage image) {
   image.GetDebugImage().normalize(0, 255).save_bmp(name.c_str());
 }
 
-#endif //ROS_DEBUG_TOOLS_CIMG_DEBUG_H
+#endif  // ROS_DEBUG_TOOLS_CIMG_DEBUG_H

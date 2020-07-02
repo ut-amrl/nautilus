@@ -5,9 +5,10 @@
 #ifndef SRC_POINTCLOUD_HELPERS_H_
 #define SRC_POINTCLOUD_HELPERS_H_
 
+#include <sensor_msgs/LaserScan.h>
+
 #include <vector>
 
-#include <sensor_msgs/LaserScan.h>
 #include "eigen3/Eigen/Dense"
 #include "ros/package.h"
 #include "ros/ros.h"
@@ -18,7 +19,7 @@ using ros::Publisher;
 using sensor_msgs::PointCloud2;
 using std::vector;
 
-namespace pointcloud_helpers {
+namespace nautilus {
 void InitPointcloud(PointCloud2* point);
 void PushBackBytes(float val, sensor_msgs::PointCloud2& ptr);
 void PublishPointcloud(const std::vector<Vector2f>& points,
@@ -29,5 +30,5 @@ PointCloud2 EigenPointcloudToRos(const vector<Vector2f>& pointcloud);
 std::vector<Vector2f> LaserScanToPointCloud(sensor_msgs::LaserScan& laser_scan,
                                             double max_range);
 
-};      // namespace pointcloud_helpers
+};      // namespace nautilus
 #endif  // SRC_POINTCLOUD_HELPERS_H_

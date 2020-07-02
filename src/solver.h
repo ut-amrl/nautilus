@@ -5,43 +5,28 @@
 #ifndef SRC_SOLVER_H_
 #define SRC_SOLVER_H_
 
+#include <boost/math/distributions/chi_squared.hpp>
 #include <vector>
 
-#include <ros/node_handle.h>
-#include <boost/math/distributions/chi_squared.hpp>
-#include "CorrelativeScanMatcher.h"
-#include "ceres/ceres.h"
-#include "eigen3/Eigen/Dense"
-#include "glog/logging.h"
+#include "Eigen/Dense"
 #include "ros/package.h"
+#include "ros/node_handle.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "visualization_msgs/Marker.h"
-#include "geometry_msgs/PoseArray.h"
 
 #include "./gui_helpers.h"
 #include "./kdtree.h"
 #include "./pointcloud_helpers.h"
 #include "./slam_types.h"
+#include "CorrelativeScanMatcher.h"
+#include "ceres/ceres.h"
 #include "config_reader/config_reader.h"
+#include "geometry_msgs/PoseArray.h"
+#include "glog/logging.h"
 #include "nautilus/HitlSlamInputMsg.h"
 #include "nautilus/WriteMsg.h"
 
-using boost::math::chi_squared;
-using boost::math::complement;
-using boost::math::quantile;
-using Eigen::Affine2f;
-using Eigen::Vector2f;
-using Eigen::Vector3f;
-using nautilus::HitlSlamInputMsg;
-using nautilus::HitlSlamInputMsgConstPtr;
-using nautilus::WriteMsgConstPtr;
-using slam_types::OdometryFactor2D;
-using slam_types::SLAMNode2D;
-using slam_types::SLAMNodeSolution2D;
-using slam_types::SLAMProblem2D;
-using slam_types::LidarFactor;
-using std::vector;
-
+namespace nautilus {
 /*----------------------------------------------------------------------------*
  *                            DATA STRUCTURES                                 |
  *----------------------------------------------------------------------------*/
@@ -70,37 +55,37 @@ struct LineSegment {
 
 struct LCPose {
   uint64_t node_idx;
-  vector<Vector2f> points_on_feature;
-  LCPose(uint64_t node_idx, vector<Vector2f> points_on_feature)
+  std::vector<Eigen::Vector2f> points_on_feature;
+  LCPose(uint64_t node_idx, std::vector<Eigen::Vector2f> points_on_feature)
       : node_idx(node_idx), points_on_feature(points_on_feature) {}
 };
 
 struct HitlLCConstraint {
-  vector<LCPose> line_a_poses;
-  vector<LCPose> line_b_poses;
+  std::vector<LCPose> line_a_poses;
+  std::vector<LCPose> line_b_poses;
   const LineSegment<float> line_a;
   const LineSegment<float> line_b;
   double chosen_line_pose[3]{0, 0, 0};
   HitlLCConstraint(const LineSegment<float>& line_a,
-               const LineSegment<float>& line_b)
+                   const LineSegment<float>& line_b)
       : line_a(line_a), line_b(line_b) {}
   HitlLCConstraint() {}
 };
 
 struct AutoLCConstraint {
-  const SLAMNode2D* node_a;
-  const SLAMNode2D* node_b;
+  const slam_types::SLAMNode2D* node_a;
+  const slam_types::SLAMNode2D* node_b;
   double source_pose[3];
   double target_pose[3];
   float match_ratio;
-  Vector3f relative_transformation;
+  Eigen::Vector3f relative_transformation;
 };
 
 struct PointCorrespondences {
-  vector<Vector2f> source_points;
-  vector<Vector2f> target_points;
-  vector<Vector2f> source_normals;
-  vector<Vector2f> target_normals;
+  std::vector<Eigen::Vector2f> source_points;
+  std::vector<Eigen::Vector2f> target_points;
+  std::vector<Eigen::Vector2f> source_normals;
+  std::vector<Eigen::Vector2f> target_normals;
   double* source_pose;
   double* target_pose;
   uint64_t source_index;
@@ -136,47 +121,7 @@ struct CeresInformation {
   bool cost_valid = false;
   double cost = 0.0;
   std::shared_ptr<ceres::Problem> problem;
-  vector<ResidualDesc> res_descriptors;
-};
-
-struct SolverConfig {
-  CONFIG_DOUBLE(translation_weight, "translation_weight");
-  CONFIG_DOUBLE(rotation_weight, "rotation_weight");
-  CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
-  CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
-  CONFIG_DOUBLE(lc_base_max_range, "lc_base_max_range");
-  CONFIG_DOUBLE(lc_max_range_scaling, "lc_max_range_scaling");
-  CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
-  CONFIG_STRING(pose_output_file, "pose_output_file");
-  CONFIG_STRING(map_output_file, "map_output_file");
-  CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
-  CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
-  CONFIG_DOUBLE(lc_match_threshold, "lc_match_threshold");
-  CONFIG_INT(lidar_constraint_amount, "lidar_constraint_amount");
-  CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
-  CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
-  CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
-
-  // Auto LC configs
-  CONFIG_BOOL(keyframe_local_uncertainty_filtering, "keyframe_local_uncertainty_filtering");
-  CONFIG_BOOL(keyframe_chi_squared_test, "keyframe_chi_squared_test");
-  CONFIG_DOUBLE(keyframe_min_odom_distance, "keyframe_min_odom_distance");
-  CONFIG_DOUBLE(local_uncertainty_condition_threshold,
-                "local_uncertainty_condition_threshold");
-  CONFIG_DOUBLE(local_uncertainty_scale_threshold,
-                "local_uncertainty_scale_threshold");
-  CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
-  CONFIG_INT(lc_match_window_size, "lc_match_window_size");
-  CONFIG_INT(lc_min_keyframes, "lc_min_keyframes");
-  CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
-  CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
-  CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
-
-  SolverConfig() {
-    std::cout << "Solver Waiting..." << std::endl;
-    config_reader::WaitForInit();
-    std::cout << "--- Done Waiting ---" << std::endl;
-  }
+  std::vector<ResidualDesc> res_descriptors;
 };
 
 /*----------------------------------------------------------------------------*
@@ -184,8 +129,8 @@ struct SolverConfig {
  *----------------------------------------------------------------------------*/
 
 template <typename T>
-Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(const T* rotation,
-                                                        const T* translation) {
+inline Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(
+    const T* rotation, const T* translation) {
   typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
   typedef Eigen::Rotation2D<T> Rotation2DT;
   typedef Eigen::Translation<T, 2> Translation2T;
@@ -195,19 +140,14 @@ Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(const T* rotation,
 }
 
 template <typename T>
-Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(const T* pose_array) {
+inline Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(
+    const T* pose_array) {
   return PoseArrayToAffine(&pose_array[2], &pose_array[0]);
-}
-
-inline double DistBetween(double pose_a[3], double pose_b[3]) {
-  Vector2f pose_a_pos(pose_a[0], pose_a[1]);
-  Vector2f pose_b_pos(pose_b[0], pose_b[1]);
-  return (pose_a_pos - pose_b_pos).norm();
 }
 
 inline vector<Vector2f> TransformPointcloud(double* pose,
                                             const vector<Vector2f> pointcloud) {
-  vector<Vector2f> pcloud;
+  std::vector<Eigen::Vector2f> pcloud;
   Eigen::Affine2f trans = PoseArrayToAffine(&pose[2], &pose[0]).cast<float>();
   for (const Vector2f& p : pointcloud) {
     pcloud.push_back(trans * p);
@@ -235,9 +175,8 @@ inline Eigen::MatrixXd CRSToEigen(const ceres::CRSMatrix& crs_matrix) {
   return matrix;
 }
 struct LearnedKeyframe {
-    const size_t node_idx;
-    LearnedKeyframe(const size_t node_idx) :
-                        node_idx(node_idx) {}
+  const size_t node_idx;
+  LearnedKeyframe(const size_t node_idx) : node_idx(node_idx) {}
 };
 
 // Returns if val is between a and b.
@@ -275,9 +214,9 @@ class VisualizationCallback : public ceres::IterationCallback {
  public:
   VisualizationCallback(vector<LearnedKeyframe>& keyframes, ros::NodeHandle& n)
       : keyframes(keyframes) {
-    pointcloud_helpers::InitPointcloud(&all_points_marker);
-    pointcloud_helpers::InitPointcloud(&new_points_marker);
-    pointcloud_helpers::InitPointcloud(&keyframe_marker);
+    nautilus::InitPointcloud(&all_points_marker);
+    nautilus::InitPointcloud(&new_points_marker);
+    nautilus::InitPointcloud(&keyframe_marker);
     all_points.clear();
     point_pub = n.advertise<sensor_msgs::PointCloud2>("/all_points", 10);
     new_point_pub = n.advertise<sensor_msgs::PointCloud2>("/new_points", 10);
@@ -305,20 +244,21 @@ class VisualizationCallback : public ceres::IterationCallback {
     hitl_pointclouds = n.advertise<PointCloud2>("/hitl_pointclouds", 10);
     point_a_pub = n.advertise<PointCloud2>("/hitl_a_points", 100);
     point_b_pub = n.advertise<PointCloud2>("/hitl_b_points", 100);
-    auto_lc_poses_pub = n.advertise<visualization_msgs::Marker>("/auto_lc_poses", 10);
+    auto_lc_poses_pub =
+        n.advertise<visualization_msgs::Marker>("/auto_lc_poses", 10);
     line_pub = n.advertise<visualization_msgs::Marker>("/line_a", 10);
-    pointcloud_helpers::InitPointcloud(&pose_a_point_marker);
-    pointcloud_helpers::InitPointcloud(&pose_b_point_marker);
-    pointcloud_helpers::InitPointcloud(&a_points_marker);
-    pointcloud_helpers::InitPointcloud(&b_points_marker);
-    pointcloud_helpers::InitPointcloud(&hitl_points_marker);
+    nautilus::InitPointcloud(&pose_a_point_marker);
+    nautilus::InitPointcloud(&pose_b_point_marker);
+    nautilus::InitPointcloud(&a_points_marker);
+    nautilus::InitPointcloud(&b_points_marker);
+    nautilus::InitPointcloud(&hitl_points_marker);
     gui_helpers::InitializeMarker(visualization_msgs::Marker::LINE_LIST,
                                   gui_helpers::Color4f::kMagenta, 0.10, 0.0,
                                   0.0, &line_marker);
   }
 
   void PubVisualization() {
-    const vector<SLAMNodeSolution2D>& solution_c = *solution;
+    const vector<slam_types::SLAMNodeSolution2D>& solution_c = *solution;
     vector<Vector2f> new_points;
     gui_helpers::ClearMarker(&key_pose_array);
     pose_array.poses.clear();
@@ -329,7 +269,7 @@ class VisualizationCallback : public ceres::IterationCallback {
         new_points.clear();
       }
       auto pointcloud = problem.nodes[i].lidar_factor.pointcloud;
-      Affine2f robot_to_world =
+      Eigen::Affine2f robot_to_world =
           PoseArrayToAffine(&(solution_c[i].pose[2]), &(solution_c[i].pose[0]))
               .cast<float>();
       Eigen::Vector3f pose(solution_c[i].pose[0], solution_c[i].pose[1], 0.0);
@@ -337,8 +277,8 @@ class VisualizationCallback : public ceres::IterationCallback {
       geometry_msgs::Pose p;
       p.position.x = solution_c[i].pose[0];
       p.position.y = solution_c[i].pose[1];
-      p.orientation.z = sin(solution_c[i].pose[2]/2);
-      p.orientation.w = cos(solution_c[i].pose[2]/2);
+      p.orientation.z = sin(solution_c[i].pose[2] / 2);
+      p.orientation.w = cos(solution_c[i].pose[2] / 2);
       pose_array.poses.push_back(p);
       if (solution_c[i].is_keyframe) {
         gui_helpers::AddPoint(pose, gui_helpers::Color4f::kRed,
@@ -365,10 +305,8 @@ class VisualizationCallback : public ceres::IterationCallback {
       }
     }
     if (solution_c.size() >= 2) {
-      pointcloud_helpers::PublishPointcloud(all_points, all_points_marker,
-                                            point_pub);
-      pointcloud_helpers::PublishPointcloud(new_points, new_points_marker,
-                                            new_point_pub);
+      nautilus::PublishPointcloud(all_points, all_points_marker, point_pub);
+      nautilus::PublishPointcloud(new_points, new_points_marker, new_point_pub);
       gui_helpers::ClearMarker(&match_line_list);
       for (const PointCorrespondences& corr : last_correspondences) {
         AddMatchLines(corr);
@@ -384,7 +322,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   }
 
   void PubConstraintVisualization() {
-    const vector<SLAMNodeSolution2D>& solution_c = *solution;
+    const vector<slam_types::SLAMNodeSolution2D>& solution_c = *solution;
     vector<Vector2f> line_a_poses;
     for (const HitlLCConstraint& hitl_constraint : hitl_constraints) {
       vector<Vector2f> a_points;
@@ -393,7 +331,7 @@ class VisualizationCallback : public ceres::IterationCallback {
         const double* pose_arr = solution_c[pose.node_idx].pose;
         Vector2f pose_pos(pose_arr[0], pose_arr[1]);
         line_a_poses.push_back(pose_pos);
-        Affine2f point_to_world =
+        Eigen::Affine2f point_to_world =
             PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
         for (const Vector2f& point : pose.points_on_feature) {
           Vector2f point_transformed = point_to_world * point;
@@ -405,27 +343,26 @@ class VisualizationCallback : public ceres::IterationCallback {
         const double* pose_arr = solution_c[pose.node_idx].pose;
         Vector2f pose_pos(pose_arr[0], pose_arr[1]);
         line_b_poses.push_back(pose_pos);
-        Affine2f point_to_world =
+        Eigen::Affine2f point_to_world =
             PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
         for (const Vector2f& point : pose.points_on_feature) {
           Vector2f point_transformed = point_to_world * point;
           b_points.push_back(point_transformed);
         }
       }
-      gui_helpers::AddLine(Vector3f(hitl_constraint.line_a.start.x(),
-                                    hitl_constraint.line_a.start.y(), 0.0),
-                           Vector3f(hitl_constraint.line_a.end.x(),
-                                    hitl_constraint.line_a.end.y(), 0.0),
-                           gui_helpers::Color4f::kMagenta, &line_marker);
+      gui_helpers::AddLine(
+          Eigen::Vector3f(hitl_constraint.line_a.start.x(),
+                          hitl_constraint.line_a.start.y(), 0.0),
+          Eigen::Vector3f(hitl_constraint.line_a.end.x(),
+                          hitl_constraint.line_a.end.y(), 0.0),
+          gui_helpers::Color4f::kMagenta, &line_marker);
       for (int i = 0; i < 5; i++) {
-        pointcloud_helpers::PublishPointcloud(line_a_poses, pose_a_point_marker,
-                                              constraint_a_pose_pub);
-        pointcloud_helpers::PublishPointcloud(line_b_poses, pose_b_point_marker,
-                                              constraint_b_pose_pub);
-        pointcloud_helpers::PublishPointcloud(a_points, a_points_marker,
-                                              point_a_pub);
-        pointcloud_helpers::PublishPointcloud(b_points, b_points_marker,
-                                              point_b_pub);
+        nautilus::PublishPointcloud(line_a_poses, pose_a_point_marker,
+                                    constraint_a_pose_pub);
+        nautilus::PublishPointcloud(line_b_poses, pose_b_point_marker,
+                                    constraint_b_pose_pub);
+        nautilus::PublishPointcloud(a_points, a_points_marker, point_a_pub);
+        nautilus::PublishPointcloud(b_points, b_points_marker, point_b_pub);
         line_pub.publish(line_marker);
       }
     }
@@ -441,15 +378,15 @@ class VisualizationCallback : public ceres::IterationCallback {
       Vector2f pose_point(pose_arr[0], pose_arr[1]);
       poses.push_back(pose_point);
     }
-    pointcloud_helpers::PublishPointcloud(poses, keyframe_marker, keyframe_pub);
+    nautilus::PublishPointcloud(poses, keyframe_marker, keyframe_pub);
   }
 
   void AddPosePointcloud(vector<Vector2f>& pointcloud, const LCPose& pose) {
     size_t node_idx = pose.node_idx;
-    vector<SLAMNodeSolution2D> solution_c = *solution;
+    vector<slam_types::SLAMNodeSolution2D> solution_c = *solution;
     vector<Vector2f> p_cloud = problem.nodes[node_idx].lidar_factor.pointcloud;
     double* pose_arr = solution_c[node_idx].pose;
-    Affine2f robot_to_world =
+    Eigen::Affine2f robot_to_world =
         PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
     for (const Vector2f& p : p_cloud) {
       pointcloud.push_back(robot_to_world * p);
@@ -457,7 +394,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   }
 
   void PubConstraintPointclouds() {
-    vector<Vector2f> pointclouds;
+    std::vector<Eigen::Vector2f> pointclouds;
     for (const HitlLCConstraint& hitl_constraint : hitl_constraints) {
       for (const LCPose& pose : hitl_constraint.line_a_poses) {
         AddPosePointcloud(pointclouds, pose);
@@ -466,21 +403,25 @@ class VisualizationCallback : public ceres::IterationCallback {
         AddPosePointcloud(pointclouds, pose);
       }
     }
-    pointcloud_helpers::PublishPointcloud(pointclouds, hitl_points_marker,
-                                          hitl_pointclouds);
+    nautilus::PublishPointcloud(pointclouds, hitl_points_marker,
+                                hitl_pointclouds);
   }
 
   void PubAutoConstraints() {
-    vector<Vector3f> poses;
+    std::vector<Eigen::Vector3f> poses;
     gui_helpers::ClearMarker(&auto_lc_pose_array);
     for (const AutoLCConstraint& auto_constraint : auto_constraints) {
       // std::cout << "Frame #: " << frame.node_idx << std::endl;
-      const double* pose_arr_a = (*solution)[auto_constraint.node_a->node_idx].pose;
-      Vector3f pose_a(pose_arr_a[0], pose_arr_a[1], 0.0);
-      gui_helpers::AddPoint(pose_a, gui_helpers::Color4f::kCyan, &auto_lc_pose_array);
-      const double* pose_arr_b = (*solution)[auto_constraint.node_b->node_idx].pose;
-      Vector3f pose_b(pose_arr_b[0], pose_arr_b[1], 0.0);
-      gui_helpers::AddPoint(pose_b, gui_helpers::Color4f::kCyan, &auto_lc_pose_array);
+      const double* pose_arr_a =
+          (*solution)[auto_constraint.node_a->node_idx].pose;
+      Eigen::Vector3f pose_a(pose_arr_a[0], pose_arr_a[1], 0.0);
+      gui_helpers::AddPoint(pose_a, gui_helpers::Color4f::kCyan,
+                            &auto_lc_pose_array);
+      const double* pose_arr_b =
+          (*solution)[auto_constraint.node_b->node_idx].pose;
+      Eigen::Vector3f pose_b(pose_arr_b[0], pose_arr_b[1], 0.0);
+      gui_helpers::AddPoint(pose_b, gui_helpers::Color4f::kCyan,
+                            &auto_lc_pose_array);
     }
     if (auto_constraints.size() > 0) {
       auto_lc_poses_pub.publish(auto_lc_pose_array);
@@ -496,14 +437,14 @@ class VisualizationCallback : public ceres::IterationCallback {
          index++) {
       Vector2f source_point = correspondence.source_points[index];
       Vector2f target_point = correspondence.target_points[index];
-      Affine2f source_to_world =
+      Eigen::Affine2f source_to_world =
           PoseArrayToAffine(correspondence.source_pose).cast<float>();
-      Affine2f target_to_world =
+      Eigen::Affine2f target_to_world =
           PoseArrayToAffine(correspondence.target_pose).cast<float>();
       source_point = source_to_world * source_point;
       target_point = target_to_world * target_point;
-      Vector3f source_3d(source_point.x(), source_point.y(), 0.0);
-      Vector3f target_3d(target_point.x(), target_point.y(), 0.0);
+      Eigen::Vector3f source_3d(source_point.x(), source_point.y(), 0.0);
+      Eigen::Vector3f target_3d(target_point.x(), target_point.y(), 0.0);
       gui_helpers::AddLine(source_3d, target_3d, gui_helpers::Color4f::kBlue,
                            &match_line_list);
     }
@@ -538,9 +479,10 @@ class VisualizationCallback : public ceres::IterationCallback {
     return ceres::SOLVER_CONTINUE;
   }
 
-  void UpdateProblemAndSolution(SLAMNode2D& new_node,
-                                vector<SLAMNodeSolution2D>* new_solution,
-                                OdometryFactor2D& new_odom_factor) {
+  void UpdateProblemAndSolution(
+      slam_types::SLAMNode2D& new_node,
+      vector<slam_types::SLAMNodeSolution2D>* new_solution,
+      slam_types::OdometryFactor2D& new_odom_factor) {
     CHECK_EQ(new_node.node_idx,
              (*new_solution)[new_solution->size() - 1].node_idx);
     CHECK_EQ(new_node.node_idx, new_odom_factor.pose_j);
@@ -550,8 +492,9 @@ class VisualizationCallback : public ceres::IterationCallback {
     CHECK_EQ(solution->size(), problem.nodes.size());
   }
 
-  void UpdateProblemAndSolution(SLAMNode2D& new_node,
-                                vector<SLAMNodeSolution2D>* new_solution) {
+  void UpdateProblemAndSolution(
+      slam_types::SLAMNode2D& new_node,
+      std::vector<slam_types::SLAMNodeSolution2D>* new_solution) {
     CHECK_EQ(new_node.node_idx,
              (*new_solution)[new_solution->size() - 1].node_idx);
     problem.nodes.push_back(new_node);
@@ -563,9 +506,9 @@ class VisualizationCallback : public ceres::IterationCallback {
   sensor_msgs::PointCloud2 all_points_marker;
   sensor_msgs::PointCloud2 new_points_marker;
   std::vector<Vector2f> all_points;
-  SLAMProblem2D problem;
-  vector<SLAMNodeSolution2D>* solution;
-  vector<LearnedKeyframe>& keyframes;
+  slam_types::SLAMProblem2D problem;
+  std::vector<slam_types::SLAMNodeSolution2D>* solution;
+  std::vector<LearnedKeyframe>& keyframes;
   ros::Publisher point_pub;
   ros::Publisher pose_pub;
   ros::Publisher match_pub;
@@ -606,55 +549,66 @@ class VisualizationCallback : public ceres::IterationCallback {
 class Solver {
  public:
   Solver(ros::NodeHandle& n);
-  vector<SLAMNodeSolution2D> SolveSLAM();
-  vector<SLAMNodeSolution2D> SolvePoseSLAM();
-  double GetPointCorrespondences(const LidarFactor& source_lidar, const LidarFactor& target_lidar,
-    double* source_pose, double* target_pose, PointCorrespondences* point_correspondences);
+  std::vector<slam_types::SLAMNodeSolution2D> SolveSLAM();
+  std::vector<slam_types::SLAMNodeSolution2D> SolvePoseSLAM();
+  double GetPointCorrespondences(const slam_types::LidarFactor& source_lidar,
+                                 const slam_types::LidarFactor& target_lidar,
+                                 double* source_pose, double* target_pose,
+                                 PointCorrespondences* point_correspondences);
   void AddOdomFactors(ceres::Problem* ceres_problem,
-                      vector<OdometryFactor2D> factors, double trans_weight,
-                      double rot_weight);
-  void HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr);
-  void WriteCallback(const WriteMsgConstPtr& msg);
-  void Vectorize(const WriteMsgConstPtr& msg);
-  vector<SLAMNodeSolution2D> GetSolution() { return solution_; }
-  HitlLCConstraint GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg);
+                      std::vector<slam_types::OdometryFactor2D> factors,
+                      double trans_weight, double rot_weight);
+  void HitlCallback(const nautilus::HitlSlamInputMsgConstPtr& hitl_ptr);
+  void WriteCallback(const nautilus::WriteMsgConstPtr& msg);
+  void Vectorize(const nautilus::WriteMsgConstPtr& msg);
+  std::vector<slam_types::SLAMNodeSolution2D> GetSolution() {
+    return solution_;
+  }
+  HitlLCConstraint GetRelevantPosesForHITL(
+      const nautilus::HitlSlamInputMsg& hitl_msg);
   void SolveForLC();
   double AddResidualsForAutoLC(ceres::Problem* problem, bool include_lidar);
   void AddPointCloudResiduals(ceres::Problem* problem);
-  vector<OdometryFactor2D> GetSolvedOdomFactors();
-  void AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node);
-  void AddSlamNode(SLAMNode2D& node);
-  void CheckForLearnedLC(SLAMNode2D& node);
+  std::vector<slam_types::OdometryFactor2D> GetSolvedOdomFactors();
+  void AddSLAMNodeOdom(slam_types::SLAMNode2D& node,
+                       slam_types::OdometryFactor2D& odom_factor_to_node);
+  void AddSlamNode(slam_types::SLAMNode2D& node);
+  void CheckForLearnedLC(slam_types::SLAMNode2D& node);
 
  private:
   double CostFromResidualDescriptor(const ResidualDesc& res_desc);
   double GetChiSquareCost(uint64_t node_a, uint64_t node_b);
-  OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
-                                     const uint64_t node_b);
-  OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
-                                     const uint64_t node_b,
-                                     Vector3f trans);
+  slam_types::OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
+                                                 const uint64_t node_b);
+  slam_types::OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
+                                                 const uint64_t node_b,
+                                                 Eigen::Vector3f trans);
   vector<ResidualDesc> AddLCResiduals(const uint64_t node_a,
                                       const uint64_t node_b);
   void AddHITLResiduals(ceres::Problem* problem);
   void RemoveResiduals(vector<ResidualDesc> descs);
-  void AddKeyframe(SLAMNode2D& node);
-  float GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe);
+  void AddKeyframe(slam_types::SLAMNode2D& node);
+  float GetMatchScores(slam_types::SLAMNode2D& node,
+                       slam_types::SLAMNode2D& keyframe);
   bool AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
                             LearnedKeyframe& key_frame_b);
-  AutoLCConstraint computeAutoLCConstraint(const uint64_t node_a, const uint64_t node_b);
+  AutoLCConstraint computeAutoLCConstraint(const uint64_t node_a,
+                                           const uint64_t node_b);
   bool AddAutoLCConstraint(const AutoLCConstraint& constraint);
   void LCKeyframes(LearnedKeyframe& key_frame_a, LearnedKeyframe& key_frame_b);
-  OdometryFactor2D GetTotalOdomChange(const std::vector<OdometryFactor2D>& factors);
+  slam_types::OdometryFactor2D GetTotalOdomChange(
+      const std::vector<slam_types::OdometryFactor2D>& factors);
   bool SimilarScans(const uint64_t node_a, const uint64_t node_b,
                     const double certainty);
-  vector<OdometryFactor2D> GetSolvedOdomFactorsBetweenNodes(uint64_t node_a, uint64_t node_b);
+  std::vector<slam_types::OdometryFactor2D> GetSolvedOdomFactorsBetweenNodes(
+      uint64_t node_a, uint64_t node_b);
   std::pair<double, double> GetLocalUncertainty(const uint64_t node_idx);
-  std::pair<double, double> GetLocalUncertaintyEstimate(const uint64_t node_idx);
+  std::pair<double, double> GetLocalUncertaintyEstimate(
+      const uint64_t node_idx);
   vector<size_t> GetMatchingKeyframeIndices(size_t keyframe_index);
-  SLAMProblem2D problem_;
-  vector<OdometryFactor2D> initial_odometry_factors;
-  vector<SLAMNodeSolution2D> solution_;
+  slam_types::SLAMProblem2D problem_;
+  std::vector<slam_types::OdometryFactor2D> initial_odometry_factors;
+  std::vector<slam_types::SLAMNodeSolution2D> solution_;
   ros::NodeHandle n_;
   vector<AutoLCConstraint> auto_lc_constraints_;
   vector<HitlLCConstraint> hitl_constraints_;
@@ -664,7 +618,8 @@ class Solver {
   ros::ServiceClient local_uncertainty_client;
   CorrelativeScanMatcher scan_matcher;
   CeresInformation ceres_information;
-  SolverConfig config_;
 };
+
+}  // namespace nautilus
 
 #endif  // SRC_SOLVER_H_

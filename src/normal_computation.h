@@ -3,34 +3,20 @@
 
 #include <vector>
 
-#include "Eigen/Dense"
-
 #include "./math_util.h"
+#include "Eigen/Dense"
 #include "config_reader/config_reader.h"
 
-using Eigen::Vector2f;
-using math_util::angle_mod;
-using std::vector;
-
-struct NormalComputationConfig {
-  CONFIG_DOUBLE(neighborhood_size, "nc_neighborhood_size");
-  CONFIG_DOUBLE(neighborhood_step_size, "nc_neighborhood_step_size");
-  CONFIG_DOUBLE(mean_distance, "nc_mean_distance");
-  CONFIG_INT(bin_number, "nc_bin_number");
-
-  NormalComputationConfig() { config_reader::WaitForInit(); }
-};
-
-namespace NormalComputation {
+namespace nautilus {
 struct CircularHoughAccumulator {
-  vector<vector<double>> accumulator;
+  std::vector<std::vector<double>> accumulator;
   const double angle_step;
   size_t most_voted_bin;
   size_t second_most_voted_bin;
 
   // The bin number is the number of bins around the equator.
   CircularHoughAccumulator(size_t bin_number)
-      : accumulator(bin_number, vector<double>()),
+      : accumulator(bin_number, std::vector<double>()),
         angle_step(M_2PI / bin_number),
         most_voted_bin(0),
         second_most_voted_bin(0) {}
@@ -40,7 +26,7 @@ struct CircularHoughAccumulator {
   }
 
   void AddVote(double angle_in_radians) {
-    angle_in_radians = angle_mod(angle_in_radians);
+    angle_in_radians = math_util::angle_mod(angle_in_radians);
     size_t bin_number = round(angle_in_radians / angle_step);
     if (bin_number > accumulator.size()) {
       return;
@@ -70,7 +56,9 @@ struct CircularHoughAccumulator {
 // Returns a list of normals for the corresponding list of points.
 // Normals are unit sized, but because we use meters as our unit,
 // they are 1 meter long.
-vector<Vector2f> GetNormals(const vector<Vector2f>& points);
-}  // namespace NormalComputation
+std::vector<Eigen::Vector2f> GetNormals(
+    const std::vector<Eigen::Vector2f>& points);
+
+}  // namespace nautilus
 
 #endif
