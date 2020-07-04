@@ -51,8 +51,7 @@ struct LidarFactor {
                 std::vector<Eigen::Vector2f>& pointcloud) :
                 pose_id(pose_id),
                 pointcloud(pointcloud) {
-      KDTree<float, 2>* tree_ptr =
-          new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(pointcloud));
+      auto* tree_ptr = new KDTree<float, 2>(pointcloud);
       pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(tree_ptr);
       scan = laser_scan;
     }

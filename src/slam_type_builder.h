@@ -18,33 +18,17 @@ using slam_types::OdometryFactor2D;
 using slam_types::RobotPose2D;
 using nautilus::CobotOdometryMsg;
 
-struct SlamTypeBuilderConfig {
-  CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
-  CONFIG_BOOL(diff_odom, "differential_odom");
-  CONFIG_DOUBLE(max_pose_num, "pose_number");
-  CONFIG_DOUBLE(rotation_change, "rotation_change_for_lidar");
-  CONFIG_DOUBLE(translation_change, "translation_change_for_lidar");
-
-  SlamTypeBuilderConfig() { config_reader::WaitForInit(); }
-};
-
 class DifferentialOdometryTracking {
  public:
-  DifferentialOdometryTracking(SlamTypeBuilderConfig config)
-      : config_(config) {}
   void OdometryCallback(CobotOdometryMsg& odometry);
   RobotPose2D GetPose();
-  bool ReadyForLidar() {
-    return pending_rotation_ >= config_.CONFIG_rotation_change ||
-           pending_translation_.norm() >= config_.CONFIG_translation_change;
-  }
+  bool ReadyForLidar();
   void ResetInits() {
     total_translation = Vector2f(0, 0);
     total_rotation = 0.0f;
   }
 
  private:
-  SlamTypeBuilderConfig config_;
   bool odom_initialized_ = false;
   Eigen::Vector2f pending_translation_ = Vector2f(0, 0);
   float pending_rotation_ = 0;
@@ -56,13 +40,9 @@ class DifferentialOdometryTracking {
 
 class AbsoluteOdometryTracking {
  public:
-  AbsoluteOdometryTracking(SlamTypeBuilderConfig config) : config_(config) {}
   void OdometryCallback(nav_msgs::Odometry& odometry);
   RobotPose2D GetPose();
-  bool ReadyForLidar() {
-    return pending_rotation_ >= config_.CONFIG_rotation_change ||
-           pending_translation_.norm() >= config_.CONFIG_translation_change;
-  }
+  bool ReadyForLidar();
   void ResetInits() {
     init_odom_angle_ = odom_angle_;
     init_odom_translation_ = odom_translation_;
@@ -73,7 +53,6 @@ class AbsoluteOdometryTracking {
   }
 
  private:
-  SlamTypeBuilderConfig config_;
   bool odom_initialized_ = false;
   Eigen::Vector2f init_odom_translation_ = Vector2f(0, 0);
   float init_odom_angle_ = 0;
@@ -93,7 +72,6 @@ class AbsoluteOdometryTracking {
 
 class SLAMTypeBuilder {
  public:
-  SLAMTypeBuilder() : odom_tracking_(config_), diff_tracking_(config_) {}
   void LidarCallback(sensor_msgs::LaserScan& laser_scan);
   void OdometryCallback(nav_msgs::Odometry& odometry);
   void OdometryCallback(CobotOdometryMsg& odometry);
@@ -105,7 +83,6 @@ class SLAMTypeBuilder {
   uint64_t pose_id_ = 0;
   std::vector<slam_types::SLAMNode2D> nodes_;
   std::vector<slam_types::OdometryFactor2D> odom_factors_;
-  SlamTypeBuilderConfig config_;
   // Tracking for different types of odometry.
   AbsoluteOdometryTracking odom_tracking_;
   DifferentialOdometryTracking diff_tracking_;

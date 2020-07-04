@@ -22,7 +22,6 @@
 #include "./kdtree.h"
 #include "./pointcloud_helpers.h"
 #include "./slam_types.h"
-#include "config_reader/config_reader.h"
 #include "nautilus/HitlSlamInputMsg.h"
 #include "nautilus/WriteMsg.h"
 
@@ -137,46 +136,6 @@ struct CeresInformation {
   double cost = 0.0;
   std::shared_ptr<ceres::Problem> problem;
   vector<ResidualDesc> res_descriptors;
-};
-
-struct SolverConfig {
-  CONFIG_DOUBLE(translation_weight, "translation_weight");
-  CONFIG_DOUBLE(rotation_weight, "rotation_weight");
-  CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
-  CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
-  CONFIG_DOUBLE(lc_base_max_range, "lc_base_max_range");
-  CONFIG_DOUBLE(lc_max_range_scaling, "lc_max_range_scaling");
-  CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
-  CONFIG_STRING(pose_output_file, "pose_output_file");
-  CONFIG_STRING(map_output_file, "map_output_file");
-  CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
-  CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
-  CONFIG_DOUBLE(lc_match_threshold, "lc_match_threshold");
-  CONFIG_INT(lidar_constraint_amount, "lidar_constraint_amount");
-  CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
-  CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
-  CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
-
-  // Auto LC configs
-  CONFIG_BOOL(keyframe_local_uncertainty_filtering, "keyframe_local_uncertainty_filtering");
-  CONFIG_BOOL(keyframe_chi_squared_test, "keyframe_chi_squared_test");
-  CONFIG_DOUBLE(keyframe_min_odom_distance, "keyframe_min_odom_distance");
-  CONFIG_DOUBLE(local_uncertainty_condition_threshold,
-                "local_uncertainty_condition_threshold");
-  CONFIG_DOUBLE(local_uncertainty_scale_threshold,
-                "local_uncertainty_scale_threshold");
-  CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
-  CONFIG_INT(lc_match_window_size, "lc_match_window_size");
-  CONFIG_INT(lc_min_keyframes, "lc_min_keyframes");
-  CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
-  CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
-  CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
-
-  SolverConfig() {
-    std::cout << "Solver Waiting..." << std::endl;
-    config_reader::WaitForInit();
-    std::cout << "--- Done Waiting ---" << std::endl;
-  }
 };
 
 /*----------------------------------------------------------------------------*
@@ -348,13 +307,13 @@ class VisualizationCallback : public ceres::IterationCallback {
       for (const Vector2f& point : pointcloud) {
         new_points.push_back(robot_to_world * point);
         // Visualize normal
-        KDNodeValue<float, 2> source_point_in_tree;
+        std::shared_ptr<KDNodeValue<float, 2>> source_point_in_tree;
         float dist =
             problem.nodes[i].lidar_factor.pointcloud_tree->FindNearestPoint(
-                point, 0.01, &source_point_in_tree);
+                point, 0.01, source_point_in_tree);
         if (dist != 0.01) {
-          Eigen::Vector3f normal(source_point_in_tree.normal.x(),
-                                 source_point_in_tree.normal.y(), 0.0);
+          Eigen::Vector3f normal(source_point_in_tree->normal.x(),
+                                 source_point_in_tree->normal.y(), 0.0);
           normal = robot_to_world * normal;
           Vector2f source_point = robot_to_world * point;
           Eigen::Vector3f source_3f(source_point.x(), source_point.y(), 0.0);
@@ -664,7 +623,6 @@ class Solver {
   ros::ServiceClient local_uncertainty_client;
   CorrelativeScanMatcher scan_matcher;
   CeresInformation ceres_information;
-  SolverConfig config_;
 };
 
 #endif  // SRC_SOLVER_H_

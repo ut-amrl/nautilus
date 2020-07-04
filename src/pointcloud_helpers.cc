@@ -20,9 +20,6 @@ using math_util::NormalsSimilar;
 using std::pair;
 using std::vector;
 
-// TODO: Throw out this method for stf filtering.
-#define GLANCING_THRESHOLD 0.25
-
 vector<Vector2f> pointcloud_helpers::LaserScanToPointCloud(
     sensor_msgs::LaserScan& laser_scan, double max_range) {
   vector<Vector2f> pointcloud;

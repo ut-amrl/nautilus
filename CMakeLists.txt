@@ -24,15 +24,19 @@ INCLUDE_DIRECTORIES(${CERES_INCLUDE_DIRS})
 FIND_PACKAGE(OpenMP REQUIRED)
 INCLUDE_DIRECTORIES(third_party/eigen)
 
-INCLUDE($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
-add_subdirectory(third_party)
+SET(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
+SET(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
 
-set(CONFIG_READER_INCLUDE_DIR third_party/config-reader/include)
+INCLUDE($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
+
+SET(CONFIG_READER_INCLUDE_DIR third_party/config-reader/include)
 INCLUDE_DIRECTORIES(third_party/config-reader/include)
 INCLUDE_DIRECTORIES(third_party/csm/src)
 INCLUDE_DIRECTORIES(third_party/vector_maps/src)
 INCLUDE_DIRECTORIES(third_party/learning-loop-closure/laser_scan_matcher/srv_gen/cpp/include)
 INCLUDE_DIRECTORIES(third_party/learning-loop-closure/local_uncertainty_estimator/srv_gen/cpp/include)
+
+add_subdirectory(third_party)
 
 rosbuild_init()
 
@@ -67,9 +71,7 @@ ROSBUILD_ADD_EXECUTABLE(${CMAKE_PROJECT_NAME}
                         src/main.cc
                         src/pointcloud_helpers.cc
                         src/solver.cc
-                        src/slam_type_builder.cc
-                        src/kdtree.cc
-                        src/normal_computation.cc)
+                        src/slam_type_builder.cc)
 
 ADD_LIBRARY(shared_library
             src/gui_helpers.cc
@@ -80,7 +82,7 @@ TARGET_LINK_LIBRARIES(${CMAKE_PROJECT_NAME}
                       ${libs}
                       ${CERES_LIBRARIES})
 
-#if (TESTING)
-# enable_testing()
-#add_subdirectory(test)
-#endif()
+if (TESTING)
+  enable_testing()
+  add_subdirectory(test)
+endif()
