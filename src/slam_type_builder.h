@@ -98,6 +98,7 @@ class SLAMTypeBuilder {
   void OdometryCallback(nav_msgs::Odometry& odometry);
   void OdometryCallback(CobotOdometryMsg& odometry);
   slam_types::SLAMProblem2D GetSlamProblem();
+  size_t GetNodeCount();
   bool Done();
 
  private:

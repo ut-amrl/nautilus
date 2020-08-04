@@ -60,10 +60,12 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
   bool found_lidar = false;
   rosbag::View view(bag, rosbag::TopicQuery(topics));
   SLAMTypeBuilder slam_builder;
+  size_t msg_counter = 0;
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
        ros::ok() && it != view.end() && !slam_builder.Done(); ++it) {
     const rosbag::MessageInstance& message = *it;
+    msg_counter++;
     {
       // Load all the point clouds into memory.
       sensor_msgs::LaserScanPtr laser_scan =
@@ -92,7 +94,12 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
         slam_builder.OdometryCallback(*odom);
       }
     }
+
+    if (msg_counter % 5000 == 0) {
+      printf("Processed %ld messages of %d, found %ld nodes.\n", msg_counter, view.size(), slam_builder.GetNodeCount());
+    }
   }
+
   if (!found_lidar) {
     printf("Did not find any lidar scans! Please check your specified topics.\n");
   } else {
@@ -103,6 +110,7 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
   } else {
     printf("Successfully found odometry messages.\n");
   }
+
   bag.close();
   printf("Done.\n");
   fflush(stdout);

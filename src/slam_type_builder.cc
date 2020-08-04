@@ -110,6 +110,10 @@ slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
   return slam_problem;
 }
 
+size_t SLAMTypeBuilder::GetNodeCount() {
+  return nodes_.size();
+}
+
 void DifferentialOdometryTracking::OdometryCallback(CobotOdometryMsg& odometry) {
   if (!odom_initialized_) {
     odom_initialized_ = true;
