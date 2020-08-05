@@ -34,6 +34,7 @@ CONFIG_STRING(hitl_lc_topic, "hitl_lc_topic");
 CONFIG_BOOL(differential_odom, "differential_odom");
 
 DEFINE_string(config_file, "", "The path to the config file to use.");
+DEFINE_string(solution_poses, "", "The path to the file containing the solution poses, to load from an existing solution.");
 
 static bool asking_for_input = true;
 
@@ -124,7 +125,7 @@ void SignalHandler(int signum) {
   exit(0);
 }
 
-void LearnedLoopClosure(SLAMProblem2D& slam_problem, Solver& solver) {
+void PopulateSLAMProblem(SLAMProblem2D& slam_problem, Solver& solver) {
   // Iteratively add all the nodes and odometry factors.
   for (uint64_t node_index = 0; node_index < slam_problem.nodes.size();
        node_index++) {
@@ -136,7 +137,10 @@ void LearnedLoopClosure(SLAMProblem2D& slam_problem, Solver& solver) {
     }
     std::cout << "Nodes added: " << node_index + 1 << std::endl;
   }
-  std::cout << "Solving initial" << std::endl;
+}
+
+void SolveSLAMProblem(SLAMProblem2D& slam_problem, Solver& solver) {
+  std::cout << "Solving SLAM Problem..." << std::endl;
   solver.SolveSLAM();
   // Do a final pass through and check for any LC nodes.
   // But only if automatic loop closure is enabled.
@@ -174,7 +178,14 @@ int main(int argc, char** argv) {
       << " you probably didn't specify the correct topics!\n";
   // Load all the residuals into the problem and run to get initial solution.
   Solver solver(n);
-  LearnedLoopClosure(slam_problem, solver);
+  PopulateSLAMProblem(slam_problem, solver);
+  if (FLAGS_solution_poses.compare("") != 0) {
+    std::cout << "Loading solution poses; skipping SLAM solving step." << std::endl;
+    solver.LoadSLAMSolution(FLAGS_solution_poses.c_str());
+  } else {
+    SolveSLAMProblem(slam_problem, solver);
+  }
+
   std::cout << "Waiting for Loop Closure input" << std::endl;
   ros::Subscriber hitl_sub =
       n.subscribe(CONFIG_hitl_lc_topic, 10, &Solver::HitlCallback, &solver);

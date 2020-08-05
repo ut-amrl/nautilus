@@ -22,6 +22,7 @@
 #include "laser_scan_matcher/MatchLaserScans.h"
 #include "local_uncertainty_estimator/EstimateLocalUncertainty.h"
 #include "timer.h"
+#include <fstream>
 
 #include "./solver.h"
 #include "./cimg_debug.h"
@@ -1102,9 +1103,11 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   // TODO: Find a better way to set these up.
   //  translation_weight_ = lc_translation_weight_;
   //  rotation_weight_ = lc_rotation_weight_;
+  std::cout << "Solving problem with HITL constraints..." << std::endl;
   SolveSLAM();
   //TODO: This is giving worse results.
   problem_.odometry_factors = initial_odometry_factors;
+  std::cout << "Solving problem with initial odometry constraints..." << std::endl;
   SolveSLAM();
   std::cout << "Waiting for Loop Closure input." << std::endl;
 }
@@ -1263,6 +1266,39 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
   std::cout << "covariance:\n" << cov << std::endl;
   double cost = (vec.transpose() * cov.inverse() * vec);
   return cost;
+}
+
+void Solver::LoadSLAMSolution(const char* poses_path) {
+  std::map<double, Vector3f> poses;
+  std::ifstream poses_file;
+  poses_file.open(poses_path);
+  if(poses_file.is_open()) {
+    double timestamp;
+    float pose_x, pose_y, theta;
+    while (poses_file >> timestamp >> pose_x >> pose_y >> theta) {
+      poses[timestamp] = Vector3f(pose_x, pose_y, theta);
+    }
+  }
+  poses_file.close();
+  std::cout << "Finished loading solution file." << std::endl;
+  for(size_t i = 0; i < solution_.size(); i++) {
+    std::stringstream ss;
+    ss << std::fixed << solution_[i].timestamp;
+    double timestamp = std::stod(ss.str());
+    if (poses.find(timestamp) != poses.end()) {
+      solution_[i].pose[0] = poses[timestamp][0];
+      solution_[i].pose[1] = poses[timestamp][1];
+      solution_[i].pose[2] = poses[timestamp][2];
+    } else {
+      printf("Unable to find solution for timestamp %f\n", timestamp);
+    }
+  }
+
+  // Call the visualization once more to see the finished optimization.
+  for (int i = 0; i < 5; i++) {
+    vis_callback_->PubVisualization();
+    sleep(1);
+  }
 }
 
 void Solver::WriteCallback(const WriteMsgConstPtr& msg) {

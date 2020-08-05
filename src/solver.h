@@ -625,6 +625,7 @@ class Solver {
   void AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node);
   void AddSlamNode(SLAMNode2D& node);
   void CheckForLearnedLC(SLAMNode2D& node);
+  void LoadSLAMSolution(const char* poses_path);
 
  private:
   double CostFromResidualDescriptor(const ResidualDesc& res_desc);
