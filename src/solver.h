@@ -139,7 +139,7 @@ struct CeresInformation {
   vector<ResidualDesc> res_descriptors;
 };
 
-struct SolverConfig {
+namespace SolverConfig {
   CONFIG_DOUBLE(translation_weight, "translation_weight");
   CONFIG_DOUBLE(rotation_weight, "rotation_weight");
   CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
@@ -156,7 +156,6 @@ struct SolverConfig {
   CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
   CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
   CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
-
   // Auto LC configs
   CONFIG_BOOL(keyframe_local_uncertainty_filtering, "keyframe_local_uncertainty_filtering");
   CONFIG_BOOL(keyframe_chi_squared_test, "keyframe_chi_squared_test");
@@ -171,12 +170,6 @@ struct SolverConfig {
   CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
   CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
   CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
-
-  SolverConfig() {
-    std::cout << "Solver Waiting..." << std::endl;
-    config_reader::WaitForInit();
-    std::cout << "--- Done Waiting ---" << std::endl;
-  }
 };
 
 /*----------------------------------------------------------------------------*
@@ -665,7 +658,6 @@ class Solver {
   ros::ServiceClient local_uncertainty_client;
   CorrelativeScanMatcher scan_matcher;
   CeresInformation ceres_information;
-  SolverConfig config_;
 };
 
 #endif  // SRC_SOLVER_H_

@@ -20,8 +20,6 @@ using Eigen::Rotation2Df;
 using NormalComputation::CircularHoughAccumulator;
 using std::vector;
 
-NormalComputationConfig config;
-
 // TODO: Possibly adaptively set the k neighborhood size.
 // TODO: Orientation of normals.
 
@@ -76,18 +74,18 @@ vector<Vector2f> NormalComputation::GetNormals(const vector<Vector2f>& points) {
       new KDTree<float, 2>(KDTree<float, 2>::EigenToKDNoNormals(points));
   vector<Vector2f> normals;
   for (const Vector2f& point : points) {
-    CircularHoughAccumulator accum(config.CONFIG_bin_number);
+    CircularHoughAccumulator accum(NormalComputationConfig::CONFIG_bin_number);
     size_t number_of_samples = 0;
-    double neighborhood_size = config.CONFIG_neighborhood_size;
+    double neighborhood_size = NormalComputationConfig::CONFIG_neighborhood_size;
     vector<KDNodeValue<float, 2>> neighbors;
     while (neighbors.size() <= 1) {
       tree->FindNeighborPoints(point, neighborhood_size, &neighbors);
-      neighborhood_size += config.CONFIG_neighborhood_step_size;
+      neighborhood_size += NormalComputationConfig::CONFIG_neighborhood_step_size;
     }
     std::unordered_map<size_t, bool> chosen_samples;
     // Check that the sample limit is less than total number of choices.
     size_t limit = std::min(neighbors.size() * (neighbors.size() - 1),
-                            SampleLimit(config.CONFIG_mean_distance));
+                            SampleLimit(NormalComputationConfig::CONFIG_mean_distance));
     while (number_of_samples < limit) {
       // Get a random pair of points using a costless combinatorial ordering.
       size_t first_index;

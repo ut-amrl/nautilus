@@ -12,14 +12,12 @@ using Eigen::Vector2f;
 using math_util::angle_mod;
 using std::vector;
 
-struct NormalComputationConfig {
-  CONFIG_DOUBLE(neighborhood_size, "nc_neighborhood_size");
-  CONFIG_DOUBLE(neighborhood_step_size, "nc_neighborhood_step_size");
-  CONFIG_DOUBLE(mean_distance, "nc_mean_distance");
-  CONFIG_INT(bin_number, "nc_bin_number");
-
-  NormalComputationConfig() { config_reader::WaitForInit(); }
-};
+namespace NormalComputationConfig {
+    CONFIG_DOUBLE(neighborhood_size, "nc_neighborhood_size");
+    CONFIG_DOUBLE(neighborhood_step_size, "nc_neighborhood_step_size");
+    CONFIG_DOUBLE(mean_distance, "nc_mean_distance");
+    CONFIG_INT(bin_number, "nc_bin_number");
+}
 
 namespace NormalComputation {
 struct CircularHoughAccumulator {
