@@ -10,11 +10,11 @@ MESSAGE(STATUS "Arch: ${CMAKE_SYSTEM_PROCESSOR}")
 SET(CMAKE_CXX_FLAGS "-std=c++17 -Wall -Werror -Wno-deprecated-copy")
 
 IF(${CMAKE_BUILD_TYPE} MATCHES "Release")
-    option(TESTING "Build tests" OFF)
+    option(TESTING "Build tests" FALSE)
     MESSAGE(STATUS "Additional Flags for Release mode")
     SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -fopenmp -O3 -DNDEBUG")
 ELSEIF(${CMAKE_BUILD_TYPE} MATCHES "Debug")
-    option(TESTING "Build tests" ON)
+    option(TESTING "Build tests" TRUE)
     MESSAGE(STATUS "Additional Flags for Debug mode")
     SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -fopenmp -g -O0")
 ENDIF()
@@ -33,6 +33,8 @@ INCLUDE_DIRECTORIES(third_party/csm/src)
 INCLUDE_DIRECTORIES(third_party/vector_maps/src)
 INCLUDE_DIRECTORIES(third_party/learning-loop-closure/laser_scan_matcher/srv_gen/cpp/include)
 INCLUDE_DIRECTORIES(third_party/learning-loop-closure/local_uncertainty_estimator/srv_gen/cpp/include)
+INCLUDE_DIRECTORIES(${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include)
+LINK_DIRECTORIES(${PROJECT_SOURCE_DIR}/third_party/googletest/lib)
 
 rosbuild_init()
 
@@ -79,8 +81,8 @@ TARGET_LINK_LIBRARIES(${CMAKE_PROJECT_NAME}
                       shared_library
                       ${libs}
                       ${CERES_LIBRARIES})
-
-#if (TESTING)
-# enable_testing()
-#add_subdirectory(test)
-#endif()
+if (TESTING)
+  MESSAGE(STATUS "Compiling tests")
+  enable_testing()
+  add_subdirectory(test)
+endif()
