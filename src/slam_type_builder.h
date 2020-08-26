@@ -14,16 +14,27 @@
 
 namespace nautilus {
 
+using Eigen::Vector2f;
+using slam_types::OdometryFactor2D;
+using slam_types::RobotPose2D;
+using nautilus::CobotOdometryMsg;
+
+namespace SlamTypeBuilderConfig {
+    CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
+    CONFIG_BOOL(diff_odom, "differential_odom");
+    CONFIG_DOUBLE(max_pose_num, "pose_number");
+    CONFIG_DOUBLE(rotation_change, "rotation_change_for_lidar");
+    CONFIG_DOUBLE(translation_change, "translation_change_for_lidar");
+}
+
 class DifferentialOdometryTracking {
  public:
-  DifferentialOdometryTracking() {}
-
-  void OdometryCallback(nautilus::CobotOdometryMsg &odometry);
-
-  slam_types::RobotPose2D GetPose();
-
-  bool ReadyForLidar();
-
+  void OdometryCallback(CobotOdometryMsg& odometry);
+  RobotPose2D GetPose();
+  bool ReadyForLidar() {
+    return pending_rotation_ >= SlamTypeBuilderConfig::CONFIG_rotation_change ||
+           pending_translation_.norm() >= SlamTypeBuilderConfig::CONFIG_translation_change;
+  }
   void ResetInits() {
     total_translation = Eigen::Vector2f(0, 0);
     total_rotation = 0.0f;
@@ -41,14 +52,12 @@ class DifferentialOdometryTracking {
 
 class AbsoluteOdometryTracking {
  public:
-  AbsoluteOdometryTracking() {}
-
-  void OdometryCallback(nav_msgs::Odometry &odometry);
-
-  slam_types::RobotPose2D GetPose();
-
-  bool ReadyForLidar();
-
+  void OdometryCallback(nav_msgs::Odometry& odometry);
+  RobotPose2D GetPose();
+  bool ReadyForLidar() {
+    return pending_rotation_ >= SlamTypeBuilderConfig::CONFIG_rotation_change ||
+           pending_translation_.norm() >= SlamTypeBuilderConfig::CONFIG_translation_change;
+  }
   void ResetInits() {
     init_odom_angle_ = odom_angle_;
     init_odom_translation_ = odom_translation_;
@@ -78,16 +87,11 @@ class AbsoluteOdometryTracking {
 
 class SLAMTypeBuilder {
  public:
-  SLAMTypeBuilder() {}
-
-  void LidarCallback(sensor_msgs::LaserScan &laser_scan);
-
-  void OdometryCallback(nav_msgs::Odometry &odometry);
-
-  void OdometryCallback(CobotOdometryMsg &odometry);
-
+  void LidarCallback(sensor_msgs::LaserScan& laser_scan);
+  void OdometryCallback(nav_msgs::Odometry& odometry);
+  void OdometryCallback(CobotOdometryMsg& odometry);
   slam_types::SLAMProblem2D GetSlamProblem();
-
+  size_t GetNodeCount();
   bool Done();
 
  private:

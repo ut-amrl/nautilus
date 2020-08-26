@@ -154,7 +154,7 @@ std::vector<KDNodeValue<float, 2>> KDTree<float, 2>::EigenToKD(
     const std::vector<Vector2f>& values) {
   std::vector<KDNodeValue<float, 2>> point_nodes;
   CHECK_GE(values.size(), 0);
-  vector<Vector2f> normals = nautilus::GetNormals(values);
+  vector<Vector2f> normals = nautilus::NormalComputation::GetNormals(values);
   for (size_t node_index = 0; node_index < values.size(); node_index++) {
     point_nodes.emplace_back(values[node_index], normals[node_index],
                              node_index);

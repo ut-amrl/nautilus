@@ -42,13 +42,13 @@ void SLAMTypeBuilder::AddOdomFactor(
 
 void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan &laser_scan) {
   // We only want one odometry between each lidar callback.
-  if (((CONFIG_diff_odom && diff_tracking_.ReadyForLidar()) ||
+  if (((SlamTypeBuilderConfig::CONFIG_diff_odom && diff_tracking_.ReadyForLidar()) ||
        odom_tracking_.ReadyForLidar()) &&
       !Done()) {
     // Transform this laser scan into a point cloud.s
-    double max_range = (CONFIG_max_lidar_range <= 0)
+    double max_range = (SlamTypeBuilderConfig::CONFIG_max_lidar_range <= 0)
                            ? laser_scan.range_max
-                           : CONFIG_max_lidar_range;
+                           : SlamTypeBuilderConfig::CONFIG_max_lidar_range;
 
     // TODO wrap in a config-based if
     const size_t truncation_size = 55;
@@ -71,13 +71,13 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan &laser_scan) {
     // Reset the initial values for everything,
     // we should start at 0 for everything.
     if (pose_id_ == 0) {
-      if (CONFIG_diff_odom) {
+      if (SlamTypeBuilderConfig::CONFIG_diff_odom) {
         diff_tracking_.ResetInits();
       } else {
         odom_tracking_.ResetInits();
       }
     }
-    if (CONFIG_diff_odom) {
+    if (SlamTypeBuilderConfig::CONFIG_diff_odom) {
       pose = diff_tracking_.GetPose();
     } else {
       pose = odom_tracking_.GetPose();
@@ -119,8 +119,11 @@ slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
   return slam_problem;
 }
 
-void DifferentialOdometryTracking::OdometryCallback(
-    CobotOdometryMsg &odometry) {
+size_t SLAMTypeBuilder::GetNodeCount() {
+  return nodes_.size();
+}
+
+void DifferentialOdometryTracking::OdometryCallback(CobotOdometryMsg& odometry) {
   if (!odom_initialized_) {
     odom_initialized_ = true;
     pending_rotation_ = 0;
@@ -139,11 +142,6 @@ RobotPose2D DifferentialOdometryTracking::GetPose() {
   pending_translation_ = Vector2f(0, 0);
   pending_rotation_ = 0.0;
   return RobotPose2D(total_translation, total_rotation);
-}
-
-bool DifferentialOdometryTracking::ReadyForLidar() {
-    return pending_rotation_ >= CONFIG_rotation_change ||
-           pending_translation_.norm() >= CONFIG_translation_change;
 }
 
 void AbsoluteOdometryTracking::OdometryCallback(nav_msgs::Odometry &odometry) {
@@ -181,13 +179,8 @@ RobotPose2D AbsoluteOdometryTracking::GetPose() {
   return RobotPose2D(total_translation, total_rotation);
 }
 
-bool AbsoluteOdometryTracking::ReadyForLidar() {
-    return pending_rotation_ >= CONFIG_rotation_change ||
-           pending_translation_.norm() >= CONFIG_translation_change;
-}
-
 bool SLAMTypeBuilder::Done() {
-  return pose_id_ >= static_cast<uint64_t>(CONFIG_max_pose_num);
+  return pose_id_ >= static_cast<uint64_t>(SlamTypeBuilderConfig::CONFIG_max_pose_num);
 }
 
 }  // namespace nautilus

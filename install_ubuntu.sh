@@ -12,13 +12,6 @@ THIRD_PARTY_DIR="$SCRIPT_DIR/third_party"
 # These are things that can be installed using apt.
 echo -e "\e[32mInstalling General APT Dependencies\e[39m"
 apt install cmake libgoogle-glog-dev libatlas-base-dev libsuitesparse-dev libgtest-dev curl libomp-dev
-# Install GTest
-echo -e "\e[32mInstalling GTest\e[39m"
-cd /usr/src/gtest
-mkdir build
-cd build
-cmake ..
-make
 # Install Eigen
 echo -e "\e[32mDownloading Eigen\e[39m"
 cd $THIRD_PARTY_DIR

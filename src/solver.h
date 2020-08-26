@@ -124,6 +124,39 @@ struct CeresInformation {
   std::vector<ResidualDesc> res_descriptors;
 };
 
+namespace SolverConfig {
+  CONFIG_DOUBLE(translation_weight, "translation_weight");
+  CONFIG_DOUBLE(rotation_weight, "rotation_weight");
+  CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
+  CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
+  CONFIG_DOUBLE(lc_base_max_range, "lc_base_max_range");
+  CONFIG_DOUBLE(lc_max_range_scaling, "lc_max_range_scaling");
+  CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
+  CONFIG_STRING(pose_output_file, "pose_output_file");
+  CONFIG_STRING(map_output_file, "map_output_file");
+  CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
+  CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
+  CONFIG_DOUBLE(lc_match_threshold, "lc_match_threshold");
+  CONFIG_INT(lidar_constraint_amount, "lidar_constraint_amount");
+  CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
+  CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
+  CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
+  // Auto LC configs
+  CONFIG_BOOL(keyframe_local_uncertainty_filtering, "keyframe_local_uncertainty_filtering");
+  CONFIG_BOOL(keyframe_chi_squared_test, "keyframe_chi_squared_test");
+  CONFIG_DOUBLE(keyframe_min_odom_distance, "keyframe_min_odom_distance");
+  CONFIG_DOUBLE(local_uncertainty_condition_threshold,
+                "local_uncertainty_condition_threshold");
+  CONFIG_DOUBLE(local_uncertainty_scale_threshold,
+                "local_uncertainty_scale_threshold");
+  CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
+  CONFIG_INT(lc_match_window_size, "lc_match_window_size");
+  CONFIG_INT(lc_min_keyframes, "lc_min_keyframes");
+  CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
+  CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
+  CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
+};
+
 /*----------------------------------------------------------------------------*
  *                            HELPER FUNCTIONS                                |
  *----------------------------------------------------------------------------*/
@@ -574,7 +607,7 @@ class Solver {
                        slam_types::OdometryFactor2D& odom_factor_to_node);
   void AddSlamNode(slam_types::SLAMNode2D& node);
   void CheckForLearnedLC(slam_types::SLAMNode2D& node);
-
+  void LoadSLAMSolution(const char* poses_path);
  private:
   double CostFromResidualDescriptor(const ResidualDesc& res_desc);
   double GetChiSquareCost(uint64_t node_a, uint64_t node_b);

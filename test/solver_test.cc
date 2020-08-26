@@ -8,6 +8,7 @@
 #include "../src/solver.h"
 
 using Eigen::Vector2f;
+using namespace nautilus;
 
 TEST(LineSegDistanceTest, trivial_on_line) {
   Vector2f p1(0, 0);

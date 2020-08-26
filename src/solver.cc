@@ -23,6 +23,7 @@
 #include "nautilus/HitlSlamInputMsg.h"
 #include "nautilus/WriteMsg.h"
 #include "timer.h"
+#include <fstream>
 
 #define DEBUG true
 
@@ -278,8 +279,8 @@ vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
   //   ceres_information.ResetProblem();
   //   // Add all the odometry constraints between our poses.
   //   AddOdomFactors(ceres_information.problem.get(), GetSolvedOdomFactors(),
-  //                   CONFIG_translation_weight,
-  //                   CONFIG_rotation_weight);
+  //                   SolverConfig::CONFIG_translation_weight,
+  //                   SolverConfig::CONFIG_rotation_weight);
   //   AddResidualsForAutoLC(ceres_information.problem.get(), false);
   //   ceres::Solve(options, ceres_information.problem.get(), &summary);
   // }
@@ -414,7 +415,7 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
   // While our solution moves more than the stopping_accuracy,
   // continue to optimize.
   for (int64_t window_size = 1;
-       window_size <= CONFIG_lidar_constraint_amount; window_size++) {
+       window_size <= SolverConfig::CONFIG_lidar_constraint_amount; window_size++) {
     LOG(INFO) << "Using window size: " << window_size << std::endl;
     do {
       vis_callback_->ClearNormals();
@@ -423,8 +424,8 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
       ceres_information.ResetProblem();
       // Add all the odometry constraints between our poses.
       AddOdomFactors(ceres_information.problem.get(), problem_.odometry_factors,
-                     CONFIG_translation_weight,
-                     CONFIG_rotation_weight);
+                     SolverConfig::CONFIG_translation_weight,
+                     SolverConfig::CONFIG_rotation_weight);
       // For every SLAM node we want to optimize it against the past
       // lidar constraint amount nodes.
       for (size_t node_i_index = 0; node_i_index < problem_.nodes.size();
@@ -467,7 +468,7 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
       AddHITLResiduals(ceres_information.problem.get());
       ceres::Solve(options, ceres_information.problem.get(), &summary);
     } while (abs(difference - last_difference) >
-             CONFIG_stopping_accuracy);
+             SolverConfig::CONFIG_stopping_accuracy);
   }
   // Call the visualization once more to see the finished optimization.
   for (int i = 0; i < 5; i++) {
@@ -519,14 +520,14 @@ double Solver::GetPointCorrespondences(
     KDNodeValue<float, 2> closest_target;
     vector<KDNodeValue<float, 2>> neighbors;
     target_lidar.pointcloud_tree->FindNeighborPoints(
-        source_point_transformed, CONFIG_outlier_threshold / 6.0,
+        source_point_transformed, SolverConfig::CONFIG_outlier_threshold / 6.0,
         &neighbors);
     // Get the current source point's normal.
     KDNodeValue<float, 2> source_point_with_normal;
     float found_dist = source_lidar.pointcloud_tree->FindNearestPoint(
         source_point, 0.1, &source_point_with_normal);
     CHECK_EQ(found_dist, 0.0) << "Source point is not in KD Tree!\n";
-    float dist = CONFIG_outlier_threshold;
+    float dist = SolverConfig::CONFIG_outlier_threshold;
     // Sort the target points by distance from the source point in the
     // target frame.
     std::sort(neighbors.begin(), neighbors.end(),
@@ -548,11 +549,11 @@ double Solver::GetPointCorrespondences(
     }
     // If we didn't find any matches in the first 1/6 of the threshold,
     // try all target points within the full threshold.
-    if (dist >= CONFIG_outlier_threshold) {
+    if (dist >= SolverConfig::CONFIG_outlier_threshold) {
       // Re-find all the closest targets.
       neighbors.clear();
       target_lidar.pointcloud_tree->FindNeighborPoints(
-          source_point_transformed, CONFIG_outlier_threshold,
+          source_point_transformed, SolverConfig::CONFIG_outlier_threshold,
           &neighbors);
       // Sort them again, based on distance from the source point in the
       // target frame.
@@ -564,7 +565,7 @@ double Solver::GetPointCorrespondences(
                 });
       // Cut out the first 1/6 threshold that we already checked.
       vector<KDNodeValue<float, 2>> unchecked_neighbors(
-          neighbors.begin() + (CONFIG_outlier_threshold / 6),
+          neighbors.begin() + (SolverConfig::CONFIG_outlier_threshold / 6),
           neighbors.end());
       // See if any of these points have a normal within our threshold.
       for (KDNodeValue<float, 2> current_target : unchecked_neighbors) {
@@ -629,9 +630,7 @@ vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
   vector<OdometryFactor2D> factors;
   for (uint64_t index = 1; index < solution_.size(); index++) {
     // Get the change in translation.
-    for (uint64_t prev_idx = std::max(
-             (uint64_t)0, index - CONFIG_lidar_constraint_amount);
-         prev_idx < index; prev_idx++) {
+    for(uint64_t prev_idx = std::max((uint64_t)0, index - SolverConfig::CONFIG_lidar_constraint_amount); prev_idx < index; prev_idx++) {
       Vector2f prev_loc(solution_[prev_idx].pose[0],
                         solution_[prev_idx].pose[1]);
       Vector2f loc(solution_[index].pose[0], solution_[index].pose[1]);
@@ -779,11 +778,9 @@ bool Solver::AddAutoLCConstraint(const AutoLCConstraint &constraint) {
 
   std::cout << "Writing LC Info" << std::endl;
   std::ofstream lc_output_file;
-  lc_output_file.open(CONFIG_lc_debug_output_dir + "/lc_matches.txt",
-                      std::ios::app);
-  lc_output_file << "Loop Closed " << constraint.node_a->node_idx << " "
-                 << constraint.node_b->node_idx << ", transformation: "
-                 << constraint.relative_transformation.transpose() << std::endl;
+  lc_output_file.open(SolverConfig::CONFIG_lc_debug_output_dir + "/lc_matches.txt", std::ios::app);
+  lc_output_file << "Loop Closed " << constraint.node_a->node_idx << " " << constraint.node_b->node_idx
+                 << ", transformation: " << constraint.relative_transformation.transpose() << std::endl;
   lc_output_file.close();
   // add constraint
   auto_lc_constraints_.push_back(constraint);
@@ -813,18 +810,13 @@ double Solver::AddResidualsForAutoLC(ceres::Problem *problem,
     // add the odometry residual
     ceres::ResidualBlockId odom_id;
     odom_id = ceres_information.problem->AddResidualBlock(
-        OdometryResidual::create(
-            GetDifferenceOdom(constraint.node_a->node_idx,
-                              constraint.node_b->node_idx,
-                              constraint.relative_transformation),
-            CONFIG_lc_translation_weight,
-            CONFIG_lc_rotation_weight),
-        NULL, solution_[constraint.node_a->node_idx].pose,
-        solution_[constraint.node_b->node_idx].pose);
-    ceres_information.res_descriptors.emplace_back(
-        constraint.node_a->node_idx, constraint.node_b->node_idx, odom_id);
+        OdometryResidual::create(GetDifferenceOdom(constraint.node_a->node_idx, constraint.node_b->node_idx, constraint.relative_transformation),
+                                SolverConfig::CONFIG_lc_translation_weight,
+                                SolverConfig::CONFIG_lc_rotation_weight),
+        NULL, solution_[constraint.node_a->node_idx].pose, solution_[constraint.node_b->node_idx].pose);
+    ceres_information.res_descriptors.emplace_back(constraint.node_a->node_idx, constraint.node_b->node_idx, odom_id);
 
-#if DEBUG
+    #if DEBUG
     printf("Poses: (%f %f %f) (%f %f %f) ... trans (%f %f %f)\n",
            solution_[constraint.node_a->node_idx].pose[0],
            solution_[constraint.node_a->node_idx].pose[1],
@@ -870,13 +862,13 @@ double Solver::AddResidualsForAutoLC(ceres::Problem *problem,
 
 std::pair<double, double> Solver::GetLocalUncertainty(const uint64_t node_idx) {
   if (node_idx <
-      static_cast<uint64_t>(CONFIG_local_uncertainty_prev_scans)) {
+      static_cast<uint64_t>(SolverConfig::CONFIG_local_uncertainty_prev_scans)) {
     return std::make_pair(0, 0);
   }
   std::vector<std::vector<Vector2f>> prevScans;
   for (uint64_t idx = node_idx - 1;
        idx > node_idx - static_cast<uint64_t>(
-                            CONFIG_local_uncertainty_prev_scans);
+                            SolverConfig::CONFIG_local_uncertainty_prev_scans);
        idx--) {
     prevScans.push_back(problem_.nodes[idx].lidar_factor.pointcloud);
   }
@@ -933,7 +925,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D &node) {
 #endif
   // Step 1: Check if this is a valid keyframe using the ChiSquared test,
   // basically is it different than the last keyframe.
-  if (CONFIG_keyframe_chi_squared_test) {
+  if (SolverConfig::CONFIG_keyframe_chi_squared_test) {
     if (!SimilarScans(keyframes[keyframes.size() - 1].node_idx, node.node_idx,
                       0.95)) {
 #if DEBUG
@@ -942,36 +934,29 @@ void Solver::CheckForLearnedLC(SLAMNode2D &node) {
       return;
     }
   } else {
-    // Weak emulation of chi^2....only add keyframes after enough time has
-    // passed or we have moved far enough
-    SLAMNode2D &prev_key_node =
-        problem_.nodes[keyframes[keyframes.size() - 1].node_idx];
-    double pose_dist = GetDifferenceOdom(node.node_idx, prev_key_node.node_idx)
-                           .translation.norm();
-    if (pose_dist < CONFIG_keyframe_min_odom_distance) {
-#if DEBUG
-      printf(
-          "Not a keyframe due to lack of pose uncertainty. total distance %f "
-          "\n",
-          pose_dist);
-#endif
+    // Weak emulation of chi^2....only add keyframes after enough time has passed or we have moved far enough
+    SLAMNode2D& prev_key_node = problem_.nodes[keyframes[keyframes.size() - 1].node_idx];
+    double pose_dist = GetDifferenceOdom(node.node_idx, prev_key_node.node_idx).translation.norm();
+    if (pose_dist < SolverConfig::CONFIG_keyframe_min_odom_distance) {
+      #if DEBUG
+      printf("Not a keyframe due to lack of pose uncertainty. total distance %f \n", pose_dist);
+      #endif     
       return;
     }
   }
 
   // Step X: Check if this is a valid scan for loop closure by sub sampling from
   // the scans close to it using local invariance.
-  if (CONFIG_keyframe_local_uncertainty_filtering) {
+  if (SolverConfig::CONFIG_keyframe_local_uncertainty_filtering) {
     auto uncertainty = GetLocalUncertaintyEstimate(node.node_idx);
-    if (uncertainty.first >
-            CONFIG_local_uncertainty_condition_threshold ||
-        uncertainty.second > CONFIG_local_uncertainty_scale_threshold) {
-#if DEBUG
-      printf(
-          "Not a keyframe due to lack of local invariance... Computed "
-          "Uncertainty: %f, %f\n",
-          uncertainty.first, uncertainty.second);
-#endif
+    if (uncertainty.first > SolverConfig::CONFIG_local_uncertainty_condition_threshold ||
+        uncertainty.second > SolverConfig::CONFIG_local_uncertainty_scale_threshold)
+        {
+      #if DEBUG
+      printf("Not a keyframe due to lack of local invariance... Computed Uncertainty: %f, %f\n",
+              uncertainty.first,
+              uncertainty.second);
+      #endif
       return;
     }
     // WaitForClose({DrawPoints(problem_.nodes[node.node_idx].lidar_factor.pointcloud)});
@@ -981,8 +966,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D &node) {
             << node.node_idx << std::endl;
   AddKeyframe(node);
 
-  // SaveImage(CONFIG_lc_debug_output_dir + "/keyframe_" +
-  // std::to_string(node.node_idx) + ".bmp",
+  // SaveImage(SolverConfig::CONFIG_lc_debug_output_dir + "/keyframe_" + std::to_string(node.node_idx) + ".bmp",
   //   GetTable(problem_.nodes[node.node_idx].lidar_factor.pointcloud,
   //   img_width, 0.03));
 
@@ -1001,19 +985,11 @@ void Solver::CheckForLearnedLC(SLAMNode2D &node) {
   LearnedKeyframe new_keyframe = keyframes[keyframes.size() - 1];
   vector<size_t> matches;
 
-  for (size_t match_index = 0;
-       match_index <
-       keyframes.size() -
-           std::min(CONFIG_lc_min_keyframes, (int)keyframes.size());
-       match_index++) {
-    // for (size_t match_index = 0; match_index < keyframes.size() - 1;
-    // match_index++) {
+  for (size_t match_index = 0; match_index < keyframes.size() - std::min(SolverConfig::CONFIG_lc_min_keyframes, (int)keyframes.size()); match_index++) {
+  // for (size_t match_index = 0; match_index < keyframes.size() - 1; match_index++) {
     LearnedKeyframe matched_keyframe = keyframes[match_index];
-    SLAMNode2D &keyframe_node = problem_.nodes[matched_keyframe.node_idx];
-    if ((node.pose.loc - keyframe_node.pose.loc).norm() >
-        CONFIG_lc_base_max_range +
-            CONFIG_lc_max_range_scaling *
-                (node.node_idx - matched_keyframe.node_idx)) {
+    SLAMNode2D& keyframe_node = problem_.nodes[matched_keyframe.node_idx];
+    if ((node.pose.loc - keyframe_node.pose.loc).norm() > SolverConfig::CONFIG_lc_base_max_range + SolverConfig::CONFIG_lc_max_range_scaling * (node.node_idx - matched_keyframe.node_idx)) {
       // #if DEBUG
       // printf("Too far away, not considering LC between %ld and %ld\n",
       // node.node_idx, matched_keyframe.node_idx); #endif
@@ -1022,7 +998,7 @@ void Solver::CheckForLearnedLC(SLAMNode2D &node) {
 
     float match_score = GetMatchScores(node, keyframe_node);
 
-    if (match_score > CONFIG_lc_match_threshold) {
+    if (match_score > SolverConfig::CONFIG_lc_match_threshold) {
       matches.push_back(match_index);
     }
   }
@@ -1035,23 +1011,21 @@ void Solver::CheckForLearnedLC(SLAMNode2D &node) {
   }
 
   std::ofstream lc_output_file;
-  lc_output_file.open(CONFIG_lc_debug_output_dir + "/lc_matches.txt",
-                      std::ios::app);
+  lc_output_file.open(SolverConfig::CONFIG_lc_debug_output_dir + "/lc_matches.txt", std::ios::app);
   std::vector<AutoLCConstraint> constraints;
-  for (auto idx : matches) {
-#if DEBUG
-    printf("Found match of pose %lu to %lu\n", keyframes[idx].node_idx,
-           new_keyframe.node_idx);
-#endif
-    lc_output_file << "Matched " << new_keyframe.node_idx << " "
-                   << keyframes[idx].node_idx << std::endl;
+  for(auto idx : matches) {
+    #if DEBUG
+    printf("Found match of pose %lu to %lu\n",
+            keyframes[idx].node_idx,
+            new_keyframe.node_idx);
+    #endif
+    lc_output_file << "Matched " << new_keyframe.node_idx << " " << keyframes[idx].node_idx << std::endl;
 
-    if (CONFIG_lc_match_window_size % 2 != 1) {
+    if (SolverConfig::CONFIG_lc_match_window_size % 2 != 1) {
       std::cerr << "lc_match_window_size must be odd" << std::endl;
       exit(1);
     }
-
-    size_t window_offset = CONFIG_lc_match_window_size / 2;
+    size_t window_offset = SolverConfig::CONFIG_lc_match_window_size / 2;
 
     size_t start = std::max(new_keyframe.node_idx - window_offset, (size_t)0);
     size_t end =
@@ -1146,18 +1120,18 @@ HitlLCConstraint Solver::GetRelevantPosesForHITL(
          problem_.nodes[node_idx].lidar_factor.pointcloud) {
       Vector2f point_transformed = node_to_world * point;
       if (DistanceToLineSegment(point_transformed, lines[0]) <=
-          CONFIG_hitl_line_width) {
+          SolverConfig::CONFIG_hitl_line_width) {
         points_on_a.push_back(point);
       } else if (DistanceToLineSegment(point_transformed, lines[1]) <=
-                 CONFIG_hitl_line_width) {
+                 SolverConfig::CONFIG_hitl_line_width) {
         points_on_b.push_back(point);
       }
     }
     if (points_on_a.size() >=
-        static_cast<size_t>(CONFIG_hitl_pose_point_threshold)) {
+        static_cast<size_t>(SolverConfig::CONFIG_hitl_pose_point_threshold)) {
       hitl_constraint.line_a_poses.emplace_back(node_idx, points_on_a);
     } else if (points_on_b.size() >=
-               static_cast<size_t>(CONFIG_hitl_pose_point_threshold)) {
+               static_cast<size_t>(SolverConfig::CONFIG_hitl_pose_point_threshold)) {
       hitl_constraint.line_b_poses.emplace_back(node_idx, points_on_b);
     }
   }
@@ -1205,9 +1179,11 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr &hitl_ptr) {
   // TODO: Find a better way to set these up.
   //  translation_weight_ = lc_translation_weight_;
   //  rotation_weight_ = lc_rotation_weight_;
+  std::cout << "Solving problem with HITL constraints..." << std::endl;
   SolveSLAM();
   // TODO: This is giving worse results.
   problem_.odometry_factors = initial_odometry_factors;
+  std::cout << "Solving problem with initial odometry constraints..." << std::endl;
   SolveSLAM();
   std::cout << "Waiting for Loop Closure input." << std::endl;
 }
@@ -1238,8 +1214,8 @@ vector<ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
   ceres::ResidualBlockId odom_id;
   odom_id = ceres_information.problem->AddResidualBlock(
       OdometryResidual::create(GetDifferenceOdom(first_node, second_node),
-                               CONFIG_lc_translation_weight,
-                               CONFIG_lc_rotation_weight),
+                               SolverConfig::CONFIG_lc_translation_weight,
+                               SolverConfig::CONFIG_lc_rotation_weight),
       NULL, solution_[first_node].pose, solution_[second_node].pose);
   res_desc.emplace_back(node_a, node_b, odom_id);
   return res_desc;
@@ -1374,15 +1350,48 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
   return cost;
 }
 
-void Solver::WriteCallback(const WriteMsgConstPtr &msg) {
-  if (CONFIG_pose_output_file.compare("") == 0) {
+void Solver::LoadSLAMSolution(const char* poses_path) {
+  std::map<double, Vector3f> poses;
+  std::ifstream poses_file;
+  poses_file.open(poses_path);
+  if(poses_file.is_open()) {
+    double timestamp;
+    float pose_x, pose_y, theta;
+    while (poses_file >> timestamp >> pose_x >> pose_y >> theta) {
+      poses[timestamp] = Vector3f(pose_x, pose_y, theta);
+    }
+  }
+  poses_file.close();
+  std::cout << "Finished loading solution file." << std::endl;
+  for(size_t i = 0; i < solution_.size(); i++) {
+    std::stringstream ss;
+    ss << std::fixed << solution_[i].timestamp;
+    double timestamp = std::stod(ss.str());
+    if (poses.find(timestamp) != poses.end()) {
+      solution_[i].pose[0] = poses[timestamp][0];
+      solution_[i].pose[1] = poses[timestamp][1];
+      solution_[i].pose[2] = poses[timestamp][2];
+    } else {
+      printf("Unable to find solution for timestamp %f\n", timestamp);
+    }
+  }
+
+  // Call the visualization once more to see the finished optimization.
+  for (int i = 0; i < 5; i++) {
+    vis_callback_->PubVisualization();
+    sleep(1);
+  }
+}
+
+void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
+  if (SolverConfig::CONFIG_pose_output_file.compare("") == 0) {
     std::cout << "No output file specified, not writing!" << std::endl;
     return;
   }
   std::cout << "Writing Poses" << std::endl;
   std::ofstream output_file;
-  output_file.open(CONFIG_pose_output_file);
-  for (const SLAMNodeSolution2D &sol_node : solution_) {
+  output_file.open(SolverConfig::CONFIG_pose_output_file);
+  for (const SLAMNodeSolution2D& sol_node : solution_) {
     output_file << std::fixed << sol_node.timestamp << " " << sol_node.pose[0]
                 << " " << sol_node.pose[1] << " " << sol_node.pose[2]
                 << std::endl;
@@ -1414,18 +1423,14 @@ void Solver::Vectorize(const WriteMsgConstPtr &msg) {
     gui_helpers::AddLine(line_start, line_end, gui_helpers::Color4f::kWhite,
                          &line_mark);
   }
-
-  std::cout << "Created map: Pointcloud size: " << whole_pointcloud.size()
-            << "\tLines size: " << lines.size() << std::endl;
-
-  if (CONFIG_map_output_file.compare("") != 0) {
+  std::cout << "Created map: Pointcloud size: " << whole_pointcloud.size() << "\tLines size: " << lines.size() << std::endl;
+  
+  if (SolverConfig::CONFIG_map_output_file.compare("") != 0) {
     std::cout << "Writing map to file..." << std::endl;
     std::ofstream output_file;
-    output_file.open(CONFIG_map_output_file);
-    for (auto line : lines) {
-      output_file << line.start_point.x() << "," << line.start_point.y() << ","
-                  << line.end_point.x() << "," << line.end_point.y()
-                  << std::endl;
+    output_file.open(SolverConfig::CONFIG_map_output_file);
+    for(auto line : lines) {
+      output_file << line.start_point.x() << "," << line.start_point.y() << "," << line.end_point.x() << "," << line.end_point.y() << std::endl;
     }
     output_file.close();
   }

@@ -15,17 +15,6 @@
 #include "rosbag/view.h"
 #include "sensor_msgs/LaserScan.h"
 
-CONFIG_STRING(bag_path, "bag_path");
-CONFIG_BOOL(auto_lc, "auto_lc");
-CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
-CONFIG_STRING(lidar_topic, "lidar_topic");
-CONFIG_STRING(odom_topic, "odom_topic");
-CONFIG_STRING(hitl_lc_topic, "hitl_lc_topic");
-CONFIG_BOOL(differential_odom, "differential_odom");
-
-DEFINE_string(config_file, "", "The path to the config file to use.");
-
-
 namespace nautilus {
 
 using nautilus::CobotOdometryMsg;
@@ -37,6 +26,17 @@ using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
 using std::string;
 using std::vector;
+
+CONFIG_STRING(bag_path, "bag_path");
+CONFIG_BOOL(auto_lc, "auto_lc");
+CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
+CONFIG_STRING(lidar_topic, "lidar_topic");
+CONFIG_STRING(odom_topic, "odom_topic");
+CONFIG_STRING(hitl_lc_topic, "hitl_lc_topic");
+CONFIG_BOOL(differential_odom, "differential_odom");
+
+DEFINE_string(config_file, "", "The path to the config file to use.");
+DEFINE_string(solution_poses, "", "The path to the file containing the solution poses, to load from an existing solution.");
 
 static bool asking_for_input = true;
 
@@ -63,10 +63,12 @@ SLAMProblem2D ProcessBagFile(const char *bag_path, const ros::NodeHandle &n) {
   bool found_lidar = false;
   rosbag::View view(bag, rosbag::TopicQuery(topics));
   SLAMTypeBuilder slam_builder;
+  size_t msg_counter = 0;
   // Iterate through the bag
   for (rosbag::View::iterator it = view.begin();
        ros::ok() && it != view.end() && !slam_builder.Done(); ++it) {
-    const rosbag::MessageInstance &message = *it;
+    const rosbag::MessageInstance& message = *it;
+    msg_counter++;
     {
       // Load all the point clouds into memory.
       sensor_msgs::LaserScanPtr laser_scan =
@@ -96,7 +98,12 @@ SLAMProblem2D ProcessBagFile(const char *bag_path, const ros::NodeHandle &n) {
         slam_builder.OdometryCallback(*odom);
       }
     }
+
+    if (msg_counter % 5000 == 0) {
+      printf("Processed %ld messages of %d, found %ld nodes.\n", msg_counter, view.size(), slam_builder.GetNodeCount());
+    }
   }
+
   if (!found_lidar) {
     printf(
         "Did not find any lidar scans! Please check your specified topics.\n");
@@ -110,13 +117,21 @@ SLAMProblem2D ProcessBagFile(const char *bag_path, const ros::NodeHandle &n) {
   } else {
     printf("Successfully found odometry messages.\n");
   }
+
   bag.close();
   printf("Done.\n");
   fflush(stdout);
   return slam_builder.GetSlamProblem();
 }
 
-void LearnedLoopClosure(slam_types::SLAMProblem2D &slam_problem, Solver &solver) {
+void SignalHandler(int signum) {
+  printf("Exiting with %d\n", signum);
+  asking_for_input = false;
+  ros::shutdown();
+  exit(0);
+}
+
+void PopulateSLAMProblem(SLAMProblem2D& slam_problem, Solver& solver) {
   // Iteratively add all the nodes and odometry factors.
   for (uint64_t node_index = 0; node_index < slam_problem.nodes.size();
        node_index++) {
@@ -128,7 +143,10 @@ void LearnedLoopClosure(slam_types::SLAMProblem2D &slam_problem, Solver &solver)
     }
     std::cout << "Nodes added: " << node_index + 1 << std::endl;
   }
-  std::cout << "Solving initial" << std::endl;
+}
+
+void SolveSLAMProblem(SLAMProblem2D& slam_problem, Solver& solver) {
+  std::cout << "Solving SLAM Problem..." << std::endl;
   solver.SolveSLAM();
   // Do a final pass through and check for any LC nodes.
   // But only if automatic loop closure is enabled.
@@ -149,63 +167,45 @@ void LearnedLoopClosure(slam_types::SLAMProblem2D &slam_problem, Solver &solver)
 
 using nautilus::Solver;
 
-void SignalHandler(int signum) {
-    printf("Exiting with %d\n", signum);
-    nautilus::asking_for_input = false;
-    ros::shutdown();
-    exit(0);
-}
-
 int main(int argc, char **argv) {
   google::InitGoogleLogging(*argv);
   google::ParseCommandLineFlags(&argc, &argv, false);
-  if (FLAGS_config_file.compare("") == 0) {
+  if (nautilus::FLAGS_config_file == "") {
     printf("Must specify a config file!\n");
     exit(1);
   }
-  config_reader::ConfigReader reader({FLAGS_config_file});
-  if (CONFIG_bag_path.compare("") == 0) {
+  config_reader::ConfigReader reader({nautilus::FLAGS_config_file});
+  if (nautilus::CONFIG_bag_path == "") {
     printf("Must specify an input bag!\n");
     exit(1);
   }
   ros::init(argc, argv, "nautilus");
   ros::NodeHandle n;
-  signal(SIGINT, SignalHandler);
+  signal(SIGINT, nautilus::SignalHandler);
   // Load and pre-process the data.
   std::string package_path = ros::package::getPath("nautilus");
   nautilus::slam_types::SLAMProblem2D slam_problem = nautilus::ProcessBagFile(
-      (package_path + "/" + CONFIG_bag_path).c_str(), n);
+      (package_path + "/" + nautilus::CONFIG_bag_path).c_str(), n);
   CHECK_GT(slam_problem.nodes.size(), 1)
       << " Not enough nodes were processed"
       << " you probably didn't specify the correct topics!\n";
   // Load all the residuals into the problem and run to get initial solution.
   Solver solver(n);
-  nautilus::LearnedLoopClosure(slam_problem, solver);
+  nautilus::PopulateSLAMProblem(slam_problem, solver);
+  if (nautilus::FLAGS_solution_poses != "") {
+    std::cout << "Loading solution poses; skipping SLAM solving step." << std::endl;
+    solver.LoadSLAMSolution(nautilus::FLAGS_solution_poses.c_str());
+  } else {
+    nautilus::SolveSLAMProblem(slam_problem, solver);
+  }
+
   std::cout << "Waiting for Loop Closure input" << std::endl;
   ros::Subscriber hitl_sub =
-      n.subscribe(CONFIG_hitl_lc_topic, 10, &Solver::HitlCallback, &solver);
+      n.subscribe(nautilus::CONFIG_hitl_lc_topic, 10, &Solver::HitlCallback, &solver);
   ros::Subscriber write_sub =
       n.subscribe("/write_output", 10, &Solver::WriteCallback, &solver);
   ros::Subscriber vector_sub =
       n.subscribe("/vectorize_output", 10, &Solver::Vectorize, &solver);
   ros::spin();
-  //  while (asking_for_input) {
-  //    uint64_t scan_a, scan_b;
-  //    std::cout << "Type a pose A: "
-  //    std::cin >> scan_a;
-  //    std::cout << std::endl << "Type a pose B: ";
-  //    std::cin >> scan_b;
-  //    std::cout << std::endl;
-  //    // Run ChiSquare on these two scans.
-  //    if (scan_a > slam_problem.nodes.size() | scan_b >
-  //    slam_problem.nodes.size()) {
-  //      continue;
-  //    }
-  //    int chi_num = solver.GetChiSquare();
-  //    chi_squared dist(3);
-  //    return boost::math::cdf(dist, chi_num) <= certainty;
-  //    std::cout << "ChiSquare Boundary is: " << boost::math::cdf(dist,
-  //    chi_num);
-  //  }
   return 0;
 }
