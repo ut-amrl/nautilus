@@ -5,7 +5,7 @@ PROJECT(nautilus)
 # Setting compiler flags #
 ##########################
 
-SET(CMAKE_BUILD_TYPE Release)
+SET(CMAKE_BUILD_TYPE Debug)
 
 # TODO: Remove no-deprecated-copy once Eigen 3.4 stable is released.
 SET(CMAKE_CXX_FLAGS "-std=c++17 -Wall -Werror -Wno-deprecated-copy")
