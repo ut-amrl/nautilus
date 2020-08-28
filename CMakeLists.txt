@@ -33,7 +33,7 @@ SET(third_party_includes ${CMAKE_CURRENT_SOURCE_DIR}/third_party/csm/src
                          ${CMAKE_CURRENT_SOURCE_DIR}/third_party/vector_maps/src
                          ${CMAKE_CURRENT_SOURCE_DIR}/third_party/config-reader/include
                          ${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen
-                         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/learning-loop-closure))
+                         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/learning-loop-closure)
 ######################
 # Message Generation #
 ######################
