@@ -134,10 +134,11 @@ namespace SolverConfig {
   CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
   CONFIG_STRING(pose_output_file, "pose_output_file");
   CONFIG_STRING(map_output_file, "map_output_file");
-  CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
+  CONFIG_DOUBLE(accuracy_change_stop_threshold, "accuracy_change_stop_threshold");
   CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
   CONFIG_DOUBLE(lc_match_threshold, "lc_match_threshold");
-  CONFIG_INT(lidar_constraint_amount, "lidar_constraint_amount");
+  CONFIG_INT(lidar_constraint_amount_min, "lidar_constraint_amount_min");
+  CONFIG_INT(lidar_constraint_amount_max, "lidar_constraint_amount_max");
   CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
   CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
   CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");

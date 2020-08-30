@@ -50,38 +50,6 @@ using boost::math::chi_squared;
 using std::vector;
 using std::pair;
 
-CONFIG_DOUBLE(translation_weight, "translation_weight");
-CONFIG_DOUBLE(rotation_weight, "rotation_weight");
-CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
-CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
-CONFIG_DOUBLE(lc_base_max_range, "lc_base_max_range");
-CONFIG_DOUBLE(lc_max_range_scaling, "lc_max_range_scaling");
-CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
-CONFIG_STRING(pose_output_file, "pose_output_file");
-CONFIG_STRING(map_output_file, "map_output_file");
-CONFIG_DOUBLE(stopping_accuracy, "stopping_accuracy");
-CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
-CONFIG_DOUBLE(lc_match_threshold, "lc_match_threshold");
-CONFIG_INT(lidar_constraint_amount, "lidar_constraint_amount");
-CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
-CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
-CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
-// Auto LC configs
-CONFIG_BOOL(keyframe_local_uncertainty_filtering,
-            "keyframe_local_uncertainty_filtering");
-CONFIG_BOOL(keyframe_chi_squared_test, "keyframe_chi_squared_test");
-CONFIG_DOUBLE(keyframe_min_odom_distance, "keyframe_min_odom_distance");
-CONFIG_DOUBLE(local_uncertainty_condition_threshold,
-              "local_uncertainty_condition_threshold");
-CONFIG_DOUBLE(local_uncertainty_scale_threshold,
-              "local_uncertainty_scale_threshold");
-CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
-CONFIG_INT(lc_match_window_size, "lc_match_window_size");
-CONFIG_INT(lc_min_keyframes, "lc_min_keyframes");
-CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
-CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
-CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
-
 /*----------------------------------------------------------------------------*
  *                             CERES RESIDUALS                                |
  *----------------------------------------------------------------------------*/
@@ -411,13 +379,20 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
   options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
   options.callbacks.push_back(vis_callback_.get());
   double difference = 0;
-  double last_difference = 0;
+  double last_difference = std::numeric_limits<double>::max();
+
+  for (int i = 0; i < 5; i++) {
+    vis_callback_->PubVisualization();
+    sleep(1);
+  }
+
   // While our solution moves more than the stopping_accuracy,
   // continue to optimize.
-  for (int64_t window_size = 1;
-       window_size <= SolverConfig::CONFIG_lidar_constraint_amount; window_size++) {
+  for (int64_t window_size = SolverConfig::CONFIG_lidar_constraint_amount_min;
+       window_size <= SolverConfig::CONFIG_lidar_constraint_amount_max; window_size++) {
     LOG(INFO) << "Using window size: " << window_size << std::endl;
-    do {
+    while (abs(difference - last_difference) >
+             SolverConfig::CONFIG_accuracy_change_stop_threshold) {
       vis_callback_->ClearNormals();
       last_difference = difference;
       difference = 0;
@@ -433,24 +408,20 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
         std::mutex problem_mutex;
 #pragma omp parallel for
         for (size_t node_j_index =
-                 std::max((int64_t)(node_i_index)-window_size, 0l);
+                 std::max((int64_t)(node_i_index) - window_size, 0l);
              node_j_index < node_i_index; node_j_index++) {
           PointCorrespondences correspondence(solution_[node_i_index].pose,
                                               solution_[node_j_index].pose,
                                               node_i_index, node_j_index);
           // Get the correspondences between these two poses.
-          difference += GetPointCorrespondences(
-              problem_.nodes[node_i_index].lidar_factor,
-              problem_.nodes[node_j_index].lidar_factor,
-              solution_[node_i_index].pose, solution_[node_j_index].pose,
-              &correspondence);
-          problem_mutex.lock();
-          vis_callback_->UpdateLastCorrespondence(correspondence);
-          problem_mutex.unlock();
-          difference /=
-              problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
+          difference +=
+              GetPointCorrespondences(problem_.nodes[node_i_index].lidar_factor, problem_.nodes[node_j_index].lidar_factor,
+                                      solution_[node_i_index].pose, solution_[node_j_index].pose,
+                                      &correspondence) 
+                / problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
           // Add the correspondences as constraints in the optimization problem.
           problem_mutex.lock();
+          vis_callback_->UpdateLastCorrespondence(correspondence);
           ceres::ResidualBlockId id =
               ceres_information.problem->AddResidualBlock(
                   LIDARPointBlobResidual::create(correspondence.source_points,
@@ -463,12 +434,12 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
           problem_mutex.unlock();
         }
       }
-      difference +=
-          AddResidualsForAutoLC(ceres_information.problem.get(), true);
+      // Normalize the difference so it's an average over each node.
+      difference /= problem_.nodes.size();
+      difference += AddResidualsForAutoLC(ceres_information.problem.get(), true);
       AddHITLResiduals(ceres_information.problem.get());
       ceres::Solve(options, ceres_information.problem.get(), &summary);
-    } while (abs(difference - last_difference) >
-             SolverConfig::CONFIG_stopping_accuracy);
+    }
   }
   // Call the visualization once more to see the finished optimization.
   for (int i = 0; i < 5; i++) {
@@ -579,7 +550,7 @@ double Solver::GetPointCorrespondences(
       }
       // If no target point was found to correspond to our source point then
       // don't match this source point to anything.
-      if (dist >= CONFIG_outlier_threshold) {
+      if (dist >= SolverConfig::CONFIG_outlier_threshold) {
         difference += dist;
         continue;
       }
@@ -630,7 +601,7 @@ vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
   vector<OdometryFactor2D> factors;
   for (uint64_t index = 1; index < solution_.size(); index++) {
     // Get the change in translation.
-    for(uint64_t prev_idx = std::max((uint64_t)0, index - SolverConfig::CONFIG_lidar_constraint_amount); prev_idx < index; prev_idx++) {
+    for(uint64_t prev_idx = std::max((uint64_t)0, index - SolverConfig::CONFIG_lidar_constraint_amount_max); prev_idx < index; prev_idx++) {
       Vector2f prev_loc(solution_[prev_idx].pose[0],
                         solution_[prev_idx].pose[1]);
       Vector2f loc(solution_[index].pose[0], solution_[index].pose[1]);

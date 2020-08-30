@@ -42,9 +42,9 @@ translation_weight=1
 -- The rotation multiplier used in the rotation residuals.
 rotation_weight=1
 
--- If the scans change by an amount less than this during an entire
+-- If the scans change by, on avearage, an amount less than this during an entire
 -- minimization iteration then the problem is deemed solved.
-stopping_accuracy=0.05
+accuracy_change_stop_threshold = 0.0001
 
 -- Any point past this range in the lidar scan is truncated out.
 max_lidar_range=30
@@ -55,8 +55,11 @@ rotation_change_for_lidar=math.pi / 18
 -- The amount of translation needed to signal a lidar scan capture.
 translation_change_for_lidar=0.25
 
--- The amount of previous lidar scans that each lidar scan will be compared against.
-lidar_constraint_amount=10
+-- The min amount of previous lidar scans that each lidar scan will be compared against.
+lidar_constraint_amount_min=1
+
+-- The max amount of previous lidar scans that each lidar scan will be compared against.
+lidar_constraint_amount_max=10
 
 -- Points further than this distance from each other cannot be counted
 -- as the same point during ICL / ICP.
