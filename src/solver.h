@@ -28,32 +28,22 @@
 #include "solver_residuals.h"
 #include "visualization_msgs/Marker.h"
 
-using boost::math::chi_squared;
-using boost::math::complement;
-using boost::math::quantile;
-using Eigen::Affine2f;
-using Eigen::Vector2f;
-using Eigen::Vector3f;
-using slam_types::LidarFactor;
-using slam_types::OdometryFactor2D;
-using slam_types::SLAMNode2D;
-using slam_types::SLAMNodeSolution2D;
-using slam_types::SLAMProblem2D;
-using std::vector;
-
 namespace nautilus {
 
 struct CeresInformation {
+  CeresInformation()
+      : cost_valid(false),
+        cost(0),
+        problem(new ceres::Problem()),
+        res_descriptors() {}
+
   void ResetProblem() {
-    problem.reset(new ceres::Problem());
-    res_descriptors.clear();
-    cost_valid = false;
-    cost = 0.0;
+    *this = CeresInformation();
   }
-  bool cost_valid = false;
-  double cost = 0.0;
+  bool cost_valid;
+  double cost;
   std::shared_ptr<ceres::Problem> problem;
-  vector<ds::ResidualDesc> res_descriptors;
+  std::vector<ds::ResidualDesc> res_descriptors;
 };
 
 struct SolverConfig {
@@ -75,23 +65,6 @@ struct SolverConfig {
   CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
   CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
   CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
-
-  // Auto LC configs
-  CONFIG_BOOL(auto_lc, "auto_lc");
-  CONFIG_BOOL(keyframe_local_uncertainty_filtering,
-              "keyframe_local_uncertainty_filtering");
-  CONFIG_BOOL(keyframe_chi_squared_test, "keyframe_chi_squared_test");
-  CONFIG_DOUBLE(keyframe_min_odom_distance, "keyframe_min_odom_distance");
-  CONFIG_DOUBLE(local_uncertainty_condition_threshold,
-                "local_uncertainty_condition_threshold");
-  CONFIG_DOUBLE(local_uncertainty_scale_threshold,
-                "local_uncertainty_scale_threshold");
-  CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
-  CONFIG_INT(lc_match_window_size, "lc_match_window_size");
-  CONFIG_INT(lc_min_keyframes, "lc_min_keyframes");
-  CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
-  CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
-  CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
 
   SolverConfig() {
     std::cout << "Solver Waiting..." << std::endl;
@@ -115,7 +88,8 @@ struct LearnedKeyframe {
 
 class VisualizationCallback : public ceres::IterationCallback {
  public:
-  VisualizationCallback(vector<LearnedKeyframe>& keyframes, ros::NodeHandle& n)
+  VisualizationCallback(std::vector<LearnedKeyframe>& keyframes,
+                        ros::NodeHandle& n)
       : keyframes(keyframes) {
     pointcloud_helpers::InitPointcloud(&all_points_marker);
     pointcloud_helpers::InitPointcloud(&new_points_marker);
@@ -159,8 +133,6 @@ class VisualizationCallback : public ceres::IterationCallback {
     hitl_pointclouds = n.advertise<PointCloud2>("/hitl_pointclouds", 10);
     point_a_pub = n.advertise<PointCloud2>("/hitl_a_points", 100);
     point_b_pub = n.advertise<PointCloud2>("/hitl_b_points", 100);
-    auto_lc_poses_pub =
-        n.advertise<visualization_msgs::Marker>("/auto_lc_poses", 10);
     line_pub = n.advertise<visualization_msgs::Marker>("/line_a", 10);
     pointcloud_helpers::InitPointcloud(&pose_a_point_marker);
     pointcloud_helpers::InitPointcloud(&pose_b_point_marker);
@@ -176,46 +148,49 @@ class VisualizationCallback : public ceres::IterationCallback {
   }
 
   void PubVisualization() {
-    const vector<SLAMNodeSolution2D>& solution_c = *solution;
-    vector<Vector2f> new_points;
+    const std::vector<slam_types::SLAMNodeSolution2D>& solution_c = *solution;
+    std::vector<Eigen::Vector2f> new_points;
     gui_helpers::ClearMarker(&key_pose_array);
     pose_array.poses.clear();
-    for (size_t i = 0; i < solution_c.size(); i++) {
-      if (new_points.size() > 0) {
+    CHECK_EQ(problem.nodes.size(), solution_c.size());
+    for (size_t i = 0; i < solution_c.size(); ++i) {
+      const auto& node = solution_c[i];
+      const auto& problem_node = problem.nodes[i];
+      if (!new_points.empty()) {
         all_points.insert(
             all_points.end(), new_points.begin(), new_points.end());
         new_points.clear();
       }
-      auto pointcloud = problem.nodes[i].lidar_factor.pointcloud;
-      Affine2f robot_to_world =
-          PoseArrayToAffine(&(solution_c[i].pose[2]), &(solution_c[i].pose[0]))
-              .cast<float>();
-      Eigen::Vector3f pose(solution_c[i].pose[0], solution_c[i].pose[1], 0.0);
+      const auto& pointcloud = problem_node.lidar_factor.pointcloud;
+      Eigen::Affine2f robot_to_world =
+          PoseArrayToAffine(node.pose).cast<float>();
+      Eigen::Vector3f pose(node.pose[0], node.pose[1], 0.0);
       // gui_helpers::AddPoint(pose, gui_helpers::Color4f::kGreen, &pose_array);
       geometry_msgs::Pose p;
-      p.position.x = solution_c[i].pose[0];
-      p.position.y = solution_c[i].pose[1];
-      p.orientation.z = sin(solution_c[i].pose[2] / 2);
-      p.orientation.w = cos(solution_c[i].pose[2] / 2);
+      p.position.x = node.pose[0];
+      p.position.y = node.pose[1];
+      p.orientation.z = sin(node.pose[2] / 2);
+      p.orientation.w = cos(node.pose[2] / 2);
       pose_array.poses.push_back(p);
-      if (solution_c[i].is_keyframe) {
+      if (node.is_keyframe) {
         gui_helpers::AddPoint(
             pose, gui_helpers::Color4f::kRed, &key_pose_array);
       }
       gui_helpers::ClearMarker(&normals_marker);
-      for (const Vector2f& point : pointcloud) {
+      for (const Eigen::Vector2f& point : pointcloud) {
         new_points.push_back(robot_to_world * point);
         // Visualize normal
         KDNodeValue<float, 2> source_point_in_tree;
+        static constexpr float kMinDist = 0.01;
         float dist =
-            problem.nodes[i].lidar_factor.pointcloud_tree->FindNearestPoint(
-                point, 0.01, &source_point_in_tree);
-        if (dist != 0.01) {
+            problem_node.lidar_factor.pointcloud_tree->FindNearestPoint(
+                point, kMinDist, &source_point_in_tree);
+        if (dist != kMinDist) {
           Eigen::Vector3f normal(source_point_in_tree.normal.x(),
                                  source_point_in_tree.normal.y(),
                                  0.0);
           normal = robot_to_world * normal;
-          Vector2f source_point = robot_to_world * point;
+          Eigen::Vector2f source_point = robot_to_world * point;
           Eigen::Vector3f source_3f(source_point.x(), source_point.y(), 0.0);
           Eigen::Vector3f result = source_3f + (normal * 0.01);
           gui_helpers::AddLine(
@@ -236,44 +211,43 @@ class VisualizationCallback : public ceres::IterationCallback {
     }
     all_points.clear();
     PubConstraintVisualization();
-    PubAutoConstraints();
   }
 
   void PubConstraintVisualization() {
-    const vector<SLAMNodeSolution2D>& solution_c = *solution;
-    vector<Vector2f> line_a_poses;
+    const std::vector<slam_types::SLAMNodeSolution2D>& solution_c = *solution;
+    std::vector<Eigen::Vector2f> line_a_poses;
     for (const ds::HitlLCConstraint& hitl_constraint : hitl_constraints) {
-      vector<Vector2f> a_points;
-      vector<Vector2f> b_points;
+      std::vector<Eigen::Vector2f> a_points;
+      std::vector<Eigen::Vector2f> b_points;
       for (const ds::LCPose& pose : hitl_constraint.line_a_poses) {
         const double* pose_arr = solution_c[pose.node_idx].pose;
-        Vector2f pose_pos(pose_arr[0], pose_arr[1]);
+        Eigen::Vector2f pose_pos(pose_arr[0], pose_arr[1]);
         line_a_poses.push_back(pose_pos);
-        Affine2f point_to_world =
+        Eigen::Affine2f point_to_world =
             PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
-        for (const Vector2f& point : pose.points_on_feature) {
-          Vector2f point_transformed = point_to_world * point;
+        for (const Eigen::Vector2f& point : pose.points_on_feature) {
+          Eigen::Vector2f point_transformed = point_to_world * point;
           a_points.push_back(point_transformed);
         }
       }
-      vector<Vector2f> line_b_poses;
+      std::vector<Eigen::Vector2f> line_b_poses;
       for (const ds::LCPose& pose : hitl_constraint.line_b_poses) {
         const double* pose_arr = solution_c[pose.node_idx].pose;
-        Vector2f pose_pos(pose_arr[0], pose_arr[1]);
+        Eigen::Vector2f pose_pos(pose_arr[0], pose_arr[1]);
         line_b_poses.push_back(pose_pos);
-        Affine2f point_to_world =
+        Eigen::Affine2f point_to_world =
             PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
-        for (const Vector2f& point : pose.points_on_feature) {
-          Vector2f point_transformed = point_to_world * point;
+        for (const Eigen::Vector2f& point : pose.points_on_feature) {
+          Eigen::Vector2f point_transformed = point_to_world * point;
           b_points.push_back(point_transformed);
         }
       }
-      gui_helpers::AddLine(Vector3f(hitl_constraint.line_a.start.x(),
-                                    hitl_constraint.line_a.start.y(),
-                                    0.0),
-                           Vector3f(hitl_constraint.line_a.end.x(),
-                                    hitl_constraint.line_a.end.y(),
-                                    0.0),
+      gui_helpers::AddLine(Eigen::Vector3f(hitl_constraint.line_a.start.x(),
+                                           hitl_constraint.line_a.start.y(),
+                                           0.0),
+                           Eigen::Vector3f(hitl_constraint.line_a.end.x(),
+                                           hitl_constraint.line_a.end.y(),
+                                           0.0),
                            gui_helpers::Color4f::kMagenta,
                            &line_marker);
       for (int i = 0; i < 5; i++) {
@@ -293,30 +267,32 @@ class VisualizationCallback : public ceres::IterationCallback {
   }
 
   void PubKeyframes() {
-    vector<Vector2f> poses;
-    for (LearnedKeyframe frame : keyframes) {
+    std::vector<Eigen::Vector2f> poses;
+    for (const LearnedKeyframe& frame : keyframes) {
       // std::cout << "Frame #: " << frame.node_idx << std::endl;
       const double* pose_arr = (*solution)[frame.node_idx].pose;
-      Vector2f pose_point(pose_arr[0], pose_arr[1]);
+      Eigen::Vector2f pose_point(pose_arr[0], pose_arr[1]);
       poses.push_back(pose_point);
     }
     pointcloud_helpers::PublishPointcloud(poses, keyframe_marker, keyframe_pub);
   }
 
-  void AddPosePointcloud(vector<Vector2f>& pointcloud, const ds::LCPose& pose) {
+  void AddPosePointcloud(std::vector<Eigen::Vector2f>& pointcloud,
+                         const ds::LCPose& pose) {
     size_t node_idx = pose.node_idx;
-    vector<SLAMNodeSolution2D> solution_c = *solution;
-    vector<Vector2f> p_cloud = problem.nodes[node_idx].lidar_factor.pointcloud;
+    std::vector<slam_types::SLAMNodeSolution2D> solution_c = *solution;
+    std::vector<Eigen::Vector2f> p_cloud =
+        problem.nodes[node_idx].lidar_factor.pointcloud;
     double* pose_arr = solution_c[node_idx].pose;
-    Affine2f robot_to_world =
+    Eigen::Affine2f robot_to_world =
         PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
-    for (const Vector2f& p : p_cloud) {
+    for (const Eigen::Vector2f& p : p_cloud) {
       pointcloud.push_back(robot_to_world * p);
     }
   }
 
   void PubConstraintPointclouds() {
-    vector<Vector2f> pointclouds;
+    std::vector<Eigen::Vector2f> pointclouds;
     for (const auto& hitl_constraint : hitl_constraints) {
       for (const ds::LCPose& pose : hitl_constraint.line_a_poses) {
         AddPosePointcloud(pointclouds, pose);
@@ -329,70 +305,21 @@ class VisualizationCallback : public ceres::IterationCallback {
         pointclouds, hitl_points_marker, hitl_pointclouds);
   }
 
-  void PubAutoConstraints() {
-    vector<Vector3f> poses;
-    gui_helpers::ClearMarker(&auto_lc_pose_array);
-    for (const auto& auto_constraint : auto_constraints) {
-      // std::cout << "Frame #: " << frame.node_idx << std::endl;
-      const double* pose_arr_a =
-          (*solution)[auto_constraint.node_a->node_idx].pose;
-      Vector3f pose_a(pose_arr_a[0], pose_arr_a[1], 0.0);
-      gui_helpers::AddPoint(
-          pose_a, gui_helpers::Color4f::kCyan, &auto_lc_pose_array);
-      const double* pose_arr_b =
-          (*solution)[auto_constraint.node_b->node_idx].pose;
-      Vector3f pose_b(pose_arr_b[0], pose_arr_b[1], 0.0);
-      gui_helpers::AddPoint(
-          pose_b, gui_helpers::Color4f::kCyan, &auto_lc_pose_array);
-    }
-    if (auto_constraints.size() > 0) {
-      auto_lc_poses_pub.publish(auto_lc_pose_array);
-    }
-  }
-
   void ClearNormals() { gui_helpers::ClearMarker(&normals_marker); }
-
-  void AddMatchLines(const ds::PointCorrespondences& correspondence) {
-    CHECK_EQ(correspondence.source_points.size(),
-             correspondence.target_points.size());
-    for (uint64_t index = 0; index < correspondence.source_points.size();
-         index++) {
-      Vector2f source_point = correspondence.source_points[index];
-      Vector2f target_point = correspondence.target_points[index];
-      Affine2f source_to_world =
-          PoseArrayToAffine(correspondence.source_pose).cast<float>();
-      Affine2f target_to_world =
-          PoseArrayToAffine(correspondence.target_pose).cast<float>();
-      source_point = source_to_world * source_point;
-      target_point = target_to_world * target_point;
-      Vector3f source_3d(source_point.x(), source_point.y(), 0.0);
-      Vector3f target_3d(target_point.x(), target_point.y(), 0.0);
-      gui_helpers::AddLine(
-          source_3d, target_3d, gui_helpers::Color4f::kBlue, &match_line_list);
-    }
-  }
 
   void AddConstraint(const ds::HitlLCConstraint& constraint) {
     hitl_constraints.push_back(constraint);
   }
-
-  void AddAutoLCConstraint(const ds::AutoLCConstraint& constraint) {
-    auto_constraints.push_back(constraint);
-  }
-
-  void AddKeyframe(const LearnedKeyframe& keyframe) {
-    keyframes.push_back(keyframe);
-  }
-
   ceres::CallbackReturnType operator()(
       const ceres::IterationSummary& summary) override {
     PubVisualization();
     return ceres::SOLVER_CONTINUE;
   }
 
-  void UpdateProblemAndSolution(SLAMNode2D& new_node,
-                                vector<SLAMNodeSolution2D>* new_solution,
-                                OdometryFactor2D& new_odom_factor) {
+  void UpdateProblemAndSolution(
+      slam_types::SLAMNode2D& new_node,
+      std::vector<slam_types::SLAMNodeSolution2D>* new_solution,
+      slam_types::OdometryFactor2D& new_odom_factor) {
     CHECK_EQ(new_node.node_idx,
              (*new_solution)[new_solution->size() - 1].node_idx);
     CHECK_EQ(new_node.node_idx, new_odom_factor.pose_j);
@@ -402,8 +329,9 @@ class VisualizationCallback : public ceres::IterationCallback {
     CHECK_EQ(solution->size(), problem.nodes.size());
   }
 
-  void UpdateProblemAndSolution(SLAMNode2D& new_node,
-                                vector<SLAMNodeSolution2D>* new_solution) {
+  void UpdateProblemAndSolution(
+      slam_types::SLAMNode2D& new_node,
+      std::vector<slam_types::SLAMNodeSolution2D>* new_solution) {
     CHECK_EQ(new_node.node_idx,
              (*new_solution)[new_solution->size() - 1].node_idx);
     problem.nodes.push_back(new_node);
@@ -414,10 +342,10 @@ class VisualizationCallback : public ceres::IterationCallback {
  private:
   sensor_msgs::PointCloud2 all_points_marker;
   sensor_msgs::PointCloud2 new_points_marker;
-  std::vector<Vector2f> all_points;
-  SLAMProblem2D problem;
-  vector<SLAMNodeSolution2D>* solution;
-  vector<LearnedKeyframe>& keyframes;
+  std::vector<Eigen::Vector2f> all_points;
+  slam_types::SLAMProblem2D problem;
+  std::vector<slam_types::SLAMNodeSolution2D>* solution;
+  std::vector<LearnedKeyframe>& keyframes;
   ros::Publisher point_pub;
   ros::Publisher pose_pub;
   ros::Publisher match_pub;
@@ -426,7 +354,6 @@ class VisualizationCallback : public ceres::IterationCallback {
   ros::Publisher constraint_a_pose_pub;
   ros::Publisher constraint_b_pose_pub;
   ros::Publisher keyframe_poses_pub;
-  ros::Publisher auto_lc_poses_pub;
   ros::Publisher point_a_pub;
   ros::Publisher point_b_pub;
   ros::Publisher line_pub;
@@ -444,8 +371,8 @@ class VisualizationCallback : public ceres::IterationCallback {
   PointCloud2 hitl_points_marker;
   PointCloud2 keyframe_marker;
   visualization_msgs::Marker line_marker;
-  vector<ds::HitlLCConstraint> hitl_constraints;
-  vector<ds::AutoLCConstraint> auto_constraints;
+  std::vector<ds::HitlLCConstraint> hitl_constraints;
+  std::vector<ds::AutoLCConstraint> auto_constraints;
 };
 
 /*----------------------------------------------------------------------------*
@@ -454,72 +381,51 @@ class VisualizationCallback : public ceres::IterationCallback {
 
 class Solver {
  public:
+  Solver() = delete;
   Solver(ros::NodeHandle& n);
-  vector<SLAMNodeSolution2D> SolveSLAM();
-  vector<SLAMNodeSolution2D> SolvePoseSLAM();
+  std::vector<slam_types::SLAMNodeSolution2D> SolveSLAM();
   double GetPointCorrespondences(
-      const LidarFactor& source_lidar,
-      const LidarFactor& target_lidar,
+      const slam_types::LidarFactor& source_lidar,
+      const slam_types::LidarFactor& target_lidar,
       double* source_pose,
       double* target_pose,
       ds::PointCorrespondences* point_correspondences);
   void AddOdomFactors(ceres::Problem* ceres_problem,
-                      vector<OdometryFactor2D> factors,
+                      std::vector<slam_types::OdometryFactor2D> factors,
                       double trans_weight,
                       double rot_weight);
   void HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr);
   void WriteCallback(const WriteMsgConstPtr& msg);
   void Vectorize(const WriteMsgConstPtr& msg);
-  vector<SLAMNodeSolution2D> GetSolution() { return solution_; }
   ds::HitlLCConstraint GetRelevantPosesForHITL(
       const HitlSlamInputMsg& hitl_msg);
-  void SolveForLC();
   void AddPointCloudResiduals(ceres::Problem* problem);
-  vector<OdometryFactor2D> GetSolvedOdomFactors();
-  void AddSLAMNodeOdom(SLAMNode2D& node, OdometryFactor2D& odom_factor_to_node);
-  void AddSlamNode(SLAMNode2D& node);
-  void CheckForLearnedLC(SLAMNode2D& node);
+  std::vector<slam_types::OdometryFactor2D> GetSolvedOdomFactors();
+  void AddSLAMNodeOdom(slam_types::SLAMNode2D& node,
+                       slam_types::OdometryFactor2D& odom_factor_to_node);
+  void AddSlamNode(slam_types::SLAMNode2D& node);
   void LoadSLAMSolution(const std::string& poses_path);
 
  private:
   double CostFromResidualDescriptor(const ds::ResidualDesc& res_desc);
   double GetChiSquareCost(uint64_t node_a, uint64_t node_b);
-  OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
-                                     const uint64_t node_b);
-  OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
-                                     const uint64_t node_b,
-                                     Vector3f trans);
-  vector<ds::ResidualDesc> AddLCResiduals(const uint64_t node_a,
-                                          const uint64_t node_b);
   void AddHITLResiduals(ceres::Problem* problem);
-  void RemoveResiduals(vector<ds::ResidualDesc> descs);
-  void AddKeyframe(SLAMNode2D& node);
-  float GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe);
-  bool AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
-                            LearnedKeyframe& key_frame_b);
+  void RemoveResiduals(std::vector<ds::ResidualDesc> descs);
   ds::AutoLCConstraint computeAutoLCConstraint(const uint64_t node_a,
                                                const uint64_t node_b);
-  bool AddAutoLCConstraint(const ds::AutoLCConstraint& constraint);
-  void LCKeyframes(LearnedKeyframe& key_frame_a, LearnedKeyframe& key_frame_b);
-  OdometryFactor2D GetTotalOdomChange(
-      const std::vector<OdometryFactor2D>& factors);
+  slam_types::OdometryFactor2D GetTotalOdomChange(
+      const std::vector<slam_types::OdometryFactor2D>& factors);
   bool SimilarScans(const uint64_t node_a,
                     const uint64_t node_b,
                     const double certainty);
-  vector<OdometryFactor2D> GetSolvedOdomFactorsBetweenNodes(uint64_t node_a,
-                                                            uint64_t node_b);
-  std::pair<double, double> GetLocalUncertainty(const uint64_t node_idx);
-  std::pair<double, double> GetLocalUncertaintyEstimate(
-      const uint64_t node_idx);
-  vector<size_t> GetMatchingKeyframeIndices(size_t keyframe_index);
-  SLAMProblem2D problem_;
-  vector<OdometryFactor2D> initial_odometry_factors;
-  vector<SLAMNodeSolution2D> solution_;
+
+  slam_types::SLAMProblem2D problem_;
+  std::vector<slam_types::OdometryFactor2D> initial_odometry_factors;
+  std::vector<slam_types::SLAMNodeSolution2D> solution_;
   ros::NodeHandle n_;
-  vector<ds::AutoLCConstraint> auto_lc_constraints_;
-  vector<ds::HitlLCConstraint> hitl_constraints_;
+  std::vector<ds::HitlLCConstraint> hitl_constraints_;
   std::unique_ptr<VisualizationCallback> vis_callback_ = nullptr;
-  vector<LearnedKeyframe> keyframes;
+  std::vector<LearnedKeyframe> keyframes;
   ros::ServiceClient matcher_client;
   ros::ServiceClient local_uncertainty_client;
   CorrelativeScanMatcher scan_matcher;

@@ -45,6 +45,10 @@ using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
 using std::vector;
 
+using boost::math::chi_squared;
+using boost::math::complement;
+using boost::math::quantile;
+
 namespace nautilus {
 
 /*----------------------------------------------------------------------------*
@@ -85,143 +89,6 @@ void Solver::AddSlamNode(SLAMNode2D& node) {
  *                          SLAM SOLVING FUNCTIONS                            |
  *----------------------------------------------------------------------------*/
 
-// Solves the pose-only version of slam (no lidar factors)
-vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
-  // ceres::Solver::Options options;
-  // ceres::Solver::Summary summary;
-  // options.linear_solver_type = ceres::SPARSE_SCHUR;
-  // options.minimizer_progress_to_stdout = false;
-  // options.num_threads =
-  // static_cast<int>(std::thread::hardware_concurrency());
-  // options.callbacks.push_back(vis_callback_.get());
-  // for (int64_t i = 0; i < 20; i++) {
-  //   vis_callback_->ClearNormals();
-  //   ceres_information_.ResetProblem();
-  //   // Add all the odometry constraints between our poses.
-  //   AddOdomFactors(ceres_information_.problem.get(), GetSolvedOdomFactors(),
-  //                   config_.CONFIG_translation_weight,
-  //                   config_.CONFIG_rotation_weight);
-  //   AddResidualsForAutoLC(ceres_information_.problem.get(), false);
-  //   ceres::Solve(options, ceres_information_.problem.get(), &summary);
-  // }
-
-  // Apply Loop closures to current solution
-  // This is COP SLAM
-  for (auto constraint : auto_lc_constraints_) {
-    uint64_t i = constraint.node_a->node_idx;
-    uint64_t j = constraint.node_b->node_idx;
-    SLAMNodeSolution2D sol_i = solution_[constraint.node_a->node_idx];
-    SLAMNodeSolution2D sol_j = solution_[constraint.node_b->node_idx];
-    Eigen::Affine2d A_Mi = Eigen::Translation2d(sol_i.pose[0], sol_i.pose[1]) *
-                           Eigen::Rotation2Dd(sol_i.pose[2]);
-    Eigen::Affine2d A_Mj = Eigen::Translation2d(sol_j.pose[0], sol_j.pose[1]) *
-                           Eigen::Rotation2Dd(sol_j.pose[2]);
-    Eigen::Affine2d A_Mj_star =
-        A_Mi * Eigen::Affine2d(
-                   Eigen::Translation2d(constraint.relative_transformation[0],
-                                        constraint.relative_transformation[1]) *
-                   Eigen::Rotation2Dd(constraint.relative_transformation[2]));
-
-    std::cout << "Mi" << std::endl;
-    std::cout << A_Mi.matrix() << std::endl;
-    std::cout << "Mj" << std::endl;
-    std::cout << A_Mj.matrix() << std::endl;
-    std::cout << "Mj_star" << std::endl;
-    std::cout << A_Mj_star.matrix() << std::endl;
-
-    // std::vector<OdometryFactor2D> factors =
-    // GetSolvedOdomFactorsBetweenNodes(i, j); OdometryFactor2D chainFactor =
-    // GetTotalOdomChange(factors); Eigen::Affine2d A_chain =
-    // Eigen::Translation2f(chainFactor.translation) *
-    // Eigen::Rotation2Df(chainFactor.rotation);
-
-    // // Validated that A_Mi * A_chain = A_Mj, as expected!
-    // std::cout << "Composite" << std::endl;
-    // std::cout << (A_Mi * A_chain).matrix() << std::endl;
-
-    // Now do COP-SLAM
-    uint64_t N = j - i;
-
-    Eigen::Affine2d DeltaA = A_Mj_star.inverse() * A_Mj;
-    std::cout << "DELTA A\t" << DeltaA.matrix() << std::endl;
-
-    Eigen::Matrix3d deltaAMat = DeltaA.matrix().pow(1.0 / N);
-
-    std::cout << "dalta A\t" << deltaAMat.matrix() << std::endl;
-
-    // update poses involved in LC
-    for (uint64_t k = 1; k < N; k++) {
-      Eigen::Matrix3d poseUpdateMat = DeltaA.matrix().pow((double)k / N);
-      Eigen::Affine2d poseUpdate(poseUpdateMat);
-      solution_[i + k].pose[0] += poseUpdate.translation().x();
-      solution_[i + k].pose[1] += poseUpdate.translation().y();
-      solution_[i + k].pose[2] +=
-          Eigen::Rotation2Dd(poseUpdate.rotation()).angle();
-    }
-
-    // Update all subsequent poses
-    for (uint64_t k = 0; k < solution_.size() - j; k++) {
-      solution_[j + k].pose[0] += DeltaA.translation().x();
-      solution_[j + k].pose[1] += DeltaA.translation().y();
-      solution_[j + k].pose[2] += Eigen::Rotation2Dd(DeltaA.rotation()).angle();
-    }
-
-    // compute weights;
-    // for now, all 1?
-    /*
-    std::vector<double> weights;
-    for(uint64_t k = 0; k < N; k++) {
-      weights.push_back(0.1);
-    }
-
-    Eigen::Matrix3f jarg = (A_Mj.inverse() * A_Mj_star).matrix();
-    Eigen::Matrix3f jarg_log = jarg.log().matrix();
-
-    printf("computed jargs\n");
-    std::cout << jarg << std::endl;
-    printf("LOG\n");
-    std::cout << jarg_log << std::endl;
-
-    std::vector<Affine2f> updates;
-    for(uint64_t k = 0; k < N; k++) {
-      double alpha_1;
-      double alpha_2;
-      if (k > 0) {
-        alpha_1 = std::accumulate(weights.begin(), weights.begin() + k - 1,
-    0.0); alpha_2 = std::accumulate(weights.begin(), weights.begin() + k, 0.0);
-      } else {
-        alpha_1 = 0;
-        alpha_2 = weights[0];
-      }
-
-      Affine2f J_1 = Eigen::Affine2f(((alpha_1 * jarg_log).exp()).matrix());
-      Affine2f J_2 = Eigen::Affine2f(((alpha_2 * jarg_log).exp()).matrix());
-      // Compute local update (8)
-      Affine2f update_local = J_1.inverse() * J_2;
-      // Compute distributed update (14)
-      Eigen::Affine2f A_k = Eigen::Translation2f(solution_[i + k].pose[0],
-    solution_[i + k].pose[1]) * Eigen::Rotation2Df(solution_[i + k].pose[2]);
-      Affine2f update_distributed = A_k.inverse() * A_Mj_star * update_local *
-    A_Mj_star.inverse() * A_k;
-
-      std::cout << "UPDATE" << update_distributed.matrix() << std::endl;
-
-      solution_[i+k].pose[0] += update_distributed.translation().x();
-      solution_[i+k].pose[1] += update_distributed.translation().y();
-      solution_[i+k].pose[2] +=
-    Eigen::Rotation2Df(update_distributed.rotation()).angle();
-    }*/
-  }
-
-  // Call the visualization once more to see the finished optimization.
-  for (int i = 0; i < 5; i++) {
-    vis_callback_->PubVisualization();
-    sleep(1);
-  }
-
-  return solution_;
-}
-
 vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
   // Setup ceres for evaluation of the problem.
   ceres::Solver::Options options;
@@ -250,6 +117,7 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
     LOG(INFO) << "Using window size: " << window_size << std::endl;
     while (abs(difference - last_difference) >
            config_.CONFIG_accuracy_change_stop_threshold) {
+      std::cout << "Solve diff " << abs(difference - last_difference) << " Target: " << config_.CONFIG_accuracy_change_stop_threshold << std::endl;
       vis_callback_->ClearNormals();
       last_difference = difference;
       difference = 0;
@@ -461,23 +329,6 @@ double Solver::GetPointCorrespondences(
   return difference;
 }
 
-OdometryFactor2D Solver::GetDifferenceOdom(const uint64_t node_a,
-                                           const uint64_t node_b) {
-  double* pose_a = solution_[node_a].pose;
-  double* pose_b = solution_[node_b].pose;
-  Vector2f translation(pose_b[0] - pose_a[0], pose_b[1] - pose_a[1]);
-  float rotation = pose_b[2] - pose_a[2];
-  return OdometryFactor2D(node_a, node_b, translation, rotation);
-}
-
-OdometryFactor2D Solver::GetDifferenceOdom(const uint64_t node_a,
-                                           const uint64_t node_b,
-                                           const Vector3f trans) {
-  Vector2f translation(trans[0], trans[1]);
-  float rotation = trans[2];
-  return OdometryFactor2D(node_a, node_b, translation, rotation);
-}
-
 vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
   CHECK_GT(solution_.size(), 1);
   vector<OdometryFactor2D> factors;
@@ -496,25 +347,6 @@ vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
       Vector2f trans_change = loc - prev_loc;
       factors.emplace_back(prev_idx, index, trans_change, rot_change);
     }
-  }
-  return factors;
-}
-
-vector<OdometryFactor2D> Solver::GetSolvedOdomFactorsBetweenNodes(uint64_t a,
-                                                                  uint64_t b) {
-  CHECK_GT(solution_.size(), b);
-  CHECK_GT(b, a);
-  vector<OdometryFactor2D> factors;
-  for (uint64_t index = a + 1; index <= b; index++) {
-    // Get the change in translation.
-    uint64_t prev_idx = index - 1;
-    Vector2f prev_loc(solution_[prev_idx].pose[0], solution_[prev_idx].pose[1]);
-    Vector2f loc(solution_[index].pose[0], solution_[index].pose[1]);
-
-    double rot_change = math_util::AngleDiff(solution_[index].pose[2],
-                                             solution_[prev_idx].pose[2]);
-    Vector2f trans_change = loc - prev_loc;
-    factors.emplace_back(prev_idx, index, trans_change, rot_change);
   }
   return factors;
 }
@@ -638,47 +470,6 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   std::cout << "Waiting for Loop Closure input." << std::endl;
 }
 
-vector<ds::ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
-                                                const uint64_t node_b) {
-  const uint64_t first_node = std::min(node_a, node_b);
-  const uint64_t second_node = std::max(node_a, node_b);
-  vector<ds::ResidualDesc> res_desc;
-  ds::PointCorrespondences correspondence(solution_[first_node].pose,
-                                          solution_[second_node].pose,
-                                          first_node,
-                                          second_node);
-  // Get the correspondences between these two poses.
-  GetPointCorrespondences(problem_.nodes[first_node].lidar_factor,
-                          problem_.nodes[second_node].lidar_factor,
-                          solution_[first_node].pose,
-                          solution_[second_node].pose,
-                          &correspondence);
-  // Add the correspondences as constraints in the optimization problem.
-  ceres::ResidualBlockId lidar_id;
-  lidar_id = ceres_information_.problem->AddResidualBlock(
-      residuals::LIDARPointBlobResidual::create(correspondence.source_points,
-                                                correspondence.target_points,
-                                                correspondence.source_normals,
-                                                correspondence.target_normals),
-      NULL,
-      correspondence.source_pose,
-      correspondence.target_pose);
-  res_desc.emplace_back(node_a, node_b, lidar_id);
-  // TODO: Odom factor is difference between solution positions as we haven't
-  // solved using CSM yet and can't get the actual difference between them.
-  ceres::ResidualBlockId odom_id;
-  odom_id = ceres_information_.problem->AddResidualBlock(
-      residuals::OdometryResidual::create(
-          GetDifferenceOdom(first_node, second_node),
-          config_.CONFIG_lc_translation_weight,
-          config_.CONFIG_lc_rotation_weight),
-      NULL,
-      solution_[first_node].pose,
-      solution_[second_node].pose);
-  res_desc.emplace_back(node_a, node_b, odom_id);
-  return res_desc;
-}
-
 /*----------------------------------------------------------------------------*
  *                            MISC. SOLVER CALLBACKS                          |
  *----------------------------------------------------------------------------*/
@@ -703,45 +494,6 @@ bool Solver::SimilarScans(const uint64_t node_a,
   std::cout << "Boundary: " << upper_critical_value << std::endl;
   // Upper Critical Value so must be less than to accept (i.e. are similar).
   return chi_num < upper_critical_value;
-}
-
-float Solver::GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe) {
-  // TODO figure out how this even happened
-  if (node.node_idx == keyframe.node_idx) {
-    return 0.0f;
-  }
-
-  laser_scan_matcher::MatchLaserScans srv;
-  srv.request.scan = node.lidar_factor.scan;
-  srv.request.alt_scan = keyframe.lidar_factor.scan;
-
-  int response = matcher_client.call(srv);
-  if (response) {
-    float score = srv.response.match_prob;
-    std::cout << "Match Score between " << node.node_idx << " and "
-              << keyframe.node_idx << ": " << score << std::endl;
-    return score;
-  } else {
-    std::cerr << "Failed to call service match_laser_scans: " << response
-              << "\t" << srv.response.match_prob << std::endl;
-    exit(100);
-  }
-}
-
-std::pair<double, double> Solver::GetLocalUncertaintyEstimate(
-    const uint64_t node_idx) {
-  local_uncertainty_estimator::EstimateLocalUncertainty srv;
-  srv.request.scan = problem_.nodes[node_idx].lidar_factor.scan;
-
-  int response = local_uncertainty_client.call(srv);
-  if (response) {
-    return std::pair<double, double>(srv.response.condition_num,
-                                     srv.response.scale);
-  } else {
-    std::cerr << "Failed to call service estimate_local_uncertainty: "
-              << response << std::endl;
-    exit(100);
-  }
 }
 
 double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
