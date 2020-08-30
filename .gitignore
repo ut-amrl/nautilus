@@ -19,3 +19,4 @@ map_lines.txt
 third_party/ceres
 third_party/eigen
 auto_lc_debug
+map.txt

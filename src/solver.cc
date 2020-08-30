@@ -365,13 +365,20 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
   options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
   options.callbacks.push_back(vis_callback_.get());
   double difference = 0;
-  double last_difference = 0;
+  double last_difference = std::numeric_limits<double>::max();
+
+  for (int i = 0; i < 5; i++) {
+    vis_callback_->PubVisualization();
+    sleep(1);
+  }
+
   // While our solution moves more than the stopping_accuracy,
   // continue to optimize.
-  for (int64_t window_size = 1;
-       window_size <= config_.CONFIG_lidar_constraint_amount; window_size++) {
+  for (int64_t window_size = config_.CONFIG_lidar_constraint_amount_min;
+       window_size <= config_.CONFIG_lidar_constraint_amount_max; window_size++) {
     LOG(INFO) << "Using window size: " << window_size << std::endl;
-    do {
+    while (abs(difference - last_difference) >
+             config_.CONFIG_accuracy_change_stop_threshold) {
       vis_callback_->ClearNormals();
       last_difference = difference;
       difference = 0;
@@ -387,7 +394,7 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
         std::mutex problem_mutex;
         #pragma omp parallel for
         for (size_t node_j_index =
-                 std::max((int64_t)(node_i_index)-window_size, 0l);
+                 std::max((int64_t)(node_i_index) - window_size, 0l);
              node_j_index < node_i_index; node_j_index++) {
           PointCorrespondences correspondence(solution_[node_i_index].pose,
                                               solution_[node_j_index].pose,
@@ -396,14 +403,11 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
           difference +=
               GetPointCorrespondences(problem_.nodes[node_i_index].lidar_factor, problem_.nodes[node_j_index].lidar_factor,
                                       solution_[node_i_index].pose, solution_[node_j_index].pose,
-                                      &correspondence);
-          problem_mutex.lock();
-          vis_callback_->UpdateLastCorrespondence(correspondence);
-          problem_mutex.unlock();
-          difference /=
-              problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
+                                      &correspondence) 
+                / problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
           // Add the correspondences as constraints in the optimization problem.
           problem_mutex.lock();
+          vis_callback_->UpdateLastCorrespondence(correspondence);
           ceres::ResidualBlockId id =
               ceres_information.problem->AddResidualBlock(
                   LIDARPointBlobResidual::create(correspondence.source_points,
@@ -416,11 +420,12 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
           problem_mutex.unlock();
         }
       }
+      // Normalize the difference so it's an average over each node.
+      difference /= problem_.nodes.size();
       difference += AddResidualsForAutoLC(ceres_information.problem.get(), true);
       AddHITLResiduals(ceres_information.problem.get());
       ceres::Solve(options, ceres_information.problem.get(), &summary);
-    } while (abs(difference - last_difference) >
-             config_.CONFIG_stopping_accuracy);
+    }
   }
   // Call the visualization once more to see the finished optimization.
   for (int i = 0; i < 5; i++) {
@@ -582,7 +587,7 @@ vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
   vector<OdometryFactor2D> factors;
   for (uint64_t index = 1; index < solution_.size(); index++) {
     // Get the change in translation.
-    for(uint64_t prev_idx = std::max((uint64_t)0, index - config_.CONFIG_lidar_constraint_amount); prev_idx < index; prev_idx++) {
+    for(uint64_t prev_idx = std::max((uint64_t)0, index - config_.CONFIG_lidar_constraint_amount_max); prev_idx < index; prev_idx++) {
       Vector2f prev_loc(solution_[prev_idx].pose[0],
                         solution_[prev_idx].pose[1]);
       Vector2f loc(solution_[index].pose[0], solution_[index].pose[1]);
