@@ -34,156 +34,151 @@ CONFIG_STRING(hitl_lc_topic, "hitl_lc_topic");
 CONFIG_BOOL(differential_odom, "differential_odom");
 
 DEFINE_string(config_file, "", "The path to the config file to use.");
-DEFINE_string(solution_poses, "", "The path to the file containing the solution poses, to load from an existing solution.");
+DEFINE_string(solution_poses,
+              "",
+              "The path to the file containing the solution poses, to load "
+              "from an existing solution.");
 
-static bool asking_for_input = true;
+bool TryProcessLaser(const rosbag::MessageInstance& message,
+                     SLAMTypeBuilder* slam_builder) {
+  auto laser_scan = message.instantiate<sensor_msgs::LaserScan>();
+  if (laser_scan == nullptr) {
+    return false;
+  }
+  slam_builder->LidarCallback(*laser_scan);
+  return true;
+}
 
-SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
+bool TryProcessOdom(const rosbag::MessageInstance& message,
+                    SLAMTypeBuilder* slam_builder) {
+  auto std_odom = message.instantiate<nav_msgs::Odometry>();
+  if (std_odom != nullptr) {
+    slam_builder->OdometryCallback(*std_odom);
+    return true;
+  }
+  auto cobot_odom = message.instantiate<CobotOdometryMsg>();
+  if (cobot_odom != nullptr) {
+    if (!CONFIG_differential_odom) {
+      std::cout << "Error: Recieved Cobot odometry message, but "
+                   "differential odometry is not enabled."
+                << std::endl;
+      exit(1);
+    }
+    slam_builder->OdometryCallback(*cobot_odom);
+    return true;
+  }
+  return false;
+}
+
+SLAMProblem2D ProcessBagFile(const std::string& bag_path,
+                             const ros::NodeHandle& n) {
   /*
    * Loads and processes the bag file pulling out the lidar data
    * and the odometry data. Keeps track of the current pose and produces
    * a list of poses / pointclouds. Also keeps a list of the odometry data.
    */
-  printf("Loading bag file...\n");
-  fflush(stdout);
+  std::cout << "Loading bag file..." << std::endl;
   rosbag::Bag bag;
   try {
     bag.open(bag_path, rosbag::bagmode::Read);
-  } catch (rosbag::BagException& exception) {
-    printf("Unable to read %s, reason: %s\n", bag_path, exception.what());
-    return slam_types::SLAMProblem2D();
+  } catch (const rosbag::BagException& exception) {
+    std::cout << "Unable to read " << bag_path
+              << ", reason: " << exception.what() << std::endl;
+    return {};
   }
-  // Get the topics we want
-  vector<string> topics;
-  topics.emplace_back(CONFIG_odom_topic.c_str());
-  topics.emplace_back(CONFIG_lidar_topic.c_str());
   bool found_odom = false;
   bool found_lidar = false;
-  rosbag::View view(bag, rosbag::TopicQuery(topics));
+  std::cout << "Laser topic: " << CONFIG_lidar_topic << std::endl;
+  std::cout << "Odom topic: " << CONFIG_odom_topic << std::endl;
   SLAMTypeBuilder slam_builder;
   size_t msg_counter = 0;
   // Iterate through the bag
-  for (rosbag::View::iterator it = view.begin();
-       ros::ok() && it != view.end() && !slam_builder.Done(); ++it) {
-    const rosbag::MessageInstance& message = *it;
+  rosbag::View view(
+      bag, rosbag::TopicQuery({CONFIG_lidar_topic, CONFIG_odom_topic}));
+  for (const auto& msg : view) {
+    if (slam_builder.Done() || !ros::ok()) {
+      break;
+    }
     msg_counter++;
-    {
-      // Load all the point clouds into memory.
-      sensor_msgs::LaserScanPtr laser_scan =
-          message.instantiate<sensor_msgs::LaserScan>();
-      if (laser_scan != nullptr) {
-        found_lidar = true;
-        slam_builder.LidarCallback(*laser_scan);
-      }
-    }
-    {
-      nav_msgs::OdometryPtr odom = message.instantiate<nav_msgs::Odometry>();
-      if (odom != nullptr) {
-        found_odom = true;
-        slam_builder.OdometryCallback(*odom);
-      }
-    }
-    {
-      CobotOdometryMsgPtr odom =
-          message.instantiate<CobotOdometryMsg>();
-      if (odom != nullptr) {
-        if (!CONFIG_differential_odom) {
-          printf("Error: Recieved Cobot odometry message, but differential odometry is not enabled.\n");
-          exit(1);
-        }
-        found_odom = true;
-        slam_builder.OdometryCallback(*odom);
-      }
-    }
+    found_lidar |= TryProcessLaser(msg, &slam_builder);
+    found_odom |= TryProcessOdom(msg, &slam_builder);
 
     if (msg_counter % 5000 == 0) {
-      printf("Processed %ld messages of %d, found %ld nodes.\n", msg_counter, view.size(), slam_builder.GetNodeCount());
+      std::cout << "Processed " << msg_counter << " messages of " << view.size()
+                << ", found " << slam_builder.GetNodeCount() << " nodes.\n";
     }
   }
+  bag.close();
 
   if (!found_lidar) {
-    printf("Did not find any lidar scans! Please check your specified topics.\n");
-  } else {
-    printf("Successfully found lidar messages.\n");
+    std::cout << "Did not find any lidar scans! Please check your specified "
+                 "topics.\n";
+    return {};
   }
+  std::cout << "Successfully found lidar messages.\n";
   if (!found_odom) {
-    printf("Did not find any odometry messages! Please check your specified topics.\n");
-  } else {
-    printf("Successfully found odometry messages.\n");
+    std::cout << "Did not find any odometry messages! Please check your "
+                 "specified topics.\n";
+    return {};
   }
+  std::cout << "Successfully found odometry messages.\n";
 
-  bag.close();
-  printf("Done.\n");
-  fflush(stdout);
+  std::cout << "Done." << std::endl;
   return slam_builder.GetSlamProblem();
 }
 
 void SignalHandler(int signum) {
-  printf("Exiting with %d\n", signum);
-  asking_for_input = false;
+  std::cout << "Exiting with SIGNAL: " << strsignal(signum) << std::endl;
   ros::shutdown();
   exit(0);
 }
 
-void PopulateSLAMProblem(SLAMProblem2D& slam_problem, Solver& solver) {
+void PopulateSLAMProblem(SLAMProblem2D* slam_problem, Solver* solver) {
   // Iteratively add all the nodes and odometry factors.
-  for (uint64_t node_index = 0; node_index < slam_problem.nodes.size();
-       node_index++) {
+  CHECK_EQ(slam_problem->nodes.size(),
+           slam_problem->odometry_factors.size() + 1);
+  size_t node_index = 0;
+  for (; node_index < slam_problem->nodes.size(); node_index++) {
     if (node_index == 0) {
-      solver.AddSlamNode(slam_problem.nodes[0]);
-    } else {
-      solver.AddSLAMNodeOdom(slam_problem.nodes[node_index],
-                             slam_problem.odometry_factors[node_index - 1]);
+      solver->AddSlamNode(slam_problem->nodes[0]);
+      continue;
     }
-    std::cout << "Nodes added: " << node_index + 1 << std::endl;
+    solver->AddSLAMNodeOdom(slam_problem->nodes[node_index],
+                            slam_problem->odometry_factors[node_index - 1]);
   }
-}
-
-void SolveSLAMProblem(SLAMProblem2D& slam_problem, Solver& solver) {
-  std::cout << "Solving SLAM Problem..." << std::endl;
-  solver.SolveSLAM();
-  // Do a final pass through and check for any LC nodes.
-  // But only if automatic loop closure is enabled.
-  if (CONFIG_auto_lc) {
-    std::cout << "Automatically loop closing" << std::endl;
-    std::ofstream lc_output_file;
-    lc_output_file.open(CONFIG_lc_debug_output_dir + "/lc_matches.txt", std::ios::trunc);
-    lc_output_file.close();
-    for (SLAMNode2D& node : slam_problem.nodes) {
-      solver.CheckForLearnedLC(node);
-    }
-    solver.SolveSLAM();
-  }
+  std::cout << "Nodes added: " << node_index + 1 << std::endl;
 }
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(*argv);
   google::ParseCommandLineFlags(&argc, &argv, false);
-  if (FLAGS_config_file.compare("") == 0) {
-    printf("Must specify a config file!\n");
-    exit(1);
+  if (FLAGS_config_file == "") {
+    std::cout << "Must specify a config file!\n";
+    return 1;
   }
   config_reader::ConfigReader reader({FLAGS_config_file});
-  if (CONFIG_bag_path.compare("") == 0) {
-    printf("Must specify an input bag!\n");
-    exit(1);
+  if (CONFIG_bag_path == "") {
+    std::cout << "Must specify an input bag!\n";
+    return 1;
   }
   ros::init(argc, argv, "nautilus");
   ros::NodeHandle n;
   signal(SIGINT, SignalHandler);
   // Load and pre-process the data.
-  SLAMProblem2D slam_problem = ProcessBagFile(CONFIG_bag_path.c_str(), n);
+  SLAMProblem2D slam_problem = ProcessBagFile(CONFIG_bag_path, n);
   CHECK_GT(slam_problem.nodes.size(), 1)
-      << " Not enough nodes were processed"
-      << " you probably didn't specify the correct topics!\n";
+      << " Not enough nodes were processed, you probably didn't specify the "
+         "correct topics!\n";
   // Load all the residuals into the problem and run to get initial solution.
   Solver solver(n);
-  PopulateSLAMProblem(slam_problem, solver);
-  if (FLAGS_solution_poses.compare("") != 0) {
-    std::cout << "Loading solution poses; skipping SLAM solving step." << std::endl;
-    solver.LoadSLAMSolution(FLAGS_solution_poses.c_str());
+  PopulateSLAMProblem(&slam_problem, &solver);
+  if (FLAGS_solution_poses != "") {
+    std::cout << "Loading solution poses; skipping SLAM solving step."
+              << std::endl;
+    solver.LoadSLAMSolution(FLAGS_solution_poses);
   } else {
-    SolveSLAMProblem(slam_problem, solver);
+    std::cout << "Performing initial solve\n";
+    solver.SolveSLAM();
   }
 
   std::cout << "Waiting for Loop Closure input" << std::endl;
@@ -194,23 +189,5 @@ int main(int argc, char** argv) {
   ros::Subscriber vector_sub =
       n.subscribe("/vectorize_output", 10, &Solver::Vectorize, &solver);
   ros::spin();
-  //  while (asking_for_input) {
-  //    uint64_t scan_a, scan_b;
-  //    std::cout << "Type a pose A: "
-  //    std::cin >> scan_a;
-  //    std::cout << std::endl << "Type a pose B: ";
-  //    std::cin >> scan_b;
-  //    std::cout << std::endl;
-  //    // Run ChiSquare on these two scans.
-  //    if (scan_a > slam_problem.nodes.size() | scan_b >
-  //    slam_problem.nodes.size()) {
-  //      continue;
-  //    }
-  //    int chi_num = solver.GetChiSquare();
-  //    chi_squared dist(3);
-  //    return boost::math::cdf(dist, chi_num) <= certainty;
-  //    std::cout << "ChiSquare Boundary is: " << boost::math::cdf(dist,
-  //    chi_num);
-  //  }
   return 0;
 }

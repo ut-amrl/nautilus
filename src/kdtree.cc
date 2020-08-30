@@ -112,10 +112,10 @@ KDTree<T, K>::~KDTree() {
 template <typename T, unsigned int K>
 KDTree<T, K>* KDTree<T, K>::BuildKDTree(vector<KDNodeValue<T, K>> values) {
   if (values.size() == 0) {
-      // Return an empty tree;
-      left_tree_ = nullptr;
-      right_tree_ = nullptr;
-      return this;
+    // Return an empty tree;
+    left_tree_ = nullptr;
+    right_tree_ = nullptr;
+    return this;
   }
 
   // Determine splitting plane.
@@ -155,8 +155,8 @@ std::vector<KDNodeValue<float, 2>> KDTree<float, 2>::EigenToKD(
   CHECK_GE(values.size(), 0);
   vector<Vector2f> normals = NormalComputation::GetNormals(values);
   for (size_t node_index = 0; node_index < values.size(); node_index++) {
-    point_nodes.emplace_back(values[node_index], normals[node_index],
-                             node_index);
+    point_nodes.emplace_back(
+        values[node_index], normals[node_index], node_index);
   }
   return point_nodes;
 }
@@ -231,7 +231,8 @@ T KDTree<T, K>::FindNearestPointNormal(const Eigen::Matrix<T, K, 1>& point,
 
 template <typename T, unsigned int K>
 void KDTree<T, K>::FindNeighborPoints(
-    const Eigen::Matrix<T, K, 1>& point, const T& threshold,
+    const Eigen::Matrix<T, K, 1>& point,
+    const T& threshold,
     std::vector<KDNodeValue<T, K>>* neighbor_points) {
   T current_dist = (value_.point - point).norm();
   if (current_dist < threshold) neighbor_points->push_back(value_);

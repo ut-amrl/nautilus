@@ -109,9 +109,10 @@ PointCloud2 pointcloud_helpers::EigenPointcloudToRos(
 std::vector<Vector2f> pointcloud_helpers::normalizePointCloud(
     const vector<Vector2f>& pointcloud, double range) {
   std::vector<Vector2f> normalized(pointcloud.size());
-  Vector2f mean = std::accumulate(pointcloud.begin(), pointcloud.end(),
-                                  Vector2f(0.0f, 0.0f)) /
-                  pointcloud.size();
+  Vector2f mean =
+      std::accumulate(
+          pointcloud.begin(), pointcloud.end(), Vector2f(0.0f, 0.0f)) /
+      pointcloud.size();
   for (uint64_t i = 0; i < pointcloud.size(); i++) {
     normalized[i] = (pointcloud[i] - mean) / range;
   }

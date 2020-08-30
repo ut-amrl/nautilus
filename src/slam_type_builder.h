@@ -14,9 +14,9 @@
 #include "slam_types.h"
 
 using Eigen::Vector2f;
+using nautilus::CobotOdometryMsg;
 using slam_types::OdometryFactor2D;
 using slam_types::RobotPose2D;
-using nautilus::CobotOdometryMsg;
 
 struct SlamTypeBuilderConfig {
   CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");

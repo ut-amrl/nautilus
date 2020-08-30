@@ -37,25 +37,24 @@
 namespace slam_types {
 
 struct LidarFactor {
-    // IDs of the poses
-    uint64_t pose_id;
-    sensor_msgs::LaserScan scan;
-    std::vector<Eigen::Vector2f> pointcloud;
-    std::shared_ptr<KDTree<float, 2>> pointcloud_tree;
-    LidarFactor() {
-      pose_id = 0;
-      pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(nullptr);
-    }
-    LidarFactor(uint64_t pose_id,
-                sensor_msgs::LaserScan& laser_scan,
-                std::vector<Eigen::Vector2f>& pointcloud) :
-                pose_id(pose_id),
-                pointcloud(pointcloud) {
-      KDTree<float, 2>* tree_ptr =
-          new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(pointcloud));
-      pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(tree_ptr);
-      scan = laser_scan;
-    }
+  // IDs of the poses
+  uint64_t pose_id;
+  sensor_msgs::LaserScan scan;
+  std::vector<Eigen::Vector2f> pointcloud;
+  std::shared_ptr<KDTree<float, 2>> pointcloud_tree;
+  LidarFactor() {
+    pose_id = 0;
+    pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(nullptr);
+  }
+  LidarFactor(uint64_t pose_id,
+              sensor_msgs::LaserScan& laser_scan,
+              std::vector<Eigen::Vector2f>& pointcloud)
+      : pose_id(pose_id), pointcloud(pointcloud) {
+    KDTree<float, 2>* tree_ptr =
+        new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(pointcloud));
+    pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(tree_ptr);
+    scan = laser_scan;
+  }
 };
 
 struct RobotPose2D {
@@ -94,8 +93,10 @@ struct OdometryFactor2D {
   // Default constructor: do nothing.
   OdometryFactor2D() = default;
   // Convenience constructor: initialize everything.
-  OdometryFactor2D(uint64_t pose_i, uint64_t pose_j,
-                   Eigen::Vector2f& translation, float rotation)
+  OdometryFactor2D(uint64_t pose_i,
+                   uint64_t pose_j,
+                   Eigen::Vector2f& translation,
+                   float rotation)
       : pose_i(pose_i),
         pose_j(pose_j),
         translation(translation),
@@ -116,7 +117,9 @@ struct SLAMNode2D {
   // Default constructor: do nothing.
   SLAMNode2D() = default;
   // Convenience constructor, initialize all components.
-  SLAMNode2D(uint64_t idx, double timestamp, const RobotPose2D& pose,
+  SLAMNode2D(uint64_t idx,
+             double timestamp,
+             const RobotPose2D& pose,
              const LidarFactor& lidar_factor)
       : node_idx(idx),
         is_keyframe(false),

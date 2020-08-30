@@ -109,5 +109,7 @@ CumulativeFunctionTimer::~CumulativeFunctionTimer() {
   printf(
       "Run-time stats for %s : mean run time = %f ms, "
       "invocations = %" PRIu64 "\n",
-      name_.c_str(), 1.0E3 * mean_run_time, total_invocations_);
+      name_.c_str(),
+      1.0E3 * mean_run_time,
+      total_invocations_);
 }

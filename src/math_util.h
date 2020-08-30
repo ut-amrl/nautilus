@@ -42,7 +42,8 @@
 
 namespace math_util {
 
-inline bool NormalsSimilar(const Eigen::Vector2f& n1, const Eigen::Vector2f& n2,
+inline bool NormalsSimilar(const Eigen::Vector2f& n1,
+                           const Eigen::Vector2f& n2,
                            float max_cosine_value) {
   return (fabs(n1.dot(n2)) > max_cosine_value);
 }
@@ -124,7 +125,8 @@ T Pow(const T& x, const unsigned int n) {
 template <typename T>
 constexpr T ConstexprPow(const T& base, const int exp, const T result = 1) {
   return (exp < 1) ? result
-                   : ConstexprPow((base * base), (exp / 2),
+                   : ConstexprPow((base * base),
+                                  (exp / 2),
                                   ((exp % 2) ? result * base : result));
 }
 
@@ -176,8 +178,8 @@ int Sign(T val) {
 // the largest real root. The return value is the number of unique real roots
 // found.
 template <typename T>
-unsigned int SolveCubic(const T& a, const T& b, const T& c, const T& d, T* r0,
-                        T* r1, T* r2) {
+unsigned int SolveCubic(
+    const T& a, const T& b, const T& c, const T& d, T* r0, T* r1, T* r2) {
   DCHECK_NE(r0, static_cast<T*>(nullptr));
   DCHECK_NE(r1, static_cast<T*>(nullptr));
   DCHECK_NE(r2, static_cast<T*>(nullptr));

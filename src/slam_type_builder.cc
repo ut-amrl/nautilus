@@ -4,15 +4,15 @@
 
 #include "eigen3/Eigen/Dense"
 
-#include "nautilus/CobotOdometryMsg.h"
 #include "math_util.h"
+#include "nautilus/CobotOdometryMsg.h"
 #include "pointcloud_helpers.h"
 #include "slam_type_builder.h"
 
 using Eigen::Rotation2Df;
 using Eigen::Vector2f;
-using nautilus::CobotOdometryMsg;
 using math_util::AngleDist;
+using nautilus::CobotOdometryMsg;
 using pointcloud_helpers::LaserScanToPointCloud;
 using slam_types::LidarFactor;
 using slam_types::OdometryFactor2D;
@@ -27,8 +27,8 @@ void SLAMTypeBuilder::AddOdomFactor(
   auto node_j = nodes_[nodes_.size() - 2];
   double angle = node_i.pose.angle - node_j.pose.angle;
   Vector2f translation = node_i.pose.loc - node_j.pose.loc;
-  OdometryFactor2D odom_factor(nodes_.size() - 2, nodes_.size() - 1,
-                               translation, angle);
+  OdometryFactor2D odom_factor(
+      nodes_.size() - 2, nodes_.size() - 1, translation, angle);
   odom_factors.emplace_back(odom_factor);
 }
 
@@ -44,17 +44,18 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
 
     // TODO wrap in a config-based if
     const size_t truncation_size = 55;
-    size_t num_ranges = (laser_scan.angle_max - laser_scan.angle_min) / laser_scan.angle_increment;
+    size_t num_ranges = (laser_scan.angle_max - laser_scan.angle_min) /
+                        laser_scan.angle_increment;
     // printf("NUM ranges %ld\n", num_ranges);
-    
-    for(size_t i = 0; i < num_ranges; i++) {
+
+    for (size_t i = 0; i < num_ranges; i++) {
       if (i < truncation_size || i > num_ranges - truncation_size) {
         laser_scan.ranges[i] = max_range + 1.0;
       }
     }
 
     std::vector<Vector2f> pointcloud =
-      LaserScanToPointCloud(laser_scan, max_range);
+        LaserScanToPointCloud(laser_scan, max_range);
     // laser scan truncation
 
     LidarFactor lidar_factor(pose_id_, laser_scan, pointcloud);
@@ -73,8 +74,8 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
     } else {
       pose = odom_tracking_.GetPose();
     }
-    SLAMNode2D slam_node(pose_id_, laser_scan.header.stamp.toSec(), pose,
-                         lidar_factor);
+    SLAMNode2D slam_node(
+        pose_id_, laser_scan.header.stamp.toSec(), pose, lidar_factor);
     nodes_.push_back(slam_node);
     if (pose_id_ > 0) {
       AddOdomFactor(odom_factors_);
@@ -110,11 +111,10 @@ slam_types::SLAMProblem2D SLAMTypeBuilder::GetSlamProblem() {
   return slam_problem;
 }
 
-size_t SLAMTypeBuilder::GetNodeCount() {
-  return nodes_.size();
-}
+size_t SLAMTypeBuilder::GetNodeCount() { return nodes_.size(); }
 
-void DifferentialOdometryTracking::OdometryCallback(CobotOdometryMsg& odometry) {
+void DifferentialOdometryTracking::OdometryCallback(
+    CobotOdometryMsg& odometry) {
   if (!odom_initialized_) {
     odom_initialized_ = true;
     pending_rotation_ = 0;
