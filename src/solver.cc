@@ -38,15 +38,14 @@ using Eigen::Vector3f;
 using laser_scan_matcher::MatchLaserScans;
 using local_uncertainty_estimator::EstimateLocalUncertainty;
 using math_util::NormalsSimilar;
-using nautilus::HitlSlamInputMsg;
-using nautilus::HitlSlamInputMsgConstPtr;
-using nautilus::WriteMsgConstPtr;
 using slam_types::LidarFactor;
 using slam_types::OdometryFactor2D;
 using slam_types::SLAMNode2D;
 using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
 using std::vector;
+
+namespace nautilus {
 
 /*----------------------------------------------------------------------------*
  *                             PROBLEM BUILDING                               |
@@ -276,10 +275,10 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
         for (size_t node_j_index = node_j_start_idx;
              node_j_index < node_i_index;
              node_j_index++) {
-          PointCorrespondences correspondence(solution_[node_i_index].pose,
-                                              solution_[node_j_index].pose,
-                                              node_i_index,
-                                              node_j_index);
+          ds::PointCorrespondences correspondence(solution_[node_i_index].pose,
+                                                  solution_[node_j_index].pose,
+                                                  node_i_index,
+                                                  node_j_index);
           // Get the correspondences between these two poses.
           const double local_difference =
               GetPointCorrespondences(problem_.nodes[node_i_index].lidar_factor,
@@ -288,12 +287,11 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
                                       solution_[node_j_index].pose,
                                       &correspondence) /
               problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
-          auto lidar_residual =
-              nautilus::residuals::LIDARPointBlobResidual::create(
-                  correspondence.source_points,
-                  correspondence.target_points,
-                  correspondence.source_normals,
-                  correspondence.target_normals);
+          auto lidar_residual = residuals::LIDARPointBlobResidual::create(
+              correspondence.source_points,
+              correspondence.target_points,
+              correspondence.source_normals,
+              correspondence.target_normals);
           // Add the correspondences as constraints in the optimization problem.
           problem_mutex.lock();
           difference += local_difference;
@@ -331,7 +329,7 @@ void Solver::AddOdomFactors(ceres::Problem* ceres_problem,
     CHECK_GT(solution_.size(), odom_factor.pose_i);
     CHECK_GT(solution_.size(), odom_factor.pose_j);
     ceres::ResidualBlockId id = ceres_problem->AddResidualBlock(
-        nautilus::residuals::OdometryResidual::create(
+        residuals::OdometryResidual::create(
             odom_factor, trans_weight, rot_weight),
         NULL,
         solution_[odom_factor.pose_i].pose,
@@ -350,7 +348,7 @@ double Solver::GetPointCorrespondences(
     const LidarFactor& target_lidar,
     double* source_pose,
     double* target_pose,
-    PointCorrespondences* point_correspondences) {
+    ds::PointCorrespondences* point_correspondences) {
   // Summed differences between point correspondences.
   double difference = 0.0;
   // Affine transformations from the two pose's reference frames.
@@ -538,24 +536,25 @@ OdometryFactor2D Solver::GetTotalOdomChange(
  *                        HUMAN-IN-THE-LOOP LOOP CLOSURE                      |
  *----------------------------------------------------------------------------*/
 
-vector<LineSegment<float>> LineSegmentsFromHitlMsg(
+vector<ds::LineSegment<float>> LineSegmentsFromHitlMsg(
     const HitlSlamInputMsg& msg) {
   Vector2f start_a(msg.line_a_start.x, msg.line_a_start.y);
   Vector2f end_a(msg.line_a_end.x, msg.line_a_end.y);
   Vector2f start_b(msg.line_b_start.x, msg.line_b_start.y);
   Vector2f end_b(msg.line_b_end.x, msg.line_b_end.y);
-  vector<LineSegment<float>> lines;
+  vector<ds::LineSegment<float>> lines;
   lines.emplace_back(start_a, end_a);
   lines.emplace_back(start_b, end_b);
   return lines;
 }
 
-HitlLCConstraint Solver::GetRelevantPosesForHITL(
+ds::HitlLCConstraint Solver::GetRelevantPosesForHITL(
     const HitlSlamInputMsg& hitl_msg) {
   // Linearly go through all poses
   // Go through all points and see if they lie on either of the two lines.
-  const vector<LineSegment<float>> lines = LineSegmentsFromHitlMsg(hitl_msg);
-  HitlLCConstraint hitl_constraint(lines[0], lines[1]);
+  const vector<ds::LineSegment<float>> lines =
+      LineSegmentsFromHitlMsg(hitl_msg);
+  ds::HitlLCConstraint hitl_constraint(lines[0], lines[1]);
   for (size_t node_idx = 0; node_idx < problem_.nodes.size(); node_idx++) {
     vector<Vector2f> points_on_a;
     vector<Vector2f> points_on_b;
@@ -585,26 +584,24 @@ HitlLCConstraint Solver::GetRelevantPosesForHITL(
 }
 
 void Solver::AddHITLResiduals(ceres::Problem* problem) {
-  for (HitlLCConstraint& constraint : hitl_constraints_) {
-    for (const LCPose& a_pose : constraint.line_a_poses) {
+  for (ds::HitlLCConstraint& constraint : hitl_constraints_) {
+    for (const ds::LCPose& a_pose : constraint.line_a_poses) {
       const vector<Vector2f>& pointcloud_a = a_pose.points_on_feature;
       CHECK_LT(a_pose.node_idx, solution_.size());
-      problem->AddResidualBlock(
-          nautilus::residuals::PointToLineResidual::create(constraint.line_a,
-                                                           pointcloud_a),
-          nullptr,
-          solution_[a_pose.node_idx].pose,
-          constraint.chosen_line_pose);
+      problem->AddResidualBlock(residuals::PointToLineResidual::create(
+                                    constraint.line_a, pointcloud_a),
+                                nullptr,
+                                solution_[a_pose.node_idx].pose,
+                                constraint.chosen_line_pose);
     }
-    for (const LCPose& b_pose : constraint.line_b_poses) {
+    for (const ds::LCPose& b_pose : constraint.line_b_poses) {
       const vector<Vector2f>& pointcloud_b = b_pose.points_on_feature;
       CHECK_LT(b_pose.node_idx, solution_.size());
-      problem->AddResidualBlock(
-          nautilus::residuals::PointToLineResidual::create(constraint.line_a,
-                                                           pointcloud_b),
-          nullptr,
-          solution_[b_pose.node_idx].pose,
-          constraint.chosen_line_pose);
+      problem->AddResidualBlock(residuals::PointToLineResidual::create(
+                                    constraint.line_a, pointcloud_b),
+                                nullptr,
+                                solution_[b_pose.node_idx].pose,
+                                constraint.chosen_line_pose);
     }
   }
 }
@@ -613,7 +610,7 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   problem_.odometry_factors = GetSolvedOdomFactors();
   const HitlSlamInputMsg hitl_msg = *hitl_ptr;
   // Get the poses that belong to this input.
-  const HitlLCConstraint colinear_constraint =
+  const ds::HitlLCConstraint colinear_constraint =
       GetRelevantPosesForHITL(hitl_msg);
   std::cout << "Found " << colinear_constraint.line_a_poses.size()
             << " poses for the first line." << std::endl;
@@ -641,15 +638,15 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   std::cout << "Waiting for Loop Closure input." << std::endl;
 }
 
-vector<ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
-                                            const uint64_t node_b) {
+vector<ds::ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
+                                                const uint64_t node_b) {
   const uint64_t first_node = std::min(node_a, node_b);
   const uint64_t second_node = std::max(node_a, node_b);
-  vector<ResidualDesc> res_desc;
-  PointCorrespondences correspondence(solution_[first_node].pose,
-                                      solution_[second_node].pose,
-                                      first_node,
-                                      second_node);
+  vector<ds::ResidualDesc> res_desc;
+  ds::PointCorrespondences correspondence(solution_[first_node].pose,
+                                          solution_[second_node].pose,
+                                          first_node,
+                                          second_node);
   // Get the correspondences between these two poses.
   GetPointCorrespondences(problem_.nodes[first_node].lidar_factor,
                           problem_.nodes[second_node].lidar_factor,
@@ -659,11 +656,10 @@ vector<ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
   // Add the correspondences as constraints in the optimization problem.
   ceres::ResidualBlockId lidar_id;
   lidar_id = ceres_information_.problem->AddResidualBlock(
-      nautilus::residuals::LIDARPointBlobResidual::create(
-          correspondence.source_points,
-          correspondence.target_points,
-          correspondence.source_normals,
-          correspondence.target_normals),
+      residuals::LIDARPointBlobResidual::create(correspondence.source_points,
+                                                correspondence.target_points,
+                                                correspondence.source_normals,
+                                                correspondence.target_normals),
       NULL,
       correspondence.source_pose,
       correspondence.target_pose);
@@ -672,7 +668,7 @@ vector<ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
   // solved using CSM yet and can't get the actual difference between them.
   ceres::ResidualBlockId odom_id;
   odom_id = ceres_information_.problem->AddResidualBlock(
-      nautilus::residuals::OdometryResidual::create(
+      residuals::OdometryResidual::create(
           GetDifferenceOdom(first_node, second_node),
           config_.CONFIG_lc_translation_weight,
           config_.CONFIG_lc_rotation_weight),
@@ -919,3 +915,4 @@ void Solver::Vectorize(const WriteMsgConstPtr& msg) {
     sleep(1);
   }
 }
+}  // namespace nautilus

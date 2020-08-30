@@ -3,6 +3,9 @@
 #include "eigen3/Eigen/Dense"
 #include "slam_types.h"
 
+namespace nautilus {
+namespace ds {
+
 /*----------------------------------------------------------------------------*
  *                            DATA STRUCTURES                                 |
  *----------------------------------------------------------------------------*/
@@ -88,3 +91,6 @@ struct ResidualDesc {
   ResidualDesc(size_t node_i, size_t node_j, ceres::ResidualBlockId id)
       : node_i(node_i), node_j(node_j), id(id) {}
 };
+
+}  // namespace ds
+}  // namespace nautilus

@@ -133,7 +133,8 @@ void SignalHandler(int signum) {
   exit(0);
 }
 
-void PopulateSLAMProblem(SLAMProblem2D* slam_problem, Solver* solver) {
+void PopulateSLAMProblem(SLAMProblem2D* slam_problem,
+                         nautilus::Solver* solver) {
   // Iteratively add all the nodes and odometry factors.
   CHECK_EQ(slam_problem->nodes.size(),
            slam_problem->odometry_factors.size() + 1);
@@ -170,7 +171,7 @@ int main(int argc, char** argv) {
       << " Not enough nodes were processed, you probably didn't specify the "
          "correct topics!\n";
   // Load all the residuals into the problem and run to get initial solution.
-  Solver solver(n);
+  nautilus::Solver solver(n);
   PopulateSLAMProblem(&slam_problem, &solver);
   if (FLAGS_solution_poses != "") {
     std::cout << "Loading solution poses; skipping SLAM solving step."
@@ -182,12 +183,12 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "Waiting for Loop Closure input" << std::endl;
-  ros::Subscriber hitl_sub =
-      n.subscribe(CONFIG_hitl_lc_topic, 10, &Solver::HitlCallback, &solver);
-  ros::Subscriber write_sub =
-      n.subscribe("/write_output", 10, &Solver::WriteCallback, &solver);
-  ros::Subscriber vector_sub =
-      n.subscribe("/vectorize_output", 10, &Solver::Vectorize, &solver);
+  ros::Subscriber hitl_sub = n.subscribe(
+      CONFIG_hitl_lc_topic, 10, &nautilus::Solver::HitlCallback, &solver);
+  ros::Subscriber write_sub = n.subscribe(
+      "/write_output", 10, &nautilus::Solver::WriteCallback, &solver);
+  ros::Subscriber vector_sub = n.subscribe(
+      "/vectorize_output", 10, &nautilus::Solver::Vectorize, &solver);
   ros::spin();
   return 0;
 }

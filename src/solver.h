@@ -34,15 +34,14 @@ using boost::math::quantile;
 using Eigen::Affine2f;
 using Eigen::Vector2f;
 using Eigen::Vector3f;
-using nautilus::HitlSlamInputMsg;
-using nautilus::HitlSlamInputMsgConstPtr;
-using nautilus::WriteMsgConstPtr;
 using slam_types::LidarFactor;
 using slam_types::OdometryFactor2D;
 using slam_types::SLAMNode2D;
 using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
 using std::vector;
+
+namespace nautilus {
 
 struct CeresInformation {
   void ResetProblem() {
@@ -54,7 +53,7 @@ struct CeresInformation {
   bool cost_valid = false;
   double cost = 0.0;
   std::shared_ptr<ceres::Problem> problem;
-  vector<ResidualDesc> res_descriptors;
+  vector<ds::ResidualDesc> res_descriptors;
 };
 
 struct SolverConfig {
@@ -109,33 +108,6 @@ struct LearnedKeyframe {
   const size_t node_idx;
   LearnedKeyframe(const size_t node_idx) : node_idx(node_idx) {}
 };
-
-// Returns if val is between a and b.
-template <typename T>
-bool IsBetween(const T& val, const T& a, const T& b) {
-  return (val >= a && val <= b) || (val >= b && val <= a);
-}
-
-template <typename T>
-T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1>& point,
-                        const LineSegment<T>& line_seg) {
-  typedef Eigen::Matrix<T, 2, 1> Vector2T;
-  // Line segment is parametric, with a start point and end.
-  // Parameterized by t between 0 and 1.
-  // We can get the point on the line by projecting the start -> point onto
-  // this line.
-  Eigen::Hyperplane<T, 2> line =
-      Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.end);
-  Vector2T point_on_line = line.projection(point);
-  if (IsBetween(point_on_line.x(), line_seg.start.x(), line_seg.end.x()) &&
-      IsBetween(point_on_line.y(), line_seg.start.y(), line_seg.end.y())) {
-    return line.absDistance(point);
-  }
-
-  T dist_to_start = (point - line_seg.start).norm();
-  T dist_to_endpoint = (point - line_seg.end).norm();
-  return std::min<T>(dist_to_start, dist_to_endpoint);
-}
 
 /*----------------------------------------------------------------------------*
  *                           DEBUGGING OUTPUT                                 |
@@ -270,10 +242,10 @@ class VisualizationCallback : public ceres::IterationCallback {
   void PubConstraintVisualization() {
     const vector<SLAMNodeSolution2D>& solution_c = *solution;
     vector<Vector2f> line_a_poses;
-    for (const HitlLCConstraint& hitl_constraint : hitl_constraints) {
+    for (const ds::HitlLCConstraint& hitl_constraint : hitl_constraints) {
       vector<Vector2f> a_points;
       vector<Vector2f> b_points;
-      for (const LCPose& pose : hitl_constraint.line_a_poses) {
+      for (const ds::LCPose& pose : hitl_constraint.line_a_poses) {
         const double* pose_arr = solution_c[pose.node_idx].pose;
         Vector2f pose_pos(pose_arr[0], pose_arr[1]);
         line_a_poses.push_back(pose_pos);
@@ -285,7 +257,7 @@ class VisualizationCallback : public ceres::IterationCallback {
         }
       }
       vector<Vector2f> line_b_poses;
-      for (const LCPose& pose : hitl_constraint.line_b_poses) {
+      for (const ds::LCPose& pose : hitl_constraint.line_b_poses) {
         const double* pose_arr = solution_c[pose.node_idx].pose;
         Vector2f pose_pos(pose_arr[0], pose_arr[1]);
         line_b_poses.push_back(pose_pos);
@@ -331,7 +303,7 @@ class VisualizationCallback : public ceres::IterationCallback {
     pointcloud_helpers::PublishPointcloud(poses, keyframe_marker, keyframe_pub);
   }
 
-  void AddPosePointcloud(vector<Vector2f>& pointcloud, const LCPose& pose) {
+  void AddPosePointcloud(vector<Vector2f>& pointcloud, const ds::LCPose& pose) {
     size_t node_idx = pose.node_idx;
     vector<SLAMNodeSolution2D> solution_c = *solution;
     vector<Vector2f> p_cloud = problem.nodes[node_idx].lidar_factor.pointcloud;
@@ -345,11 +317,11 @@ class VisualizationCallback : public ceres::IterationCallback {
 
   void PubConstraintPointclouds() {
     vector<Vector2f> pointclouds;
-    for (const HitlLCConstraint& hitl_constraint : hitl_constraints) {
-      for (const LCPose& pose : hitl_constraint.line_a_poses) {
+    for (const auto& hitl_constraint : hitl_constraints) {
+      for (const ds::LCPose& pose : hitl_constraint.line_a_poses) {
         AddPosePointcloud(pointclouds, pose);
       }
-      for (const LCPose& pose : hitl_constraint.line_b_poses) {
+      for (const ds::LCPose& pose : hitl_constraint.line_b_poses) {
         AddPosePointcloud(pointclouds, pose);
       }
     }
@@ -360,7 +332,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   void PubAutoConstraints() {
     vector<Vector3f> poses;
     gui_helpers::ClearMarker(&auto_lc_pose_array);
-    for (const AutoLCConstraint& auto_constraint : auto_constraints) {
+    for (const auto& auto_constraint : auto_constraints) {
       // std::cout << "Frame #: " << frame.node_idx << std::endl;
       const double* pose_arr_a =
           (*solution)[auto_constraint.node_a->node_idx].pose;
@@ -380,7 +352,7 @@ class VisualizationCallback : public ceres::IterationCallback {
 
   void ClearNormals() { gui_helpers::ClearMarker(&normals_marker); }
 
-  void AddMatchLines(const PointCorrespondences& correspondence) {
+  void AddMatchLines(const ds::PointCorrespondences& correspondence) {
     CHECK_EQ(correspondence.source_points.size(),
              correspondence.target_points.size());
     for (uint64_t index = 0; index < correspondence.source_points.size();
@@ -400,11 +372,11 @@ class VisualizationCallback : public ceres::IterationCallback {
     }
   }
 
-  void AddConstraint(const HitlLCConstraint& constraint) {
+  void AddConstraint(const ds::HitlLCConstraint& constraint) {
     hitl_constraints.push_back(constraint);
   }
 
-  void AddAutoLCConstraint(const AutoLCConstraint& constraint) {
+  void AddAutoLCConstraint(const ds::AutoLCConstraint& constraint) {
     auto_constraints.push_back(constraint);
   }
 
@@ -472,8 +444,8 @@ class VisualizationCallback : public ceres::IterationCallback {
   PointCloud2 hitl_points_marker;
   PointCloud2 keyframe_marker;
   visualization_msgs::Marker line_marker;
-  vector<HitlLCConstraint> hitl_constraints;
-  vector<AutoLCConstraint> auto_constraints;
+  vector<ds::HitlLCConstraint> hitl_constraints;
+  vector<ds::AutoLCConstraint> auto_constraints;
 };
 
 /*----------------------------------------------------------------------------*
@@ -485,11 +457,12 @@ class Solver {
   Solver(ros::NodeHandle& n);
   vector<SLAMNodeSolution2D> SolveSLAM();
   vector<SLAMNodeSolution2D> SolvePoseSLAM();
-  double GetPointCorrespondences(const LidarFactor& source_lidar,
-                                 const LidarFactor& target_lidar,
-                                 double* source_pose,
-                                 double* target_pose,
-                                 PointCorrespondences* point_correspondences);
+  double GetPointCorrespondences(
+      const LidarFactor& source_lidar,
+      const LidarFactor& target_lidar,
+      double* source_pose,
+      double* target_pose,
+      ds::PointCorrespondences* point_correspondences);
   void AddOdomFactors(ceres::Problem* ceres_problem,
                       vector<OdometryFactor2D> factors,
                       double trans_weight,
@@ -498,7 +471,8 @@ class Solver {
   void WriteCallback(const WriteMsgConstPtr& msg);
   void Vectorize(const WriteMsgConstPtr& msg);
   vector<SLAMNodeSolution2D> GetSolution() { return solution_; }
-  HitlLCConstraint GetRelevantPosesForHITL(const HitlSlamInputMsg& hitl_msg);
+  ds::HitlLCConstraint GetRelevantPosesForHITL(
+      const HitlSlamInputMsg& hitl_msg);
   void SolveForLC();
   void AddPointCloudResiduals(ceres::Problem* problem);
   vector<OdometryFactor2D> GetSolvedOdomFactors();
@@ -508,24 +482,24 @@ class Solver {
   void LoadSLAMSolution(const std::string& poses_path);
 
  private:
-  double CostFromResidualDescriptor(const ResidualDesc& res_desc);
+  double CostFromResidualDescriptor(const ds::ResidualDesc& res_desc);
   double GetChiSquareCost(uint64_t node_a, uint64_t node_b);
   OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
                                      const uint64_t node_b);
   OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
                                      const uint64_t node_b,
                                      Vector3f trans);
-  vector<ResidualDesc> AddLCResiduals(const uint64_t node_a,
-                                      const uint64_t node_b);
+  vector<ds::ResidualDesc> AddLCResiduals(const uint64_t node_a,
+                                          const uint64_t node_b);
   void AddHITLResiduals(ceres::Problem* problem);
-  void RemoveResiduals(vector<ResidualDesc> descs);
+  void RemoveResiduals(vector<ds::ResidualDesc> descs);
   void AddKeyframe(SLAMNode2D& node);
   float GetMatchScores(SLAMNode2D& node, SLAMNode2D& keyframe);
   bool AddKeyframeResiduals(LearnedKeyframe& key_frame_a,
                             LearnedKeyframe& key_frame_b);
-  AutoLCConstraint computeAutoLCConstraint(const uint64_t node_a,
-                                           const uint64_t node_b);
-  bool AddAutoLCConstraint(const AutoLCConstraint& constraint);
+  ds::AutoLCConstraint computeAutoLCConstraint(const uint64_t node_a,
+                                               const uint64_t node_b);
+  bool AddAutoLCConstraint(const ds::AutoLCConstraint& constraint);
   void LCKeyframes(LearnedKeyframe& key_frame_a, LearnedKeyframe& key_frame_b);
   OdometryFactor2D GetTotalOdomChange(
       const std::vector<OdometryFactor2D>& factors);
@@ -542,8 +516,8 @@ class Solver {
   vector<OdometryFactor2D> initial_odometry_factors;
   vector<SLAMNodeSolution2D> solution_;
   ros::NodeHandle n_;
-  vector<AutoLCConstraint> auto_lc_constraints_;
-  vector<HitlLCConstraint> hitl_constraints_;
+  vector<ds::AutoLCConstraint> auto_lc_constraints_;
+  vector<ds::HitlLCConstraint> hitl_constraints_;
   std::unique_ptr<VisualizationCallback> vis_callback_ = nullptr;
   vector<LearnedKeyframe> keyframes;
   ros::ServiceClient matcher_client;
@@ -552,5 +526,5 @@ class Solver {
   CeresInformation ceres_information_;
   SolverConfig config_;
 };
-
+}  // namespace nautilus
 #endif  // SRC_SOLVER_H_

@@ -130,7 +130,7 @@ struct PointToLineResidual {
     const Affine2T line_to_world = PoseArrayToAffine(line_pose);
     Vector2T line_start = line_to_world * line_segment_.start.cast<T>();
     Vector2T line_end = line_to_world * line_segment_.end.cast<T>();
-    const LineSegment<T> world_line_segment(line_start, line_end);
+    const ds::LineSegment<T> world_line_segment(line_start, line_end);
 #pragma omp parallel for default(none) shared(residuals)
     for (size_t i = 0; i < points_.size(); i++) {
       // Transform source_point into the frame of the line
@@ -140,19 +140,19 @@ struct PointToLineResidual {
     return true;
   }
 
-  PointToLineResidual(const LineSegment<float>& line_segment,
+  PointToLineResidual(const ds::LineSegment<float>& line_segment,
                       const std::vector<Eigen::Vector2f>& points)
       : line_segment_(line_segment), points_(points) {}
 
   static ceres::AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC, 3, 3>*
-  create(const LineSegment<float>& line_segment,
+  create(const ds::LineSegment<float>& line_segment,
          const std::vector<Eigen::Vector2f>& points) {
     return new ceres::
         AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC, 3, 3>(
             new PointToLineResidual(line_segment, points), points.size());
   }
 
-  const LineSegment<float> line_segment_;
+  const ds::LineSegment<float> line_segment_;
   const std::vector<Eigen::Vector2f> points_;
 };
 
