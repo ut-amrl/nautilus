@@ -29,4 +29,6 @@
   <run_depend>std_msgs</run_depend>
   <run_depend>rosbag</run_depend>
   <run_depend>laser_scan_matcher</run_depend>
+
+  <test_depend>rosunit</test_depend>
 </package>

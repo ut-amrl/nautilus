@@ -83,7 +83,7 @@ target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES}
 # We need the second Exported Targets because Laser_scan_matcher should be built first.
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} laser_scan_matcher_generate_messages_cpp local_uncertainty_matcher_generate_messages_cpp)
 
-if (TESTING)
+if (CATKIN_ENABLE_TESTING OR TESTING)
   MESSAGE(STATUS "Compiling tests")
   enable_testing()
   add_subdirectory(test)

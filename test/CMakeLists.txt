@@ -7,5 +7,10 @@ macro(package_add_test TESTNAME)
     set_target_properties(${TESTNAME} PROPERTIES FOLDER tests)
 endmacro()
 
-package_add_test(solver_test solver_test.cc)
-#package_add_test(correlative_scan_matching_test correlative_scan_matching_test.cc ../src/CorrelativeScanMatcher.cc ../src/timer.cc)
+if (CATKIN_ENABLED_TESTING)
+  catkin_add_gtest(solver_test solver_test.cc)
+  target_link_libraries(solver_test ${catkin_LIBRARIES})
+else()
+  # build the packages using the above macro.
+  package_add_test(solver_test solver_test.cc)
+endif()
