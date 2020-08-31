@@ -109,14 +109,13 @@ class Solver {
                     const double certainty);
 
   slam_types::SLAMProblem2D problem_;
-  std::vector<slam_types::OdometryFactor2D> initial_odometry_factors;
+  std::vector<slam_types::OdometryFactor2D> initial_odometry_factors_;
   std::vector<slam_types::SLAMNodeSolution2D> solution_;
   ros::NodeHandle n_;
   std::vector<ds::HitlLCConstraint> hitl_constraints_;
   std::unique_ptr<VisualizationCallback> vis_callback_;
-  std::vector<ds::LearnedKeyframe> keyframes;
-  ros::ServiceClient local_uncertainty_client;
-  CorrelativeScanMatcher scan_matcher;
+  std::vector<ds::LearnedKeyframe> keyframes_;
+  CorrelativeScanMatcher scan_matcher_;
   CeresInformation ceres_information_;
   SolverConfig config_;
 };

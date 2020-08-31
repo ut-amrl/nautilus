@@ -19,7 +19,6 @@
 #include "./line_extraction.h"
 #include "./math_util.h"
 #include "laser_scan_matcher/MatchLaserScans.h"
-#include "local_uncertainty_estimator/EstimateLocalUncertainty.h"
 #include "nautilus/HitlSlamInputMsg.h"
 #include "nautilus/WriteMsg.h"
 #include "timer.h"
@@ -36,7 +35,6 @@ using Eigen::Rotation2D;
 using Eigen::Vector2f;
 using Eigen::Vector3f;
 using laser_scan_matcher::MatchLaserScans;
-using local_uncertainty_estimator::EstimateLocalUncertainty;
 using math_util::NormalsSimilar;
 using slam_types::LidarFactor;
 using slam_types::OdometryFactor2D;
@@ -58,11 +56,9 @@ namespace nautilus {
 /* Solver takes in a ros node handle to be used for sending out debugging
  * information*/
 // TODO: Upped the Scanmatcher resolution to 0.01 for ChiSquare.
-Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(30, 2, 0.3, 0.01) {
-  local_uncertainty_client =
-      n_.serviceClient<EstimateLocalUncertainty>("estimate_local_uncertainty");
+Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher_(30, 2, 0.3, 0.01) {
   vis_callback_ = std::unique_ptr<VisualizationCallback>(
-      new VisualizationCallback(keyframes, n_));
+      new VisualizationCallback(keyframes_, n_));
 }
 
 void Solver::AddSLAMNodeOdom(SLAMNode2D& node,
@@ -70,7 +66,7 @@ void Solver::AddSLAMNodeOdom(SLAMNode2D& node,
   CHECK_EQ(node.node_idx, odom_factor_to_node.pose_j);
   problem_.nodes.push_back(node);
   problem_.odometry_factors.push_back(odom_factor_to_node);
-  initial_odometry_factors.push_back(odom_factor_to_node);
+  initial_odometry_factors_.push_back(odom_factor_to_node);
   SLAMNodeSolution2D sol_node(node);
   solution_.push_back(sol_node);
   vis_callback_->UpdateProblemAndSolution(
@@ -463,7 +459,7 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
   std::cout << "Solving problem with HITL constraints..." << std::endl;
   SolveSLAM();
   // TODO: This is giving worse results.
-  problem_.odometry_factors = initial_odometry_factors;
+  problem_.odometry_factors = initial_odometry_factors_;
   std::cout << "Solving problem with initial odometry constraints..."
             << std::endl;
   SolveSLAM();
@@ -525,7 +521,7 @@ double Solver::GetChiSquareCost(uint64_t node_a, uint64_t node_b) {
   // TODO: Should we be restricting by rotation here?
   std::cout << "Running CSM" << std::endl;
   std::pair<double, std::pair<Vector2f, float>> trans_prob_pair =
-      scan_matcher.GetTransformation(
+      scan_matcher_.GetTransformation(
           problem_.nodes[node_a].lidar_factor.pointcloud,
           problem_.nodes[node_b].lidar_factor.pointcloud,
           solution_[node_a].pose[2],
