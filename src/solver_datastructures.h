@@ -92,5 +92,10 @@ struct ResidualDesc {
       : node_i(node_i), node_j(node_j), id(id) {}
 };
 
+struct LearnedKeyframe {
+  const size_t node_idx;
+  LearnedKeyframe(const size_t node_idx) : node_idx(node_idx) {}
+};
+
 }  // namespace ds
 }  // namespace nautilus

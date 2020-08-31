@@ -10,3 +10,6 @@
 [submodule "third_party/config-reader"]
 	path = third_party/config-reader
 	url = git@github.com:ut-amrl/config-reader.git
+[submodule "third_party/amrl_shared_lib"]
+	path = third_party/amrl_shared_lib
+	url = git@github.com:ut-amrl/amrl_shared_lib.git

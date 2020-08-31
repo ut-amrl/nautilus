@@ -59,7 +59,6 @@ namespace nautilus {
  * information*/
 // TODO: Upped the Scanmatcher resolution to 0.01 for ChiSquare.
 Solver::Solver(ros::NodeHandle& n) : n_(n), scan_matcher(30, 2, 0.3, 0.01) {
-  matcher_client = n_.serviceClient<MatchLaserScans>("match_laser_scans");
   local_uncertainty_client =
       n_.serviceClient<EstimateLocalUncertainty>("estimate_local_uncertainty");
   vis_callback_ = std::unique_ptr<VisualizationCallback>(
@@ -117,7 +116,9 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
     LOG(INFO) << "Using window size: " << window_size << std::endl;
     while (abs(difference - last_difference) >
            config_.CONFIG_accuracy_change_stop_threshold) {
-      std::cout << "Solve diff " << abs(difference - last_difference) << " Target: " << config_.CONFIG_accuracy_change_stop_threshold << std::endl;
+      std::cout << "Solve diff " << abs(difference - last_difference)
+                << " Target: " << config_.CONFIG_accuracy_change_stop_threshold
+                << std::endl;
       vis_callback_->ClearNormals();
       last_difference = difference;
       difference = 0;
@@ -355,8 +356,7 @@ OdometryFactor2D Solver::GetTotalOdomChange(
     const std::vector<OdometryFactor2D>& factors) {
   Vector2f init_trans(0, 0);
   OdometryFactor2D factor(0, factors.size(), init_trans, 0);
-  for (size_t factor_idx = 0; factor_idx < factors.size(); factor_idx++) {
-    OdometryFactor2D curr_factor = factors[factor_idx];
+  for (const auto& curr_factor : factors) {
     factor.translation += curr_factor.translation;
     factor.rotation += curr_factor.rotation;
     factor.rotation = math_util::AngleMod(factor.rotation);

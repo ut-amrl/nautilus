@@ -28,6 +28,7 @@ INCLUDE($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
 add_subdirectory(third_party)
 
 set(CONFIG_READER_INCLUDE_DIR third_party/config-reader/include)
+INCLUDE_DIRECTORIES(third_party/amrl_shared_lib)
 INCLUDE_DIRECTORIES(third_party/config-reader/include)
 INCLUDE_DIRECTORIES(third_party/csm/src)
 INCLUDE_DIRECTORIES(third_party/vector_maps/src)
