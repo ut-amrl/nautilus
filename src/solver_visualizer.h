@@ -242,9 +242,9 @@ class VisualizationCallback : public ceres::IterationCallback {
   }
 
   void UpdateProblemAndSolution(
-      slam_types::SLAMNode2D& new_node,
+      const slam_types::SLAMNode2D& new_node,
       std::vector<slam_types::SLAMNodeSolution2D>* new_solution,
-      slam_types::OdometryFactor2D& new_odom_factor) {
+      const slam_types::OdometryFactor2D& new_odom_factor) {
     CHECK_EQ(new_node.node_idx,
              (*new_solution)[new_solution->size() - 1].node_idx);
     CHECK_EQ(new_node.node_idx, new_odom_factor.pose_j);
@@ -255,7 +255,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   }
 
   void UpdateProblemAndSolution(
-      slam_types::SLAMNode2D& new_node,
+      const slam_types::SLAMNode2D& new_node,
       std::vector<slam_types::SLAMNodeSolution2D>* new_solution) {
     CHECK_EQ(new_node.node_idx,
              (*new_solution)[new_solution->size() - 1].node_idx);
