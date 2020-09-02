@@ -2,7 +2,6 @@
 // Created by jack on 11/24/19.
 //
 
-
 #include "gtest/gtest.h"
 #include "eigen3/Eigen/Dense"
 #include "../src/solver.h"
