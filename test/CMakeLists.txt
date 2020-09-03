@@ -8,7 +8,7 @@ macro(package_add_test TESTNAME)
     add_dependencies(${TESTNAME} ${catkin_EXPORTED_TARGETS})
 endmacro()
 
-if (CATKIN_ENABLED_TESTING)
+if (CATKIN_ENABLE_TESTING)
   catkin_add_gtest(solver_test solver_test.cc)
   target_link_libraries(solver_test ${catkin_LIBRARIES})
   add_dependencies(solver_test ${catkin_EXPORTED_TARGETS})
