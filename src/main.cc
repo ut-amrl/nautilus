@@ -133,23 +133,6 @@ void SignalHandler(int signum) {
   exit(0);
 }
 
-void PopulateSLAMProblem(SLAMProblem2D* slam_problem,
-                         nautilus::Solver* solver) {
-  // Iteratively add all the nodes and odometry factors.
-  CHECK_EQ(slam_problem->nodes.size(),
-           slam_problem->odometry_factors.size() + 1);
-  size_t node_index = 0;
-  for (; node_index < slam_problem->nodes.size(); node_index++) {
-    if (node_index == 0) {
-      solver->AddSlamNode(slam_problem->nodes[0]);
-      continue;
-    }
-    solver->AddSLAMNodeOdom(slam_problem->nodes[node_index],
-                            slam_problem->odometry_factors[node_index - 1]);
-  }
-  std::cout << "Nodes added: " << node_index + 1 << std::endl;
-}
-
 int main(int argc, char** argv) {
   google::InitGoogleLogging(*argv);
   google::ParseCommandLineFlags(&argc, &argv, false);
@@ -171,8 +154,7 @@ int main(int argc, char** argv) {
       << " Not enough nodes were processed, you probably didn't specify the "
          "correct topics!\n";
   // Load all the residuals into the problem and run to get initial solution.
-  nautilus::Solver solver(n);
-  PopulateSLAMProblem(&slam_problem, &solver);
+  nautilus::Solver solver(&n, slam_problem);
   if (FLAGS_solution_poses != "") {
     std::cout << "Loading solution poses; skipping SLAM solving step."
               << std::endl;
@@ -182,7 +164,7 @@ int main(int argc, char** argv) {
     solver.SolveSLAM();
   }
 
-  std::cout << "Waiting for Loop Closure input" << std::endl;
+  std::cout << "Waiting for Loop Closure input..." << std::endl;
   ros::Subscriber hitl_sub = n.subscribe(
       CONFIG_hitl_lc_topic, 10, &nautilus::Solver::HitlCallback, &solver);
   ros::Subscriber write_sub = n.subscribe(

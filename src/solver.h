@@ -69,7 +69,7 @@ struct CeresInformation {
 class Solver {
  public:
   Solver() = delete;
-  Solver(ros::NodeHandle& n);
+  Solver(ros::NodeHandle* n, const slam_types::SLAMProblem2D& slam_problem);
   std::vector<slam_types::SLAMNodeSolution2D> SolveSLAM();
   double GetPointCorrespondences(
       const slam_types::LidarFactor& source_lidar,
@@ -97,14 +97,12 @@ class Solver {
   slam_types::OdometryFactor2D GetTotalOdomChange(
       const std::vector<slam_types::OdometryFactor2D>& factors);
 
+  ros::NodeHandle* n_;
   slam_types::SLAMProblem2D problem_;
   std::vector<slam_types::OdometryFactor2D> initial_odometry_factors_;
   std::vector<slam_types::SLAMNodeSolution2D> solution_;
-  ros::NodeHandle n_;
   std::vector<ds::HitlLCConstraint> hitl_constraints_;
   std::unique_ptr<VisualizationCallback> vis_callback_;
-  std::vector<ds::LearnedKeyframe> keyframes_;
-  CorrelativeScanMatcher scan_matcher_;
   CeresInformation ceres_information_;
 };
 }  // namespace nautilus

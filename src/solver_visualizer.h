@@ -13,9 +13,8 @@ namespace nautilus {
 
 class VisualizationCallback : public ceres::IterationCallback {
  public:
-  VisualizationCallback(std::vector<ds::LearnedKeyframe>& keyframes,
-                        ros::NodeHandle& n)
-      : keyframes(keyframes) {
+  explicit VisualizationCallback(ros::NodeHandle* n_ptr) {
+    ros::NodeHandle& n = *n_ptr;
     pointcloud_helpers::InitPointcloud(&all_points_marker);
     pointcloud_helpers::InitPointcloud(&new_points_marker);
     pointcloud_helpers::InitPointcloud(&keyframe_marker);
@@ -188,18 +187,6 @@ class VisualizationCallback : public ceres::IterationCallback {
       }
     }
     PubConstraintPointclouds();
-    PubKeyframes();
-  }
-
-  void PubKeyframes() {
-    std::vector<Eigen::Vector2f> poses;
-    for (const ds::LearnedKeyframe& frame : keyframes) {
-      // std::cout << "Frame #: " << frame.node_idx << std::endl;
-      const double* pose_arr = (*solution)[frame.node_idx].pose;
-      Eigen::Vector2f pose_point(pose_arr[0], pose_arr[1]);
-      poses.push_back(pose_point);
-    }
-    pointcloud_helpers::PublishPointcloud(poses, keyframe_marker, keyframe_pub);
   }
 
   void AddPosePointcloud(std::vector<Eigen::Vector2f>& pointcloud,
@@ -270,7 +257,6 @@ class VisualizationCallback : public ceres::IterationCallback {
   std::vector<Eigen::Vector2f> all_points;
   slam_types::SLAMProblem2D problem;
   std::vector<slam_types::SLAMNodeSolution2D>* solution;
-  std::vector<ds::LearnedKeyframe>& keyframes;
   ros::Publisher point_pub;
   ros::Publisher pose_pub;
   ros::Publisher match_pub;

@@ -53,10 +53,21 @@ namespace nautilus {
 
 /* Solver takes in a ros node handle to be used for sending out debugging
  * information*/
-Solver::Solver(ros::NodeHandle& n)
-    : n_(n),
-      vis_callback_(new VisualizationCallback(keyframes_, n_)),
-      scan_matcher_(30, 2, 0.3, 0.01) {}
+
+Solver::Solver(ros::NodeHandle* n,
+               const slam_types::SLAMProblem2D& slam_problem)
+    : n_(n), vis_callback_(new VisualizationCallback(n_)) {
+  // Iteratively add all the nodes and odometry factors.
+  CHECK_EQ(slam_problem.nodes.size(), slam_problem.odometry_factors.size() + 1);
+  CHECK_GE(slam_problem.nodes.size(), 1);
+  this->AddSlamNode(slam_problem.nodes.front());
+  size_t node_index = 1;
+  for (; node_index < slam_problem.nodes.size(); node_index++) {
+    this->AddSLAMNodeOdom(slam_problem.nodes[node_index],
+                          slam_problem.odometry_factors[node_index - 1]);
+  }
+  std::cout << "Nodes added: " << node_index + 1 << std::endl;
+}
 
 void Solver::AddSLAMNodeOdom(const SLAMNode2D& node,
                              const OdometryFactor2D& odom_factor_to_node) {
@@ -408,8 +419,8 @@ void Solver::AddHITLResiduals(ceres::Problem* problem) {
 }
 
 void Solver::HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr) {
-  problem_.odometry_factors = GetSolvedOdomFactors();
   const HitlSlamInputMsg hitl_msg = *hitl_ptr;
+  problem_.odometry_factors = GetSolvedOdomFactors();
   // Get the poses that belong to this input.
   const ds::HitlLCConstraint colinear_constraint =
       GetRelevantPosesForHITL(hitl_msg);
@@ -520,7 +531,7 @@ void Solver::Vectorize(const WriteMsgConstPtr& msg) {
                                 0.00,
                                 &line_mark);
   ros::Publisher lines_pub =
-      n_.advertise<visualization_msgs::Marker>("/debug_lines", 10);
+      n_->advertise<visualization_msgs::Marker>("/debug_lines", 10);
   for (const auto& line : lines) {
     Vector3f line_start(line.start_point.x(), line.start_point.y(), 0.0);
     Vector3f line_end(line.end_point.x(), line.end_point.y(), 0.0);
