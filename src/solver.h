@@ -87,9 +87,6 @@ class Solver {
   ds::HitlLCConstraint GetRelevantPosesForHITL(
       const HitlSlamInputMsg& hitl_msg);
   std::vector<slam_types::OdometryFactor2D> GetSolvedOdomFactors();
-  void AddSLAMNodeOdom(const slam_types::SLAMNode2D& node,
-                       const slam_types::OdometryFactor2D& odom_factor_to_node);
-  void AddSlamNode(const slam_types::SLAMNode2D& node);
   void LoadSLAMSolution(const std::string& poses_path);
 
  private:

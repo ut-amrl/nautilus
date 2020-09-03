@@ -56,34 +56,17 @@ namespace nautilus {
 
 Solver::Solver(ros::NodeHandle* n,
                const slam_types::SLAMProblem2D& slam_problem)
-    : n_(n), vis_callback_(new VisualizationCallback(n_)) {
+    : n_(n),
+      problem_(slam_problem),
+      vis_callback_(new VisualizationCallback(n_, slam_problem, solution_)) {
   // Iteratively add all the nodes and odometry factors.
   CHECK_EQ(slam_problem.nodes.size(), slam_problem.odometry_factors.size() + 1);
   CHECK_GE(slam_problem.nodes.size(), 1);
-  this->AddSlamNode(slam_problem.nodes.front());
-  size_t node_index = 1;
-  for (; node_index < slam_problem.nodes.size(); node_index++) {
-    this->AddSLAMNodeOdom(slam_problem.nodes[node_index],
-                          slam_problem.odometry_factors[node_index - 1]);
+  initial_odometry_factors_ = slam_problem.odometry_factors;
+  for (const auto& node : slam_problem.nodes) {
+    solution_.emplace_back(SLAMNodeSolution2D(node));
   }
-  std::cout << "Nodes added: " << node_index + 1 << std::endl;
-}
-
-void Solver::AddSLAMNodeOdom(const SLAMNode2D& node,
-                             const OdometryFactor2D& odom_factor_to_node) {
-  CHECK_EQ(node.node_idx, odom_factor_to_node.pose_j);
-  problem_.nodes.push_back(node);
-  problem_.odometry_factors.push_back(odom_factor_to_node);
-  initial_odometry_factors_.push_back(odom_factor_to_node);
-  solution_.emplace_back(SLAMNodeSolution2D(node));
-  vis_callback_->UpdateProblemAndSolution(
-      node, &solution_, odom_factor_to_node);
-}
-
-void Solver::AddSlamNode(const SLAMNode2D& node) {
-  problem_.nodes.push_back(node);
-  solution_.emplace_back(SLAMNodeSolution2D(node));
-  vis_callback_->UpdateProblemAndSolution(node, &solution_);
+  std::cout << "Nodes added: " << slam_problem.nodes.size() << std::endl;
 }
 
 /*----------------------------------------------------------------------------*

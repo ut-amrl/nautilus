@@ -13,7 +13,11 @@ namespace nautilus {
 
 class VisualizationCallback : public ceres::IterationCallback {
  public:
-  explicit VisualizationCallback(ros::NodeHandle* n_ptr) {
+  explicit VisualizationCallback(
+      ros::NodeHandle* n_ptr,
+      const slam_types::SLAMProblem2D& problem,
+      std::vector<slam_types::SLAMNodeSolution2D>& solution)
+      : problem(problem), solution(solution) {
     ros::NodeHandle& n = *n_ptr;
     pointcloud_helpers::InitPointcloud(&all_points_marker);
     pointcloud_helpers::InitPointcloud(&new_points_marker);
@@ -72,7 +76,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   }
 
   void PubVisualization() {
-    const std::vector<slam_types::SLAMNodeSolution2D>& solution_c = *solution;
+    const std::vector<slam_types::SLAMNodeSolution2D>& solution_c = solution;
     std::vector<Eigen::Vector2f> new_points;
     gui_helpers::ClearMarker(&key_pose_array);
     pose_array.poses.clear();
@@ -138,7 +142,7 @@ class VisualizationCallback : public ceres::IterationCallback {
   }
 
   void PubConstraintVisualization() {
-    const std::vector<slam_types::SLAMNodeSolution2D>& solution_c = *solution;
+    const std::vector<slam_types::SLAMNodeSolution2D>& solution_c = solution;
     std::vector<Eigen::Vector2f> line_a_poses;
     for (const ds::HitlLCConstraint& hitl_constraint : hitl_constraints) {
       std::vector<Eigen::Vector2f> a_points;
@@ -192,12 +196,11 @@ class VisualizationCallback : public ceres::IterationCallback {
   void AddPosePointcloud(std::vector<Eigen::Vector2f>& pointcloud,
                          const ds::LCPose& pose) {
     size_t node_idx = pose.node_idx;
-    std::vector<slam_types::SLAMNodeSolution2D> solution_c = *solution;
+    const std::vector<slam_types::SLAMNodeSolution2D> solution_c = solution;
     std::vector<Eigen::Vector2f> p_cloud =
         problem.nodes[node_idx].lidar_factor.pointcloud;
-    double* pose_arr = solution_c[node_idx].pose;
-    Eigen::Affine2f robot_to_world =
-        PoseArrayToAffine(&pose_arr[2], &pose_arr[0]).cast<float>();
+    const double* pose_arr = solution_c[node_idx].pose;
+    Eigen::Affine2f robot_to_world = PoseArrayToAffine(pose_arr).cast<float>();
     for (const Eigen::Vector2f& p : p_cloud) {
       pointcloud.push_back(robot_to_world * p);
     }
@@ -228,35 +231,12 @@ class VisualizationCallback : public ceres::IterationCallback {
     return ceres::SOLVER_CONTINUE;
   }
 
-  void UpdateProblemAndSolution(
-      const slam_types::SLAMNode2D& new_node,
-      std::vector<slam_types::SLAMNodeSolution2D>* new_solution,
-      const slam_types::OdometryFactor2D& new_odom_factor) {
-    CHECK_EQ(new_node.node_idx,
-             (*new_solution)[new_solution->size() - 1].node_idx);
-    CHECK_EQ(new_node.node_idx, new_odom_factor.pose_j);
-    problem.nodes.push_back(new_node);
-    problem.odometry_factors.push_back(new_odom_factor);
-    solution = new_solution;
-    CHECK_EQ(solution->size(), problem.nodes.size());
-  }
-
-  void UpdateProblemAndSolution(
-      const slam_types::SLAMNode2D& new_node,
-      std::vector<slam_types::SLAMNodeSolution2D>* new_solution) {
-    CHECK_EQ(new_node.node_idx,
-             (*new_solution)[new_solution->size() - 1].node_idx);
-    problem.nodes.push_back(new_node);
-    solution = new_solution;
-    CHECK_EQ(solution->size(), problem.nodes.size());
-  }
-
  private:
   sensor_msgs::PointCloud2 all_points_marker;
   sensor_msgs::PointCloud2 new_points_marker;
   std::vector<Eigen::Vector2f> all_points;
   slam_types::SLAMProblem2D problem;
-  std::vector<slam_types::SLAMNodeSolution2D>* solution;
+  const std::vector<slam_types::SLAMNodeSolution2D>& solution;
   ros::Publisher point_pub;
   ros::Publisher pose_pub;
   ros::Publisher match_pub;
