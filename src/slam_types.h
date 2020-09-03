@@ -33,7 +33,9 @@
 #include "math_util.h"
 #include "sensor_msgs/LaserScan.h"
 
-namespace nautilus::slam_types {
+namespace nautilus {
+
+namespace slam_types {
 
 struct LidarFactor {
   // IDs of the poses
@@ -157,6 +159,8 @@ struct SLAMNodeSolution2D {
   SLAMNodeSolution2D() = default;
 };
 
-}  // namespace nautilus::slam_types
+}  // namespace slam_types
+}  // namespace nautilus
 
 #endif  // __SLAM_TYPES_H__
+
