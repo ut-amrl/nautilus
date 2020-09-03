@@ -59,6 +59,7 @@ Solver::Solver(ros::NodeHandle* n,
     : n_(n),
       problem_(slam_problem),
       vis_callback_(new VisualizationCallback(n_, slam_problem, solution_)) {
+  CHECK_NOTNULL(n_);
   // Iteratively add all the nodes and odometry factors.
   CHECK_EQ(slam_problem.nodes.size(), slam_problem.odometry_factors.size() + 1);
   CHECK_GE(slam_problem.nodes.size(), 1);

@@ -70,8 +70,7 @@ bool TryProcessOdom(const rosbag::MessageInstance& message,
   return false;
 }
 
-SLAMProblem2D ProcessBagFile(const std::string& bag_path,
-                             const ros::NodeHandle& n) {
+SLAMProblem2D ProcessBagFile(const std::string& bag_path) {
   /*
    * Loads and processes the bag file pulling out the lidar data
    * and the odometry data. Keeps track of the current pose and produces
@@ -149,7 +148,7 @@ int main(int argc, char** argv) {
   ros::NodeHandle n;
   signal(SIGINT, SignalHandler);
   // Load and pre-process the data.
-  SLAMProblem2D slam_problem = ProcessBagFile(CONFIG_bag_path, n);
+  SLAMProblem2D slam_problem = ProcessBagFile(CONFIG_bag_path);
   CHECK_GT(slam_problem.nodes.size(), 1)
       << " Not enough nodes were processed, you probably didn't specify the "
          "correct topics!\n";
