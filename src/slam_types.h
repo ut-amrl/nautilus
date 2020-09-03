@@ -95,7 +95,7 @@ struct OdometryFactor2D {
   // Convenience constructor: initialize everything.
   OdometryFactor2D(uint64_t pose_i,
                    uint64_t pose_j,
-                   Eigen::Vector2f& translation,
+                   const Eigen::Vector2f& translation,
                    float rotation)
       : pose_i(pose_i),
         pose_j(pose_j),

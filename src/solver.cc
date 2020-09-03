@@ -26,8 +26,6 @@
 #include "./cimg_debug.h"
 #include "./solver.h"
 
-#define DEBUG true
-
 using ceres::AutoDiffCostFunction;
 using Eigen::Affine2f;
 using Eigen::Matrix2f;
@@ -55,7 +53,6 @@ namespace nautilus {
 
 /* Solver takes in a ros node handle to be used for sending out debugging
  * information*/
-// TODO: Upped the Scanmatcher resolution to 0.01 for ChiSquare.
 Solver::Solver(ros::NodeHandle& n)
     : n_(n),
       vis_callback_(new VisualizationCallback(keyframes_, n_)),
@@ -100,18 +97,18 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
 
   // While our solution moves more than the stopping_accuracy,
   // continue to optimize.
-  CHECK_GT(config_.CONFIG_lidar_constraint_amount_min, 0);
-  CHECK_GE(config_.CONFIG_lidar_constraint_amount_max,
-           config_.CONFIG_lidar_constraint_amount_min);
-  const size_t window_min = config_.CONFIG_lidar_constraint_amount_min;
-  const size_t window_max = config_.CONFIG_lidar_constraint_amount_max;
+  CHECK_GT(config::CONFIG_lidar_constraint_amount_min, 0);
+  CHECK_GE(config::CONFIG_lidar_constraint_amount_max,
+           config::CONFIG_lidar_constraint_amount_min);
+  const size_t window_min = config::CONFIG_lidar_constraint_amount_min;
+  const size_t window_max = config::CONFIG_lidar_constraint_amount_max;
   for (size_t window_size = window_min; window_size <= window_max;
        window_size++) {
     LOG(INFO) << "Using window size: " << window_size << std::endl;
     while (abs(difference - last_difference) >
-           config_.CONFIG_accuracy_change_stop_threshold) {
+           config::CONFIG_accuracy_change_stop_threshold) {
       std::cout << "Solve diff " << abs(difference - last_difference)
-                << " Target: " << config_.CONFIG_accuracy_change_stop_threshold
+                << " Target: " << config::CONFIG_accuracy_change_stop_threshold
                 << std::endl;
       vis_callback_->ClearNormals();
       last_difference = difference;
@@ -120,21 +117,14 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
       // Add all the odometry constraints between our poses.
       AddOdomFactors(ceres_information_.problem.get(),
                      problem_.odometry_factors,
-                     config_.CONFIG_translation_weight,
-                     config_.CONFIG_rotation_weight);
+                     config::CONFIG_translation_weight,
+                     config::CONFIG_rotation_weight);
       // For every SLAM node we want to optimize it against the past
       // lidar constraint amount nodes.
       for (size_t node_i_index = 0; node_i_index < problem_.nodes.size();
            node_i_index++) {
-        std::mutex problem_mutex;
         const size_t node_j_start_idx =
             (node_i_index > window_size) ? (node_i_index - window_size) : 0;
-#pragma omp parallel for default(none) shared(problem_mutex,      \
-                                              vis_callback_,      \
-                                              problem_,           \
-                                              ceres_information_, \
-                                              node_i_index,       \
-                                              difference)
         for (size_t node_j_index = node_j_start_idx;
              node_j_index < node_i_index;
              node_j_index++) {
@@ -156,7 +146,6 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
               correspondence.source_normals,
               correspondence.target_normals);
           // Add the correspondences as constraints in the optimization problem.
-          problem_mutex.lock();
           difference += local_difference;
           ceres::ResidualBlockId id =
               ceres_information_.problem->AddResidualBlock(
@@ -166,7 +155,6 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
                   correspondence.target_pose);
           ceres_information_.res_descriptors.emplace_back(
               node_i_index, node_j_index, id);
-          problem_mutex.unlock();
         }
       }
       // Normalize the difference so it's an average over each node.
@@ -194,7 +182,7 @@ void Solver::AddOdomFactors(ceres::Problem* ceres_problem,
     ceres::ResidualBlockId id = ceres_problem->AddResidualBlock(
         residuals::OdometryResidual::create(
             odom_factor, trans_weight, rot_weight),
-        NULL,
+        nullptr,
         solution_[odom_factor.pose_i].pose,
         solution_[odom_factor.pose_j].pose);
     ceres_information_.res_descriptors.emplace_back(
@@ -252,15 +240,21 @@ double Solver::GetPointCorrespondences(
     double* source_pose,
     double* target_pose,
     ds::PointCorrespondences* point_correspondences) {
-  // Summed differences between point correspondences.
-  double difference = 0.0;
   // Affine transformations from the two pose's reference frames.
-  Affine2f source_to_world = PoseArrayToAffine(source_pose).cast<float>();
-  Affine2f target_to_world = PoseArrayToAffine(target_pose).cast<float>();
+  const Affine2f source_to_world = PoseArrayToAffine(source_pose).cast<float>();
+  const Affine2f target_to_world = PoseArrayToAffine(target_pose).cast<float>();
   // Loop over all the points in the source pointcloud,
   // match each point to the closest point in the target pointcloud
   // who's normal is within a certain threshold.
-  for (const Vector2f& source_point : source_lidar.pointcloud) {
+
+  const float small_threshold = config::CONFIG_outlier_threshold / 6.0f;
+  const float large_threshold = config::CONFIG_outlier_threshold;
+
+  // Summed differences between point correspondences.
+  double difference = 0.0;
+
+  for (size_t i = 0; i < source_lidar.pointcloud.size(); ++i) {
+    const Vector2f& source_point = source_lidar.pointcloud[i];
     // Transform the source point to the target frame.
     const Vector2f source_point_transformed =
         target_to_world.inverse() * source_to_world * source_point;
@@ -269,24 +263,23 @@ double Solver::GetPointCorrespondences(
     KDNodeValue<float, 2> source_point_with_normal;
 
     // For now we assume that a match is within 1/6 of the threshold.
-    float dist =
-        ComputeNormalAndClosestWithDist(source_lidar,
-                                        target_lidar,
-                                        source_point,
-                                        source_point_transformed,
-                                        config_.CONFIG_outlier_threshold / 6.0f,
-                                        &closest_target,
-                                        &source_point_with_normal);
-    if (dist >= config_.CONFIG_outlier_threshold / 6.0f) {
+    float dist = ComputeNormalAndClosestWithDist(source_lidar,
+                                                 target_lidar,
+                                                 source_point,
+                                                 source_point_transformed,
+                                                 small_threshold,
+                                                 &closest_target,
+                                                 &source_point_with_normal);
+    if (dist >= small_threshold) {
       // Try again with full threshold.
       dist = ComputeNormalAndClosestWithDist(source_lidar,
                                              target_lidar,
                                              source_point,
                                              source_point_transformed,
-                                             config_.CONFIG_outlier_threshold,
+                                             large_threshold,
                                              &closest_target,
                                              &source_point_with_normal);
-      if (dist >= config_.CONFIG_outlier_threshold) {
+      if (dist >= large_threshold) {
         difference += dist;
         continue;
       }
@@ -308,19 +301,21 @@ double Solver::GetPointCorrespondences(
 vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
   CHECK_GT(solution_.size(), 1);
   vector<OdometryFactor2D> factors;
-  for (uint64_t index = 1; index < solution_.size(); index++) {
+  for (size_t index = 1; index < solution_.size(); index++) {
     // Get the change in translation.
-    for (uint64_t prev_idx = std::max(
-             (uint64_t)0, index - config_.CONFIG_lidar_constraint_amount_max);
-         prev_idx < index;
-         prev_idx++) {
-      Vector2f prev_loc(solution_[prev_idx].pose[0],
-                        solution_[prev_idx].pose[1]);
-      Vector2f loc(solution_[index].pose[0], solution_[index].pose[1]);
+    const size_t prev_idx_start =
+        (index >
+         static_cast<size_t>(config::CONFIG_lidar_constraint_amount_max))
+            ? (index - config::CONFIG_lidar_constraint_amount_max)
+            : 0;
+    for (size_t prev_idx = prev_idx_start; prev_idx < index; prev_idx++) {
+      const Vector2f loc(solution_[index].pose[0], solution_[index].pose[1]);
+      const Vector2f prev_loc(solution_[prev_idx].pose[0],
+                              solution_[prev_idx].pose[1]);
 
-      double rot_change =
-          solution_[index].pose[2] - solution_[prev_idx].pose[2];
-      Vector2f trans_change = loc - prev_loc;
+      const auto rot_change = static_cast<float>(solution_[index].pose[2] -
+                                                 solution_[prev_idx].pose[2]);
+      const Vector2f trans_change = loc - prev_loc;
       factors.emplace_back(prev_idx, index, trans_change, rot_change);
     }
   }
@@ -329,8 +324,7 @@ vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
 
 OdometryFactor2D Solver::GetTotalOdomChange(
     const std::vector<OdometryFactor2D>& factors) {
-  Vector2f init_trans(0, 0);
-  OdometryFactor2D factor(0, factors.size(), init_trans, 0);
+  OdometryFactor2D factor(0, factors.size(), {0, 0}, 0);
   for (const auto& curr_factor : factors) {
     factor.translation += curr_factor.translation;
     factor.rotation += curr_factor.rotation;
@@ -372,18 +366,18 @@ ds::HitlLCConstraint Solver::GetRelevantPosesForHITL(
          problem_.nodes[node_idx].lidar_factor.pointcloud) {
       Vector2f point_transformed = node_to_world * point;
       if (DistanceToLineSegment(point_transformed, lines[0]) <=
-          config_.CONFIG_hitl_line_width) {
+          config::CONFIG_hitl_line_width) {
         points_on_a.push_back(point);
       } else if (DistanceToLineSegment(point_transformed, lines[1]) <=
-                 config_.CONFIG_hitl_line_width) {
+                 config::CONFIG_hitl_line_width) {
         points_on_b.push_back(point);
       }
     }
     if (points_on_a.size() >=
-        static_cast<size_t>(config_.CONFIG_hitl_pose_point_threshold)) {
+        static_cast<size_t>(config::CONFIG_hitl_pose_point_threshold)) {
       hitl_constraint.line_a_poses.emplace_back(node_idx, points_on_a);
     } else if (points_on_b.size() >=
-               static_cast<size_t>(config_.CONFIG_hitl_pose_point_threshold)) {
+               static_cast<size_t>(config::CONFIG_hitl_pose_point_threshold)) {
       hitl_constraint.line_b_poses.emplace_back(node_idx, points_on_b);
     }
   }
@@ -481,13 +475,13 @@ void Solver::LoadSLAMSolution(const std::string& poses_path) {
 }
 
 void Solver::WriteCallback(const WriteMsgConstPtr& msg) {
-  if (config_.CONFIG_pose_output_file == "") {
+  if (config::CONFIG_pose_output_file == "") {
     std::cout << "No output file specified, not writing!" << std::endl;
     return;
   }
   std::cout << "Writing Poses" << std::endl;
   std::ofstream output_file;
-  output_file.open(config_.CONFIG_pose_output_file);
+  output_file.open(config::CONFIG_pose_output_file);
   for (const SLAMNodeSolution2D& sol_node : solution_) {
     output_file << std::fixed << sol_node.timestamp << " " << sol_node.pose[0]
                 << " " << sol_node.pose[1] << " " << sol_node.pose[2]
@@ -537,10 +531,10 @@ void Solver::Vectorize(const WriteMsgConstPtr& msg) {
   std::cout << "Created map: Pointcloud size: " << whole_pointcloud.size()
             << "\tLines size: " << lines.size() << std::endl;
 
-  if (config_.CONFIG_map_output_file != "") {
+  if (config::CONFIG_map_output_file != "") {
     std::cout << "Writing map to file..." << std::endl;
     std::ofstream output_file;
-    output_file.open(config_.CONFIG_map_output_file);
+    output_file.open(config::CONFIG_map_output_file);
     for (auto line : lines) {
       output_file << line.start_point.x() << "," << line.start_point.y() << ","
                   << line.end_point.x() << "," << line.end_point.y()

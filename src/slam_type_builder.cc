@@ -34,13 +34,13 @@ void SLAMTypeBuilder::AddOdomFactor(
 
 void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
   // We only want one odometry between each lidar callback.
-  if (((config_.CONFIG_diff_odom && diff_tracking_.ReadyForLidar()) ||
+  if (((config::CONFIG_diff_odom && diff_tracking_.ReadyForLidar()) ||
        odom_tracking_.ReadyForLidar()) &&
       !Done()) {
     // Transform this laser scan into a point cloud.s
-    double max_range = (config_.CONFIG_max_lidar_range <= 0)
+    double max_range = (config::CONFIG_max_lidar_range <= 0)
                            ? laser_scan.range_max
-                           : config_.CONFIG_max_lidar_range;
+                           : config::CONFIG_max_lidar_range;
 
     // TODO wrap in a config-based if
     const size_t truncation_size = 55;
@@ -63,13 +63,13 @@ void SLAMTypeBuilder::LidarCallback(sensor_msgs::LaserScan& laser_scan) {
     // Reset the initial values for everything,
     // we should start at 0 for everything.
     if (pose_id_ == 0) {
-      if (config_.CONFIG_diff_odom) {
+      if (config::CONFIG_diff_odom) {
         diff_tracking_.ResetInits();
       } else {
         odom_tracking_.ResetInits();
       }
     }
-    if (config_.CONFIG_diff_odom) {
+    if (config::CONFIG_diff_odom) {
       pose = diff_tracking_.GetPose();
     } else {
       pose = odom_tracking_.GetPose();
@@ -171,5 +171,5 @@ RobotPose2D AbsoluteOdometryTracking::GetPose() {
 }
 
 bool SLAMTypeBuilder::Done() {
-  return pose_id_ >= static_cast<uint64_t>(config_.CONFIG_max_pose_num);
+  return pose_id_ >= static_cast<uint64_t>(config::CONFIG_max_pose_num);
 }

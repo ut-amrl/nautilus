@@ -31,6 +31,26 @@
 
 namespace nautilus {
 
+namespace config {
+CONFIG_DOUBLE(translation_weight, "translation_weight");
+CONFIG_DOUBLE(rotation_weight, "rotation_weight");
+CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
+CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
+CONFIG_DOUBLE(lc_base_max_range, "lc_base_max_range");
+CONFIG_DOUBLE(lc_max_range_scaling, "lc_max_range_scaling");
+CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
+CONFIG_STRING(pose_output_file, "pose_output_file");
+CONFIG_STRING(map_output_file, "map_output_file");
+CONFIG_DOUBLE(accuracy_change_stop_threshold, "accuracy_change_stop_threshold");
+CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
+CONFIG_DOUBLE(lc_match_threshold, "lc_match_threshold");
+CONFIG_INT(lidar_constraint_amount_min, "lidar_constraint_amount_min");
+CONFIG_INT(lidar_constraint_amount_max, "lidar_constraint_amount_max");
+CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
+CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
+CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
+}  // namespace config
+
 struct CeresInformation {
   CeresInformation()
       : cost_valid(false),
@@ -44,33 +64,6 @@ struct CeresInformation {
   double cost;
   std::shared_ptr<ceres::Problem> problem;
   std::vector<ds::ResidualDesc> res_descriptors;
-};
-
-struct SolverConfig {
-  CONFIG_DOUBLE(translation_weight, "translation_weight");
-  CONFIG_DOUBLE(rotation_weight, "rotation_weight");
-  CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
-  CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
-  CONFIG_DOUBLE(lc_base_max_range, "lc_base_max_range");
-  CONFIG_DOUBLE(lc_max_range_scaling, "lc_max_range_scaling");
-  CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
-  CONFIG_STRING(pose_output_file, "pose_output_file");
-  CONFIG_STRING(map_output_file, "map_output_file");
-  CONFIG_DOUBLE(accuracy_change_stop_threshold,
-                "accuracy_change_stop_threshold");
-  CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
-  CONFIG_DOUBLE(lc_match_threshold, "lc_match_threshold");
-  CONFIG_INT(lidar_constraint_amount_min, "lidar_constraint_amount_min");
-  CONFIG_INT(lidar_constraint_amount_max, "lidar_constraint_amount_max");
-  CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
-  CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
-  CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
-
-  SolverConfig() {
-    std::cout << "Solver Waiting..." << std::endl;
-    config_reader::WaitForInit();
-    std::cout << "--- Done Waiting ---" << std::endl;
-  }
 };
 
 class Solver {
@@ -100,13 +93,9 @@ class Solver {
   void LoadSLAMSolution(const std::string& poses_path);
 
  private:
-  double GetChiSquareCost(uint64_t node_a, uint64_t node_b);
   void AddHITLResiduals(ceres::Problem* problem);
   slam_types::OdometryFactor2D GetTotalOdomChange(
       const std::vector<slam_types::OdometryFactor2D>& factors);
-  bool SimilarScans(const uint64_t node_a,
-                    const uint64_t node_b,
-                    const double certainty);
 
   slam_types::SLAMProblem2D problem_;
   std::vector<slam_types::OdometryFactor2D> initial_odometry_factors_;
@@ -117,7 +106,6 @@ class Solver {
   std::vector<ds::LearnedKeyframe> keyframes_;
   CorrelativeScanMatcher scan_matcher_;
   CeresInformation ceres_information_;
-  SolverConfig config_;
 };
 }  // namespace nautilus
 #endif  // SRC_SOLVER_H_
