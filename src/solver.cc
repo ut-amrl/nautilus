@@ -108,9 +108,9 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
       vis_callback_->ClearNormals();
       last_difference = difference;
       difference = 0;
-      ceres_information_.ResetProblem();
+      CeresInformation ceres_information;
       // Add all the odometry constraints between our poses.
-      AddOdomFactors(ceres_information_.problem.get(),
+      AddOdomFactors(&ceres_information,
                      problem_.odometry_factors,
                      config::CONFIG_translation_weight,
                      config::CONFIG_rotation_weight);
@@ -143,19 +143,19 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
           // Add the correspondences as constraints in the optimization problem.
           difference += local_difference;
           ceres::ResidualBlockId id =
-              ceres_information_.problem->AddResidualBlock(
+              ceres_information.problem->AddResidualBlock(
                   lidar_residual,
                   nullptr,
                   correspondence.source_pose,
                   correspondence.target_pose);
-          ceres_information_.res_descriptors.emplace_back(
+          ceres_information.res_descriptors.emplace_back(
               node_i_index, node_j_index, id);
         }
       }
       // Normalize the difference so it's an average over each node.
       difference /= problem_.nodes.size();
-      AddHITLResiduals(ceres_information_.problem.get());
-      ceres::Solve(options, ceres_information_.problem.get(), &summary);
+      AddHITLResiduals(ceres_information.problem.get());
+      ceres::Solve(options, ceres_information.problem.get(), &summary);
     }
   }
   // Call the visualization once more to see the finished optimization.
@@ -166,25 +166,27 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
   return solution_;
 }
 
-void Solver::AddOdomFactors(ceres::Problem* ceres_problem,
-                            vector<OdometryFactor2D> factors,
+void Solver::AddOdomFactors(CeresInformation* ceres_information,
+                            const vector<OdometryFactor2D>& factors,
                             double trans_weight,
                             double rot_weight) {
+  CHECK_NOTNULL(ceres_information);
   for (const OdometryFactor2D& odom_factor : factors) {
     CHECK_LT(odom_factor.pose_i, odom_factor.pose_j);
     CHECK_GT(solution_.size(), odom_factor.pose_i);
     CHECK_GT(solution_.size(), odom_factor.pose_j);
-    ceres::ResidualBlockId id = ceres_problem->AddResidualBlock(
+    ceres::ResidualBlockId id = ceres_information->problem->AddResidualBlock(
         residuals::OdometryResidual::create(
             odom_factor, trans_weight, rot_weight),
         nullptr,
         solution_[odom_factor.pose_i].pose,
         solution_[odom_factor.pose_j].pose);
-    ceres_information_.res_descriptors.emplace_back(
+    ceres_information->res_descriptors.emplace_back(
         odom_factor.pose_i, odom_factor.pose_j, id);
   }
   if (!solution_.empty()) {
-    ceres_problem->SetParameterBlockConstant(solution_.front().pose);
+    ceres_information->problem->SetParameterBlockConstant(
+        solution_.front().pose);
   }
 }
 

@@ -58,8 +58,6 @@ struct CeresInformation {
         problem(new ceres::Problem()),
         res_descriptors() {}
 
-  void ResetProblem() { *this = CeresInformation(); }
-
   bool cost_valid;
   double cost;
   std::shared_ptr<ceres::Problem> problem;
@@ -77,8 +75,8 @@ class Solver {
       double* source_pose,
       double* target_pose,
       ds::PointCorrespondences* point_correspondences);
-  void AddOdomFactors(ceres::Problem* ceres_problem,
-                      std::vector<slam_types::OdometryFactor2D> factors,
+  void AddOdomFactors(CeresInformation* ceres_information,
+                      const std::vector<slam_types::OdometryFactor2D>& factors,
                       double trans_weight,
                       double rot_weight);
   void HitlCallback(const HitlSlamInputMsgConstPtr& hitl_ptr);
@@ -100,7 +98,6 @@ class Solver {
   std::vector<slam_types::SLAMNodeSolution2D> solution_;
   std::vector<ds::HitlLCConstraint> hitl_constraints_;
   std::unique_ptr<VisualizationCallback> vis_callback_;
-  CeresInformation ceres_information_;
 };
 }  // namespace nautilus
 #endif  // SRC_SOLVER_H_
