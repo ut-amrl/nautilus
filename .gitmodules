@@ -1,12 +1,12 @@
 [submodule "third_party/learning-loop-closure"]
 	path = third_party/learning-loop-closure
-	url = https://github.com/ut-amrl/learning-loop-closure.git
+	url = ../../ut-amrl/learning-loop-closure.git
 [submodule "third_party/csm"]
 	path = third_party/csm
-	url = https://github.com/ut-amrl/correlative-scan-matching.git
+	url = ../../ut-amrl/correlative-scan-matching.git
 [submodule "third_party/vector_maps"]
 	path = third_party/vector_maps
-	url = https://github.com/ut-amrl/CuratingLongTermVectorMaps.git
+	url = ../../ut-amrl/CuratingLongTermVectorMaps.git
 [submodule "third_party/config-reader"]
 	path = third_party/config-reader
-	url = https://github.com/ut-amrl/config-reader.git
+	url = ../../ut-amrl/config-reader.git
