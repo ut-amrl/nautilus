@@ -11,7 +11,7 @@ SCRIPT_DIR=$(dirname $SCRIPT_PATH)
 THIRD_PARTY_DIR="$SCRIPT_DIR/third_party"
 # These are things that can be installed using apt.
 echo -e "\e[32mInstalling General APT Dependencies\e[39m"
-apt install cmake libgoogle-glog-dev libatlas-base-dev libsuitesparse-dev libgtest-dev curl libomp-dev libgtest-dev python-pip &>/dev/null
+apt install cmake libgoogle-glog-dev libatlas-base-dev libsuitesparse-dev libgtest-dev curl libomp-dev libgtest-dev python-pip qt5-default &>/dev/null
 # Install Eigen
 echo -e "\e[32mDownloading Eigen\e[39m"
 cd $THIRD_PARTY_DIR

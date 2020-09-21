@@ -371,6 +371,8 @@ vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
 }
 
 vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
+  std::cout << "Optimizing, Trans Weight: " << SolverConfig::CONFIG_translation_weight
+            << " Rotation Weight: " << SolverConfig::CONFIG_rotation_weight << std::endl;
   // Setup ceres for evaluation of the problem.
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
