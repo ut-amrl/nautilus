@@ -72,7 +72,7 @@ add_executable(${PROJECT_NAME} src/main.cc
 add_library(amrl_shared src/gui_helpers.cc
                         src/timer.cc)
 
-set(non_findable_libs gflags glog X11 m lua5.1 pthread csm vector_maps Boost::system)
+set(non_findable_libs gflags glog X11 m lua5.1 pthread csm vector_maps Boost::system stdc++)
 
 target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES}
                                        amrl_shared
