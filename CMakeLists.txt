@@ -24,6 +24,7 @@ ENDIF()
 # Find Dependencies #
 #####################
 
+SET(Ceres_DIR {PROJECT_SOURCE_DIR}/third_party/ceres)
 FIND_PACKAGE(Ceres REQUIRED)
 FIND_PACKAGE(OpenMP REQUIRED)
 FIND_PACKAGE(Boost REQUIRED COMPONENTS system)
@@ -33,7 +34,8 @@ SET(third_party_includes ${CMAKE_CURRENT_SOURCE_DIR}/third_party/csm/src
                          ${CMAKE_CURRENT_SOURCE_DIR}/third_party/vector_maps/src
                          ${CMAKE_CURRENT_SOURCE_DIR}/third_party/config-reader/include
                          ${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen
-                         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/learning-loop-closure)
+                         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/learning-loop-closure
+                         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ceres/ceres-solver-1.14.0/include)
 ######################
 # Message Generation #
 ######################
@@ -46,7 +48,7 @@ generate_messages(DEPENDENCIES std_msgs sensor_msgs geometry_msgs)
 ########################
 
 catkin_package(
-  INCLUDE_DIRS ${third_party_includes} ${CERES_INCLUDE_DIRS} 
+  INCLUDE_DIRS ${third_party_includes} ${CERES_INCLUDE_DIRS}
   LIBRARIES amrl_shared
   CATKIN_DEPENDS message_runtime std_msgs sensor_msgs geometry_msgs)
 
