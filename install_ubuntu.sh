@@ -37,8 +37,8 @@ tar zxf ceres.tar.gz &>/dev/null
 mkdir -p ceres
 cd ceres
 cmake ../ceres-solver-1.14.0 &>/dev/null
-make -j $(nproc) &>/dev/null
-make install &>/dev/null
+make -j $(nproc) &>/dev/nullaa
+make install -DEXPORT_BUILD_DIR=ON &>/dev/null
 cd ..
 mv ceres-solver-1.14.0 ceres/ceres-solver-1.14.0
 rm $CERES_TAR
