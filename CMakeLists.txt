@@ -24,7 +24,7 @@ ENDIF()
 # Find Dependencies #
 #####################
 
-SET(Ceres_DIR {PROJECT_SOURCE_DIR}/third_party/ceres)
+SET(Ceres_DIR {PROJECT_SOURCE_DIR}/third_party/ceres/ceres-solver-1.14.0/cmake)
 FIND_PACKAGE(Ceres REQUIRED)
 FIND_PACKAGE(OpenMP REQUIRED)
 FIND_PACKAGE(Boost REQUIRED COMPONENTS system)
