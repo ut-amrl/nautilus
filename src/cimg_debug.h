@@ -6,6 +6,7 @@
 #define ROS_DEBUG_TOOLS_CIMG_DEBUG_H
 
 #include <vector>
+#include "CImg.h"
 
 #include "CImg.h"
 
@@ -54,7 +55,12 @@ struct WrappedImage {
   CImg<double> GetDebugImage() const { return values; }
 };
 
+<<<<<<< HEAD
 inline WrappedImage GetTable(const vector<Vector2f>& pointcloud, double range,
+=======
+inline WrappedImage GetTable(const vector<Vector2f>& pointcloud,
+                             double range,
+>>>>>>> code_cleanup
                              double resolution) {
   WrappedImage table(range, resolution);
   for (const Vector2f& point : pointcloud) {

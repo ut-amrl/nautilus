@@ -63,12 +63,12 @@ LINK_DIRECTORIES(${PROJECT_SOURCE_DIR}/third_party/googletest/lib)
 # Make sure all our dependecies get built
 add_subdirectory(third_party)
 
-add_executable(${PROJECT_NAME} src/main.cc
+add_executable(${PROJECT_NAME} src/kdtree.cc
+                               src/main.cc
+                               src/normal_computation.cc
                                src/pointcloud_helpers.cc
-                               src/solver.cc
                                src/slam_type_builder.cc
-                               src/kdtree.cc
-                               src/normal_computation.cc)
+                               src/solver.cc)
 
 add_library(amrl_shared src/gui_helpers.cc
                         src/timer.cc)

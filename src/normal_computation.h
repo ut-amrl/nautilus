@@ -9,12 +9,12 @@
 
 namespace nautilus {
 
-namespace NormalComputationConfig {
-    CONFIG_DOUBLE(neighborhood_size, "nc_neighborhood_size");
-    CONFIG_DOUBLE(neighborhood_step_size, "nc_neighborhood_step_size");
-    CONFIG_DOUBLE(mean_distance, "nc_mean_distance");
-    CONFIG_INT(bin_number, "nc_bin_number");
-}
+namespace config {
+CONFIG_DOUBLE(neighborhood_size, "nc_neighborhood_size");
+CONFIG_DOUBLE(neighborhood_step_size, "nc_neighborhood_step_size");
+CONFIG_DOUBLE(mean_distance, "nc_mean_distance");
+CONFIG_INT(bin_number, "nc_bin_number");
+}  // namespace config
 
 namespace NormalComputation {
 

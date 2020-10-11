@@ -31,7 +31,8 @@ struct KDNodeValue {
   int index;
   KDNodeValue() : index(0) {}
   KDNodeValue(const Eigen::Matrix<T, K, 1>& _point,
-              const Eigen::Matrix<T, K, 1>& _normal, int _index)
+              const Eigen::Matrix<T, K, 1>& _normal,
+              int _index)
       : point(_point), normal(_normal), index(_index) {}
 };
 
@@ -71,7 +72,8 @@ class KDTree {
   // specified threshold. Euclidean L2 norm is used as the distance metric for
   // nearest neighbor search. This is useful for (for example) point to
   // point ICP.
-  T FindNearestPoint(const Eigen::Matrix<T, K, 1>& point, const T& threshold,
+  T FindNearestPoint(const Eigen::Matrix<T, K, 1>& point,
+                     const T& threshold,
                      KDNodeValue<T, K>* neighbor_node);
 
   // Finds the set of points in the KDTree closer than the distance &threshold
