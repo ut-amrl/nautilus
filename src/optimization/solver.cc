@@ -90,24 +90,6 @@ void Solver::AddSlamNode(SLAMNode2D &node) {
 
 // Solves the pose-only version of slam (no lidar factors)
 vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
-  // ceres::Solver::Options options;
-  // ceres::Solver::Summary summary;
-  // options.linear_solver_type = ceres::SPARSE_SCHUR;
-  // options.minimizer_progress_to_stdout = false;
-  // options.num_threads =
-  // static_cast<int>(std::thread::hardware_concurrency());
-  // options.callbacks.push_back(vis_callback_.get());
-  // for (int64_t i = 0; i < 20; i++) {
-  //   vis_callback_->ClearNormals();
-  //   ceres_information.ResetProblem();
-  //   // Add all the odometry constraints between our poses.
-  //   AddOdomFactors(ceres_information.problem.get(), GetSolvedOdomFactors(),
-  //                   SolverConfig::CONFIG_translation_weight,
-  //                   SolverConfig::CONFIG_rotation_weight);
-  //   AddResidualsForAutoLC(ceres_information.problem.get(), false);
-  //   ceres::Solve(options, ceres_information.problem.get(), &summary);
-  // }
-
   // Apply Loop closures to current solution
   // This is COP SLAM
   for (auto constraint : auto_lc_constraints_) {
@@ -131,16 +113,6 @@ vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
     std::cout << A_Mj.matrix() << std::endl;
     std::cout << "Mj_star" << std::endl;
     std::cout << A_Mj_star.matrix() << std::endl;
-
-    // std::vector<OdometryFactor2D> factors =
-    // GetSolvedOdomFactorsBetweenNodes(i, j); OdometryFactor2D chainFactor =
-    // GetTotalOdomChange(factors); Eigen::Affine2d A_chain =
-    // Eigen::Translation2f(chainFactor.translation) *
-    // Eigen::Rotation2Df(chainFactor.rotation);
-
-    // // Validated that A_Mi * A_chain = A_Mj, as expected!
-    // std::cout << "Composite" << std::endl;
-    // std::cout << (A_Mi * A_chain).matrix() << std::endl;
 
     // Now do COP-SLAM
     uint64_t N = j - i;
@@ -168,52 +140,6 @@ vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
       solution_[j + k].pose[1] += DeltaA.translation().y();
       solution_[j + k].pose[2] += Eigen::Rotation2Dd(DeltaA.rotation()).angle();
     }
-
-    // compute weights;
-    // for now, all 1?
-    /*
-    std::vector<double> weights;
-    for(uint64_t k = 0; k < N; k++) {
-      weights.push_back(0.1);
-    }
-
-    Eigen::Matrix3f jarg = (A_Mj.inverse() * A_Mj_star).matrix();
-    Eigen::Matrix3f jarg_log = jarg.log().matrix();
-
-    printf("computed jargs\n");
-    std::cout << jarg << std::endl;
-    printf("LOG\n");
-    std::cout << jarg_log << std::endl;
-
-    std::vector<Affine2f> updates;
-    for(uint64_t k = 0; k < N; k++) {
-      double alpha_1;
-      double alpha_2;
-      if (k > 0) {
-        alpha_1 = std::accumulate(weights.begin(), weights.begin() + k - 1,
-    0.0); alpha_2 = std::accumulate(weights.begin(), weights.begin() + k, 0.0);
-      } else {
-        alpha_1 = 0;
-        alpha_2 = weights[0];
-      }
-
-      Affine2f J_1 = Eigen::Affine2f(((alpha_1 * jarg_log).exp()).matrix());
-      Affine2f J_2 = Eigen::Affine2f(((alpha_2 * jarg_log).exp()).matrix());
-      // Compute local update (8)
-      Affine2f update_local = J_1.inverse() * J_2;
-      // Compute distributed update (14)
-      Eigen::Affine2f A_k = Eigen::Translation2f(solution_[i + k].pose[0],
-    solution_[i + k].pose[1]) * Eigen::Rotation2Df(solution_[i + k].pose[2]);
-      Affine2f update_distributed = A_k.inverse() * A_Mj_star * update_local *
-    A_Mj_star.inverse() * A_k;
-
-      std::cout << "UPDATE" << update_distributed.matrix() << std::endl;
-
-      solution_[i+k].pose[0] += update_distributed.translation().x();
-      solution_[i+k].pose[1] += update_distributed.translation().y();
-      solution_[i+k].pose[2] +=
-    Eigen::Rotation2Df(update_distributed.rotation()).angle();
-    }*/
   }
 
   // Call the visualization once more to see the finished optimization.
