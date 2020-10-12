@@ -3,14 +3,13 @@
 
 #include <vector>
 
+#include "../util/slam_types.h"
+#include "./data_structures.h"
 #include "Eigen/Geometry"
 #include "ceres/ceres.h"
 
-#include "../util/slam_types.h"
-#include "./data_structures.h"
-
-/* This file contains all the residuals (error functions) used in the optimization
- * process to solve for the maximum likelihood map.
+/* This file contains all the residuals (error functions) used in the
+ * optimization process to solve for the maximum likelihood map.
  */
 
 namespace nautilus {
@@ -39,8 +38,8 @@ struct OdometryResidual {
     return true;
   }
 
-  OdometryResidual(const slam_types::OdometryFactor2D &factor, double translation_weight,
-                   double rotation_weight)
+  OdometryResidual(const slam_types::OdometryFactor2D &factor,
+                   double translation_weight, double rotation_weight)
       : translation_weight(translation_weight),
         rotation_weight(rotation_weight),
         R_odom(factor.rotation),
@@ -102,13 +101,17 @@ struct LIDARPointBlobResidual {
     CHECK_EQ(source_normals.size(), target_normals.size());
   }
 
-  static ceres::AutoDiffCostFunction<LIDARPointBlobResidual, ceres::DYNAMIC, 3, 3> *
-  create(std::vector<Eigen::Vector2f> &source_points, std::vector<Eigen::Vector2f> &target_points,
-         std::vector<Eigen::Vector2f> &source_normals, std::vector<Eigen::Vector2f> &target_normals) {
+  static ceres::AutoDiffCostFunction<LIDARPointBlobResidual, ceres::DYNAMIC, 3,
+                                     3>
+      *create(std::vector<Eigen::Vector2f> &source_points,
+              std::vector<Eigen::Vector2f> &target_points,
+              std::vector<Eigen::Vector2f> &source_normals,
+              std::vector<Eigen::Vector2f> &target_normals) {
     LIDARPointBlobResidual *residual = new LIDARPointBlobResidual(
         source_points, target_points, source_normals, target_normals);
-    return new ceres::AutoDiffCostFunction<LIDARPointBlobResidual, ceres::DYNAMIC, 3,
-                                    3>(residual, source_points.size() * 2);
+    return new ceres::AutoDiffCostFunction<LIDARPointBlobResidual,
+                                           ceres::DYNAMIC, 3, 3>(
+        residual, source_points.size() * 2);
   }
 
   const std::vector<Eigen::Vector2f> source_points;
@@ -148,8 +151,8 @@ struct PointToLineResidual {
       *create(const LineSegment<float> &line_segment,
               const vector<Vector2f> points) {
     PointToLineResidual *res = new PointToLineResidual(line_segment, points);
-    return new ceres::AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC, 3, 3>(
-        res, points.size());
+    return new ceres::AutoDiffCostFunction<PointToLineResidual, ceres::DYNAMIC,
+                                           3, 3>(res, points.size());
   }
 
   const LineSegment<float> line_segment_;

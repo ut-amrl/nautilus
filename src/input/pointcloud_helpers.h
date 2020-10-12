@@ -27,5 +27,5 @@ sensor_msgs::PointCloud2 EigenPointcloudToRos(
 std::vector<Eigen::Vector2f> LaserScanToPointCloud(
     const sensor_msgs::LaserScan& laser_scan, double max_range);
 
-};      // namespace nautilus
+}  // namespace nautilus
 #endif  // SRC_POINTCLOUD_HELPERS_H_

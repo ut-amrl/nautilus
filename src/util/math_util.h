@@ -18,10 +18,10 @@
 // If not, see <http://www.gnu.org/licenses/>.
 // ========================================================================
 
+#include <Eigen/Dense>
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <Eigen/Dense>
 
 #include "glog/logging.h"
 

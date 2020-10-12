@@ -8,59 +8,59 @@
 #include <boost/math/distributions/chi_squared.hpp>
 #include <vector>
 
-#include "Eigen/Dense"
-#include "ros/package.h"
-#include "ros/node_handle.h"
-#include "sensor_msgs/PointCloud2.h"
-#include "visualization_msgs/Marker.h"
-
-#include "./data_structures.h"
+#include "../input/pointcloud_helpers.h"
 #include "../util/gui_helpers.h"
 #include "../util/kdtree.h"
-#include "../input/pointcloud_helpers.h"
 #include "../util/slam_types.h"
+#include "./data_structures.h"
 #include "CorrelativeScanMatcher.h"
+#include "Eigen/Dense"
 #include "ceres/ceres.h"
 #include "config_reader/config_reader.h"
 #include "geometry_msgs/PoseArray.h"
 #include "glog/logging.h"
 #include "nautilus/HitlSlamInputMsg.h"
 #include "nautilus/WriteMsg.h"
+#include "ros/node_handle.h"
+#include "ros/package.h"
+#include "sensor_msgs/PointCloud2.h"
+#include "visualization_msgs/Marker.h"
 
 namespace nautilus {
 namespace SolverConfig {
-  CONFIG_DOUBLE(translation_weight, "translation_weight");
-  CONFIG_DOUBLE(rotation_weight, "rotation_weight");
-  CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
-  CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
-  CONFIG_DOUBLE(lc_base_max_range, "lc_base_max_range");
-  CONFIG_DOUBLE(lc_max_range_scaling, "lc_max_range_scaling");
-  CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
-  CONFIG_STRING(pose_output_file, "pose_output_file");
-  CONFIG_STRING(map_output_file, "map_output_file");
-  CONFIG_DOUBLE(accuracy_change_stop_threshold, "accuracy_change_stop_threshold");
-  CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
-  CONFIG_DOUBLE(lc_match_threshold, "lc_match_threshold");
-  CONFIG_INT(lidar_constraint_amount_min, "lidar_constraint_amount_min");
-  CONFIG_INT(lidar_constraint_amount_max, "lidar_constraint_amount_max");
-  CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
-  CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
-  CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
-  // Auto LC configs
-  CONFIG_BOOL(keyframe_local_uncertainty_filtering, "keyframe_local_uncertainty_filtering");
-  CONFIG_BOOL(keyframe_chi_squared_test, "keyframe_chi_squared_test");
-  CONFIG_DOUBLE(keyframe_min_odom_distance, "keyframe_min_odom_distance");
-  CONFIG_DOUBLE(local_uncertainty_condition_threshold,
-                "local_uncertainty_condition_threshold");
-  CONFIG_DOUBLE(local_uncertainty_scale_threshold,
-                "local_uncertainty_scale_threshold");
-  CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
-  CONFIG_INT(lc_match_window_size, "lc_match_window_size");
-  CONFIG_INT(lc_min_keyframes, "lc_min_keyframes");
-  CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
-  CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
-  CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
-};
+CONFIG_DOUBLE(translation_weight, "translation_weight");
+CONFIG_DOUBLE(rotation_weight, "rotation_weight");
+CONFIG_DOUBLE(lc_translation_weight, "lc_translation_weight");
+CONFIG_DOUBLE(lc_rotation_weight, "lc_rotation_weight");
+CONFIG_DOUBLE(lc_base_max_range, "lc_base_max_range");
+CONFIG_DOUBLE(lc_max_range_scaling, "lc_max_range_scaling");
+CONFIG_STRING(lc_debug_output_dir, "lc_debug_output_dir");
+CONFIG_STRING(pose_output_file, "pose_output_file");
+CONFIG_STRING(map_output_file, "map_output_file");
+CONFIG_DOUBLE(accuracy_change_stop_threshold, "accuracy_change_stop_threshold");
+CONFIG_DOUBLE(max_lidar_range, "max_lidar_range");
+CONFIG_DOUBLE(lc_match_threshold, "lc_match_threshold");
+CONFIG_INT(lidar_constraint_amount_min, "lidar_constraint_amount_min");
+CONFIG_INT(lidar_constraint_amount_max, "lidar_constraint_amount_max");
+CONFIG_DOUBLE(outlier_threshold, "outlier_threshold");
+CONFIG_DOUBLE(hitl_line_width, "hitl_line_width");
+CONFIG_INT(hitl_pose_point_threshold, "hitl_pose_point_threshold");
+// Auto LC configs
+CONFIG_BOOL(keyframe_local_uncertainty_filtering,
+            "keyframe_local_uncertainty_filtering");
+CONFIG_BOOL(keyframe_chi_squared_test, "keyframe_chi_squared_test");
+CONFIG_DOUBLE(keyframe_min_odom_distance, "keyframe_min_odom_distance");
+CONFIG_DOUBLE(local_uncertainty_condition_threshold,
+              "local_uncertainty_condition_threshold");
+CONFIG_DOUBLE(local_uncertainty_scale_threshold,
+              "local_uncertainty_scale_threshold");
+CONFIG_INT(local_uncertainty_prev_scans, "local_uncertainty_prev_scans");
+CONFIG_INT(lc_match_window_size, "lc_match_window_size");
+CONFIG_INT(lc_min_keyframes, "lc_min_keyframes");
+CONFIG_DOUBLE(csm_score_threshold, "csm_score_threshold");
+CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
+CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
+};  // namespace SolverConfig
 
 /*----------------------------------------------------------------------------*
  *                            HELPER FUNCTIONS                                |
@@ -177,9 +177,12 @@ class VisualizationCallback : public ceres::IterationCallback {
                                   gui_helpers::Color4f::kCyan, 0.01, 0.0, 0.0,
                                   &auto_lc_pose_array);
     pose_array.header.frame_id = "map";
-    constraint_a_pose_pub = n.advertise<sensor_msgs::PointCloud2>("/hitl_poses_line_a", 10);
-    constraint_b_pose_pub = n.advertise<sensor_msgs::PointCloud2>("/hitl_poses_line_b", 10);
-    hitl_pointclouds = n.advertise<sensor_msgs::PointCloud2>("/hitl_pointclouds", 10);
+    constraint_a_pose_pub =
+        n.advertise<sensor_msgs::PointCloud2>("/hitl_poses_line_a", 10);
+    constraint_b_pose_pub =
+        n.advertise<sensor_msgs::PointCloud2>("/hitl_poses_line_b", 10);
+    hitl_pointclouds =
+        n.advertise<sensor_msgs::PointCloud2>("/hitl_pointclouds", 10);
     point_a_pub = n.advertise<sensor_msgs::PointCloud2>("/hitl_a_points", 100);
     point_b_pub = n.advertise<sensor_msgs::PointCloud2>("/hitl_b_points", 100);
     auto_lc_poses_pub =
@@ -244,7 +247,8 @@ class VisualizationCallback : public ceres::IterationCallback {
     }
     if (solution_c.size() >= 2) {
       nautilus::PublishPointcloud(all_points, &all_points_marker, point_pub);
-      nautilus::PublishPointcloud(new_points, &new_points_marker, new_point_pub);
+      nautilus::PublishPointcloud(new_points, &new_points_marker,
+                                  new_point_pub);
       gui_helpers::ClearMarker(&match_line_list);
       for (const PointCorrespondences& corr : last_correspondences) {
         AddMatchLines(corr);
@@ -513,6 +517,7 @@ class Solver {
   void AddSlamNode(slam_types::SLAMNode2D& node);
   void CheckForLearnedLC(slam_types::SLAMNode2D& node);
   void LoadSLAMSolution(const char* poses_path);
+
  private:
   double CostFromResidualDescriptor(const ResidualDesc& res_desc);
   double GetChiSquareCost(uint64_t node_a, uint64_t node_b);

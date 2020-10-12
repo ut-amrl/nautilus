@@ -3,10 +3,9 @@
 
 #include <vector>
 
+#include "../util/slam_types.h"
 #include "Eigen/Dense"
 #include "ceres/ceres.h"
-
-#include "../util/slam_types.h"
 
 namespace nautilus {
 

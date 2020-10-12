@@ -1,19 +1,19 @@
 #include <csignal>
 #include <vector>
 
-#include "input/slam_type_builder.h"
-#include "util/slam_types.h"
-#include "optimization/solver.h"
 #include "config_reader/config_reader.h"
 #include "gflags/gflags.h"
 #include "glog/logging.h"
+#include "input/slam_type_builder.h"
 #include "nautilus/CobotOdometryMsg.h"
 #include "nav_msgs/Odometry.h"
+#include "optimization/solver.h"
 #include "ros/node_handle.h"
 #include "ros/package.h"
 #include "rosbag/bag.h"
 #include "rosbag/view.h"
 #include "sensor_msgs/LaserScan.h"
+#include "util/slam_types.h"
 
 namespace nautilus {
 
@@ -36,11 +36,13 @@ CONFIG_STRING(hitl_lc_topic, "hitl_lc_topic");
 CONFIG_BOOL(differential_odom, "differential_odom");
 
 DEFINE_string(config_file, "", "The path to the config file to use.");
-DEFINE_string(solution_poses, "", "The path to the file containing the solution poses, to load from an existing solution.");
+DEFINE_string(solution_poses, "",
+              "The path to the file containing the solution poses, to load "
+              "from an existing solution.");
 
 static bool asking_for_input = true;
 
-SLAMProblem2D ProcessBagFile(const char *bag_path, const ros::NodeHandle &n) {
+SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
   /*
    * Loads and processes the bag file pulling out the lidar data
    * and the odometry data. Keeps track of the current pose and produces
@@ -51,7 +53,7 @@ SLAMProblem2D ProcessBagFile(const char *bag_path, const ros::NodeHandle &n) {
   rosbag::Bag bag;
   try {
     bag.open(bag_path, rosbag::bagmode::Read);
-  } catch (rosbag::BagException &exception) {
+  } catch (rosbag::BagException& exception) {
     printf("Unable to read %s, reason: %s\n", bag_path, exception.what());
     return slam_types::SLAMProblem2D();
   }
@@ -100,7 +102,8 @@ SLAMProblem2D ProcessBagFile(const char *bag_path, const ros::NodeHandle &n) {
     }
 
     if (msg_counter % 5000 == 0) {
-      printf("Processed %ld messages of %d, found %ld nodes.\n", msg_counter, view.size(), slam_builder.GetNodeCount());
+      printf("Processed %ld messages of %d, found %ld nodes.\n", msg_counter,
+             view.size(), slam_builder.GetNodeCount());
     }
   }
 
@@ -156,9 +159,6 @@ void SolveSLAMProblem(SLAMProblem2D& slam_problem, Solver& solver) {
     lc_output_file.open(CONFIG_lc_debug_output_dir + "/lc_matches.txt",
                         std::ios::trunc);
     lc_output_file.close();
-    for (SLAMNode2D &node : slam_problem.nodes) {
-      solver.CheckForLearnedLC(node);
-    }
     solver.SolveSLAM();
   }
 }
@@ -167,7 +167,7 @@ void SolveSLAMProblem(SLAMProblem2D& slam_problem, Solver& solver) {
 
 using nautilus::Solver;
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   google::InitGoogleLogging(*argv);
   google::ParseCommandLineFlags(&argc, &argv, false);
   if (nautilus::FLAGS_config_file == "") {
@@ -193,15 +193,16 @@ int main(int argc, char **argv) {
   Solver solver(n);
   nautilus::PopulateSLAMProblem(slam_problem, solver);
   if (nautilus::FLAGS_solution_poses != "") {
-    std::cout << "Loading solution poses; skipping SLAM solving step." << std::endl;
+    std::cout << "Loading solution poses; skipping SLAM solving step."
+              << std::endl;
     solver.LoadSLAMSolution(nautilus::FLAGS_solution_poses.c_str());
   } else {
     nautilus::SolveSLAMProblem(slam_problem, solver);
   }
 
   std::cout << "Waiting for Loop Closure input" << std::endl;
-  ros::Subscriber hitl_sub =
-      n.subscribe(nautilus::CONFIG_hitl_lc_topic, 10, &Solver::HitlCallback, &solver);
+  ros::Subscriber hitl_sub = n.subscribe(nautilus::CONFIG_hitl_lc_topic, 10,
+                                         &Solver::HitlCallback, &solver);
   ros::Subscriber write_sub =
       n.subscribe("/write_output", 10, &Solver::WriteCallback, &solver);
   ros::Subscriber vector_sub =

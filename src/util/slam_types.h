@@ -163,4 +163,3 @@ struct SLAMNodeSolution2D {
 }  // namespace nautilus
 
 #endif  // __SLAM_TYPES_H__
-
