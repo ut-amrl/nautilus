@@ -64,14 +64,14 @@ LINK_DIRECTORIES(${PROJECT_SOURCE_DIR}/third_party/googletest/lib)
 add_subdirectory(third_party)
 
 add_executable(${PROJECT_NAME} src/main.cc
-                               src/pointcloud_helpers.cc
-                               src/solver.cc
-                               src/slam_type_builder.cc
-                               src/kdtree.cc
-                               src/normal_computation.cc)
+        src/input/pointcloud_helpers.cc
+        src/optimization/solver.cc
+        src/input/slam_type_builder.cc
+        src/util/kdtree.cc
+        src/input/normal_computation.cc)
 
-add_library(amrl_shared src/gui_helpers.cc
-                        src/timer.cc)
+add_library(amrl_shared src/util/gui_helpers.cc
+        src/util/timer.cc)
 
 set(non_findable_libs gflags glog X11 m lua5.1 pthread csm vector_maps Boost::system stdc++)
 

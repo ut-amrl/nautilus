@@ -14,10 +14,11 @@
 #include "sensor_msgs/PointCloud2.h"
 #include "visualization_msgs/Marker.h"
 
-#include "./gui_helpers.h"
-#include "./kdtree.h"
-#include "./pointcloud_helpers.h"
-#include "./slam_types.h"
+#include "./data_structures.h"
+#include "../util/gui_helpers.h"
+#include "../util/kdtree.h"
+#include "../input/pointcloud_helpers.h"
+#include "../util/slam_types.h"
 #include "CorrelativeScanMatcher.h"
 #include "ceres/ceres.h"
 #include "config_reader/config_reader.h"
@@ -27,103 +28,6 @@
 #include "nautilus/WriteMsg.h"
 
 namespace nautilus {
-/*----------------------------------------------------------------------------*
- *                            DATA STRUCTURES                                 |
- *----------------------------------------------------------------------------*/
-
-template <typename T>
-struct LineSegment {
-  const Eigen::Matrix<T, 2, 1> start;
-  const Eigen::Matrix<T, 2, 1> end;
-  LineSegment(Eigen::Matrix<T, 2, 1>& start, Eigen::Matrix<T, 2, 1>& endpoint)
-      : start(start), end(endpoint){};
-
-  LineSegment() {}
-
-  template <typename F>
-  LineSegment<F> cast() const {
-    typedef Eigen::Matrix<F, 2, 1> Vector2F;
-    Vector2F startF = start.template cast<F>();
-    Vector2F endF = end.template cast<F>();
-    CHECK(ceres::IsFinite(startF.x()));
-    CHECK(ceres::IsFinite(startF.y()));
-    CHECK(ceres::IsFinite(endF.x()));
-    CHECK(ceres::IsFinite(endF.y()));
-    return LineSegment<F>(startF, endF);
-  }
-};
-
-struct LCPose {
-  uint64_t node_idx;
-  std::vector<Eigen::Vector2f> points_on_feature;
-  LCPose(uint64_t node_idx, std::vector<Eigen::Vector2f> points_on_feature)
-      : node_idx(node_idx), points_on_feature(points_on_feature) {}
-};
-
-struct HitlLCConstraint {
-  std::vector<LCPose> line_a_poses;
-  std::vector<LCPose> line_b_poses;
-  const LineSegment<float> line_a;
-  const LineSegment<float> line_b;
-  double chosen_line_pose[3]{0, 0, 0};
-  HitlLCConstraint(const LineSegment<float>& line_a,
-                   const LineSegment<float>& line_b)
-      : line_a(line_a), line_b(line_b) {}
-  HitlLCConstraint() {}
-};
-
-struct AutoLCConstraint {
-  const slam_types::SLAMNode2D* node_a;
-  const slam_types::SLAMNode2D* node_b;
-  double source_pose[3];
-  double target_pose[3];
-  float match_ratio;
-  Eigen::Vector3f relative_transformation;
-};
-
-struct PointCorrespondences {
-  std::vector<Eigen::Vector2f> source_points;
-  std::vector<Eigen::Vector2f> target_points;
-  std::vector<Eigen::Vector2f> source_normals;
-  std::vector<Eigen::Vector2f> target_normals;
-  double* source_pose;
-  double* target_pose;
-  uint64_t source_index;
-  uint64_t target_index;
-  PointCorrespondences(double* source_pose, double* target_pose,
-                       uint64_t source_index, uint64_t target_index)
-      : source_pose(source_pose),
-        target_pose(target_pose),
-        source_index(source_index),
-        target_index(target_index) {}
-  PointCorrespondences()
-      : source_pose(nullptr),
-        target_pose(nullptr),
-        source_index(0),
-        target_index(0) {}
-};
-
-struct ResidualDesc {
-  size_t node_i;
-  size_t node_j;
-  ceres::ResidualBlockId id;
-  ResidualDesc(size_t node_i, size_t node_j, ceres::ResidualBlockId id)
-      : node_i(node_i), node_j(node_j), id(id) {}
-};
-
-struct CeresInformation {
-  void ResetProblem() {
-    problem.reset(new ceres::Problem());
-    res_descriptors.clear();
-    cost_valid = false;
-    cost = 0.0;
-  }
-  bool cost_valid = false;
-  double cost = 0.0;
-  std::shared_ptr<ceres::Problem> problem;
-  std::vector<ResidualDesc> res_descriptors;
-};
-
 namespace SolverConfig {
   CONFIG_DOUBLE(translation_weight, "translation_weight");
   CONFIG_DOUBLE(rotation_weight, "rotation_weight");
@@ -273,11 +177,11 @@ class VisualizationCallback : public ceres::IterationCallback {
                                   gui_helpers::Color4f::kCyan, 0.01, 0.0, 0.0,
                                   &auto_lc_pose_array);
     pose_array.header.frame_id = "map";
-    constraint_a_pose_pub = n.advertise<PointCloud2>("/hitl_poses_line_a", 10);
-    constraint_b_pose_pub = n.advertise<PointCloud2>("/hitl_poses_line_b", 10);
-    hitl_pointclouds = n.advertise<PointCloud2>("/hitl_pointclouds", 10);
-    point_a_pub = n.advertise<PointCloud2>("/hitl_a_points", 100);
-    point_b_pub = n.advertise<PointCloud2>("/hitl_b_points", 100);
+    constraint_a_pose_pub = n.advertise<sensor_msgs::PointCloud2>("/hitl_poses_line_a", 10);
+    constraint_b_pose_pub = n.advertise<sensor_msgs::PointCloud2>("/hitl_poses_line_b", 10);
+    hitl_pointclouds = n.advertise<sensor_msgs::PointCloud2>("/hitl_pointclouds", 10);
+    point_a_pub = n.advertise<sensor_msgs::PointCloud2>("/hitl_a_points", 100);
+    point_b_pub = n.advertise<sensor_msgs::PointCloud2>("/hitl_b_points", 100);
     auto_lc_poses_pub =
         n.advertise<visualization_msgs::Marker>("/auto_lc_poses", 10);
     line_pub = n.advertise<visualization_msgs::Marker>("/line_a", 10);
@@ -339,8 +243,8 @@ class VisualizationCallback : public ceres::IterationCallback {
       }
     }
     if (solution_c.size() >= 2) {
-      nautilus::PublishPointcloud(all_points, all_points_marker, point_pub);
-      nautilus::PublishPointcloud(new_points, new_points_marker, new_point_pub);
+      nautilus::PublishPointcloud(all_points, &all_points_marker, point_pub);
+      nautilus::PublishPointcloud(new_points, &new_points_marker, new_point_pub);
       gui_helpers::ClearMarker(&match_line_list);
       for (const PointCorrespondences& corr : last_correspondences) {
         AddMatchLines(corr);
@@ -391,12 +295,12 @@ class VisualizationCallback : public ceres::IterationCallback {
                           hitl_constraint.line_a.end.y(), 0.0),
           gui_helpers::Color4f::kMagenta, &line_marker);
       for (int i = 0; i < 5; i++) {
-        nautilus::PublishPointcloud(line_a_poses, pose_a_point_marker,
+        nautilus::PublishPointcloud(line_a_poses, &pose_a_point_marker,
                                     constraint_a_pose_pub);
-        nautilus::PublishPointcloud(line_b_poses, pose_b_point_marker,
+        nautilus::PublishPointcloud(line_b_poses, &pose_b_point_marker,
                                     constraint_b_pose_pub);
-        nautilus::PublishPointcloud(a_points, a_points_marker, point_a_pub);
-        nautilus::PublishPointcloud(b_points, b_points_marker, point_b_pub);
+        nautilus::PublishPointcloud(a_points, &a_points_marker, point_a_pub);
+        nautilus::PublishPointcloud(b_points, &b_points_marker, point_b_pub);
         line_pub.publish(line_marker);
       }
     }
@@ -412,7 +316,7 @@ class VisualizationCallback : public ceres::IterationCallback {
       Vector2f pose_point(pose_arr[0], pose_arr[1]);
       poses.push_back(pose_point);
     }
-    nautilus::PublishPointcloud(poses, keyframe_marker, keyframe_pub);
+    nautilus::PublishPointcloud(poses, &keyframe_marker, keyframe_pub);
   }
 
   void AddPosePointcloud(vector<Vector2f>& pointcloud, const LCPose& pose) {
@@ -437,7 +341,7 @@ class VisualizationCallback : public ceres::IterationCallback {
         AddPosePointcloud(pointclouds, pose);
       }
     }
-    nautilus::PublishPointcloud(pointclouds, hitl_points_marker,
+    nautilus::PublishPointcloud(pointclouds, &hitl_points_marker,
                                 hitl_pointclouds);
   }
 
@@ -562,12 +466,12 @@ class VisualizationCallback : public ceres::IterationCallback {
   visualization_msgs::Marker auto_lc_pose_array;
   visualization_msgs::Marker match_line_list;
   visualization_msgs::Marker normals_marker;
-  PointCloud2 pose_a_point_marker;
-  PointCloud2 pose_b_point_marker;
-  PointCloud2 a_points_marker;
-  PointCloud2 b_points_marker;
-  PointCloud2 hitl_points_marker;
-  PointCloud2 keyframe_marker;
+  sensor_msgs::PointCloud2 pose_a_point_marker;
+  sensor_msgs::PointCloud2 pose_b_point_marker;
+  sensor_msgs::PointCloud2 a_points_marker;
+  sensor_msgs::PointCloud2 b_points_marker;
+  sensor_msgs::PointCloud2 hitl_points_marker;
+  sensor_msgs::PointCloud2 keyframe_marker;
   visualization_msgs::Marker line_marker;
   // All the correspondences were the source is the same
   // (will be the last pointcloud aligned and all of its targets).

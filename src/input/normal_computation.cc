@@ -7,8 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "./kdtree.h"
-#include "./math_util.h"
+#include "../util/kdtree.h"
+#include "../util/math_util.h"
 #include "Eigen/Dense"
 
 /* Normal computation is based on this paper
@@ -44,7 +44,7 @@ inline double BinMean(size_t bin_num, const CircularHoughAccumulator &accum) {
   return accum.Votes(bin_num) / accum.accumulator.size();
 }
 
-inline bool MeansDontIntersect(CircularHoughAccumulator &accum) {
+inline bool MeansDontIntersect(const CircularHoughAccumulator &accum) {
   double mean_difference = BinMean(accum.GetMostVotedBinIndex(), accum) -
                            BinMean(accum.GetSecondMostVotedBinIndex(), accum);
   // Assuming confidence level of 95%
@@ -52,8 +52,8 @@ inline bool MeansDontIntersect(CircularHoughAccumulator &accum) {
   return mean_difference >= lower_bound;
 }
 
-vector<double> LargestClusterWithinThreshold(const vector<double> normal_angles,
-                                             double threshold) {
+vector<double> LargestClusterWithinThreshold(
+    const vector<double> &normal_angles, double threshold) {
   // Find the largest cluster, or the normal with the most similar normals.
   vector<double> largest_cluster;
   for (size_t i = 0; i < normal_angles.size(); i++) {
@@ -81,19 +81,22 @@ vector<Vector2f> GetNormals(const vector<Vector2f> &points) {
   KDTree<float, 2> *tree =
       new KDTree<float, 2>(KDTree<float, 2>::EigenToKDNoNormals(points));
   vector<Vector2f> normals;
-  for (const Vector2f& point : points) {
+  for (const Vector2f &point : points) {
     CircularHoughAccumulator accum(NormalComputationConfig::CONFIG_bin_number);
     size_t number_of_samples = 0;
-    double neighborhood_size = NormalComputationConfig::CONFIG_neighborhood_size;
+    double neighborhood_size =
+        NormalComputationConfig::CONFIG_neighborhood_size;
     vector<KDNodeValue<float, 2>> neighbors;
     while (neighbors.size() <= 1) {
       tree->FindNeighborPoints(point, neighborhood_size, &neighbors);
-      neighborhood_size += NormalComputationConfig::CONFIG_neighborhood_step_size;
+      neighborhood_size +=
+          NormalComputationConfig::CONFIG_neighborhood_step_size;
     }
     std::unordered_map<size_t, bool> chosen_samples;
     // Check that the sample limit is less than total number of choices.
-    size_t limit = std::min(neighbors.size() * (neighbors.size() - 1),
-                            SampleLimit(NormalComputationConfig::CONFIG_mean_distance));
+    size_t limit =
+        std::min(neighbors.size() * (neighbors.size() - 1),
+                 SampleLimit(NormalComputationConfig::CONFIG_mean_distance));
     while (number_of_samples < limit) {
       // Get a random pair of points using a costless combinatorial ordering.
       size_t first_index;
@@ -123,4 +126,4 @@ vector<Vector2f> GetNormals(const vector<Vector2f> &points) {
   return normals;
 }
 
-}  // namespace nautilus
+}  // namespace nautilus::NormalComputation

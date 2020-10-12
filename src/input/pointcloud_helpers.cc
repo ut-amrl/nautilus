@@ -8,8 +8,8 @@
 
 #include <numeric>
 
-#include "./kdtree.h"
-#include "./math_util.h"
+#include "../util/kdtree.h"
+#include "../util/math_util.h"
 #include "eigen3/Eigen/Dense"
 #include "ros/package.h"
 #include "sensor_msgs/PointCloud2.h"
@@ -20,10 +20,12 @@ using Eigen::Matrix2f;
 using Eigen::Rotation2D;
 using Eigen::Vector2f;
 using math_util::NormalsSimilar;
+using ros::Publisher;
+using sensor_msgs::PointCloud2;
 using std::pair;
 using std::vector;
 
-vector<Vector2f> LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan,
+vector<Vector2f> LaserScanToPointCloud(const sensor_msgs::LaserScan &laser_scan,
                                        double max_range) {
   vector<Vector2f> pointcloud;
   float angle_offset = laser_scan.range_min;
@@ -46,6 +48,7 @@ vector<Vector2f> LaserScanToPointCloud(sensor_msgs::LaserScan &laser_scan,
 }
 
 void InitPointcloud(PointCloud2 *point) {
+  CHECK_NOTNULL(point);
   std::string arr[3] = {"x", "y", "z"};
   point->header.seq = 1;
   point->header.stamp = ros::Time::now();
@@ -68,25 +71,27 @@ void InitPointcloud(PointCloud2 *point) {
   point->is_dense = true;
 }
 
-void PushBackBytes(float val, sensor_msgs::PointCloud2 &ptr) {
+void PushBackBytes(float val, sensor_msgs::PointCloud2 *ptr) {
+  CHECK_NOTNULL(ptr);
   uint8_t *data_ptr = reinterpret_cast<uint8_t *>(&val);
   for (int i = 0; i < 4; i++) {
-    ptr.data.push_back(data_ptr[i]);
+    ptr->data.push_back(data_ptr[i]);
   }
 }
 
-void PublishPointcloud(const vector<Vector2f> &points, PointCloud2 &point_cloud,
+void PublishPointcloud(const vector<Vector2f> &points, PointCloud2 *point_cloud,
                        Publisher &pub) {
+  CHECK_NOTNULL(point_cloud);
   for (uint64_t i = 0; i < points.size(); i++) {
     Vector2f vec = points[i];
     PushBackBytes(vec[0], point_cloud);
     PushBackBytes(vec[1], point_cloud);
     PushBackBytes(0.0f, point_cloud);
   }
-  point_cloud.width = points.size();
-  pub.publish(point_cloud);
-  point_cloud.width = 0;
-  point_cloud.data.clear();
+  point_cloud->width = points.size();
+  pub.publish(*point_cloud);
+  point_cloud->width = 0;
+  point_cloud->data.clear();
 }
 
 PointCloud2 EigenPointcloudToRos(const vector<Vector2f> &pointcloud) {
@@ -94,9 +99,9 @@ PointCloud2 EigenPointcloudToRos(const vector<Vector2f> &pointcloud) {
   InitPointcloud(&point_msg);
   for (uint64_t i = 0; i < pointcloud.size(); i++) {
     Vector2f vec = pointcloud[i];
-    PushBackBytes(vec[0], point_msg);
-    PushBackBytes(vec[1], point_msg);
-    PushBackBytes(0.0f, point_msg);
+    PushBackBytes(vec[0], &point_msg);
+    PushBackBytes(vec[1], &point_msg);
+    PushBackBytes(0.0f, &point_msg);
   }
   point_msg.height = 1;
   point_msg.width = pointcloud.size();

@@ -26,7 +26,7 @@
 #include <algorithm>
 #include <vector>
 
-#include "./normal_computation.h"
+#include "../input/normal_computation.h"
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
 #include "glog/logging.h"

@@ -4,7 +4,7 @@
 
 #include "gtest/gtest.h"
 #include "eigen3/Eigen/Dense"
-#include "../src/solver.h"
+#include "../src/optimization/solver.h"
 
 using Eigen::Vector2f;
 using namespace nautilus;

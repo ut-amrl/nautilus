@@ -1,9 +1,9 @@
 #include <csignal>
 #include <vector>
 
-#include "./slam_type_builder.h"
-#include "./slam_types.h"
-#include "./solver.h"
+#include "input/slam_type_builder.h"
+#include "util/slam_types.h"
+#include "optimization/solver.h"
 #include "config_reader/config_reader.h"
 #include "gflags/gflags.h"
 #include "glog/logging.h"
@@ -75,7 +75,7 @@ SLAMProblem2D ProcessBagFile(const char *bag_path, const ros::NodeHandle &n) {
           message.instantiate<sensor_msgs::LaserScan>();
       if (laser_scan != nullptr) {
         found_lidar = true;
-        slam_builder.LidarCallback(*laser_scan);
+        slam_builder.LidarCallback(&(*laser_scan));
       }
     }
     {

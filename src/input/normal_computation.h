@@ -3,18 +3,18 @@
 
 #include <vector>
 
-#include "./math_util.h"
+#include "../util/math_util.h"
 #include "Eigen/Dense"
 #include "config_reader/config_reader.h"
 
 namespace nautilus {
 
 namespace NormalComputationConfig {
-    CONFIG_DOUBLE(neighborhood_size, "nc_neighborhood_size");
-    CONFIG_DOUBLE(neighborhood_step_size, "nc_neighborhood_step_size");
-    CONFIG_DOUBLE(mean_distance, "nc_mean_distance");
-    CONFIG_INT(bin_number, "nc_bin_number");
-}
+CONFIG_DOUBLE(neighborhood_size, "nc_neighborhood_size");
+CONFIG_DOUBLE(neighborhood_step_size, "nc_neighborhood_step_size");
+CONFIG_DOUBLE(mean_distance, "nc_mean_distance");
+CONFIG_INT(bin_number, "nc_bin_number");
+}  // namespace NormalComputationConfig
 
 namespace NormalComputation {
 
@@ -69,7 +69,7 @@ struct CircularHoughAccumulator {
 std::vector<Eigen::Vector2f> GetNormals(
     const std::vector<Eigen::Vector2f>& points);
 
-}
+}  // namespace NormalComputation
 }  // namespace nautilus
 
 #endif
