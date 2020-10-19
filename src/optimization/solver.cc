@@ -14,7 +14,7 @@
 #include "../util/kdtree.h"
 #include "../util/math_util.h"
 #include "../util/timer.h"
-#include "../visualization/cimg_debug.h"
+#include "../util/slam_util.h"
 #include "./data_structures.h"
 #include "./line_extraction.h"
 #include "./slam_residuals.h"
@@ -24,6 +24,7 @@
 #include "local_uncertainty_estimator/EstimateLocalUncertainty.h"
 #include "nautilus/HitlSlamInputMsg.h"
 #include "nautilus/WriteMsg.h"
+#include "../visualization/solver_vis.h"
 
 #define DEBUG true
 
@@ -47,56 +48,34 @@ using slam_types::OdometryFactor2D;
 using slam_types::SLAMNode2D;
 using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
+using slam_types::SLAMState2D;
 using std::pair;
 using std::vector;
+using visualization::SolverVisualizer;
 
-/*----------------------------------------------------------------------------*
- *                             PROBLEM BUILDING                               |
- *----------------------------------------------------------------------------*/
-
-/* Solver takes in a ros node handle to be used for sending out debugging
- * information*/
-// TODO: Upped the Scanmatcher resolution to 0.01 for ChiSquare.
-Solver::Solver(ros::NodeHandle &n) : n_(n), scan_matcher(30, 2, 0.3, 0.01) {
+Solver::Solver(ros::NodeHandle &n,
+               std::shared_ptr<SLAMState2D> state, 
+               std::unique_ptr<SolverVisualizer> vis)
+  : n_(n), scan_matcher(30, 2, 0.3, 0.01), state_(state) {
+  vis_.swap(vis);
   matcher_client = n_.serviceClient<MatchLaserScans>("match_laser_scans");
   local_uncertainty_client =
       n_.serviceClient<EstimateLocalUncertainty>("estimate_local_uncertainty");
-  vis_callback_ = std::unique_ptr<VisualizationCallback>(
-      new VisualizationCallback(keyframes, n_));
-}
-
-void Solver::AddSLAMNodeOdom(SLAMNode2D &node,
-                             OdometryFactor2D &odom_factor_to_node) {
-  CHECK_EQ(node.node_idx, odom_factor_to_node.pose_j);
-  problem_.nodes.push_back(node);
-  problem_.odometry_factors.push_back(odom_factor_to_node);
-  initial_odometry_factors.push_back(odom_factor_to_node);
-  SLAMNodeSolution2D sol_node(node);
-  solution_.push_back(sol_node);
-  vis_callback_->UpdateProblemAndSolution(node, &solution_,
-                                          odom_factor_to_node);
-}
-
-void Solver::AddSlamNode(SLAMNode2D &node) {
-  problem_.nodes.push_back(node);
-  SLAMNodeSolution2D sol_node(node);
-  solution_.push_back(sol_node);
-  vis_callback_->UpdateProblemAndSolution(node, &solution_);
 }
 
 /*----------------------------------------------------------------------------*
  *                          SLAM SOLVING FUNCTIONS                            |
  *----------------------------------------------------------------------------*/
 
-// Solves the pose-only version of slam (no lidar factors)
+/*// Solves the pose-only version of slam (no lidar factors)
 vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
   // Apply Loop closures to current solution
   // This is COP SLAM
   for (auto constraint : auto_lc_constraints_) {
     uint64_t i = constraint.node_a->node_idx;
     uint64_t j = constraint.node_b->node_idx;
-    SLAMNodeSolution2D sol_i = solution_[constraint.node_a->node_idx];
-    SLAMNodeSolution2D sol_j = solution_[constraint.node_b->node_idx];
+    SLAMNodeSolution2D sol_i = state_->solution[constraint.node_a->node_idx];
+    SLAMNodeSolution2D sol_j = state_->solution[constraint.node_b->node_idx];
     Eigen::Affine2d A_Mi = Eigen::Translation2d(sol_i.pose[0], sol_i.pose[1]) *
                            Eigen::Rotation2Dd(sol_i.pose[2]);
     Eigen::Affine2d A_Mj = Eigen::Translation2d(sol_j.pose[0], sol_j.pose[1]) *
@@ -128,48 +107,37 @@ vector<SLAMNodeSolution2D> Solver::SolvePoseSLAM() {
     for (uint64_t k = 1; k < N; k++) {
       Eigen::Matrix3d poseUpdateMat = DeltaA.matrix().pow((double)k / N);
       Eigen::Affine2d poseUpdate(poseUpdateMat);
-      solution_[i + k].pose[0] += poseUpdate.translation().x();
-      solution_[i + k].pose[1] += poseUpdate.translation().y();
-      solution_[i + k].pose[2] +=
+      state_->solution[i + k].pose[0] += poseUpdate.translation().x();
+      state_->solution[i + k].pose[1] += poseUpdate.translation().y();
+      state_->solution[i + k].pose[2] +=
           Eigen::Rotation2Dd(poseUpdate.rotation()).angle();
     }
 
     // Update all subsequent poses
-    for (uint64_t k = 0; k < solution_.size() - j; k++) {
-      solution_[j + k].pose[0] += DeltaA.translation().x();
-      solution_[j + k].pose[1] += DeltaA.translation().y();
-      solution_[j + k].pose[2] += Eigen::Rotation2Dd(DeltaA.rotation()).angle();
+    for (uint64_t k = 0; k < state_->solution.size() - j; k++) {
+      state_->solution[j + k].pose[0] += DeltaA.translation().x();
+      state_->solution[j + k].pose[1] += DeltaA.translation().y();
+      state_->solution[j + k].pose[2] += Eigen::Rotation2Dd(DeltaA.rotation()).angle();
     }
   }
 
-  // Call the visualization once more to see the finished optimization.
-  for (int i = 0; i < 5; i++) {
-    vis_callback_->PubVisualization();
-    sleep(1);
-  }
+  vis_->DrawSolution();
+  return state_->solution;
+}*/
 
-  return solution_;
-}
-
-vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
-  std::cout << "Optimizing, Trans Weight: "
-            << SolverConfig::CONFIG_translation_weight
-            << " Rotation Weight: " << SolverConfig::CONFIG_rotation_weight
-            << std::endl;
+void Solver::SolveSLAM() {
   // Setup ceres for evaluation of the problem.
   ceres::Solver::Options options;
   ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::SPARSE_SCHUR;
   options.minimizer_progress_to_stdout = false;
   options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
-  options.callbacks.push_back(vis_callback_.get());
+  options.callbacks.push_back(dynamic_cast<ceres::IterationCallback*>(vis_.get()));
   double difference = 0;
   double last_difference = std::numeric_limits<double>::max();
 
-  for (int i = 0; i < 5; i++) {
-    vis_callback_->PubVisualization();
-    sleep(1);
-  }
+  // Draw the initial solution
+  vis_->DrawSolution();
 
   // While our solution moves more than the stopping_accuracy,
   // continue to optimize.
@@ -179,37 +147,35 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
     LOG(INFO) << "Using window size: " << window_size << std::endl;
     while (abs(difference - last_difference) >
            SolverConfig::CONFIG_accuracy_change_stop_threshold) {
-      vis_callback_->ClearNormals();
       last_difference = difference;
       difference = 0;
       ceres_information.ResetProblem();
       // Add all the odometry constraints between our poses.
-      AddOdomFactors(ceres_information.problem.get(), problem_.odometry_factors,
+      AddOdomFactors(ceres_information.problem.get(), state_->problem.odometry_factors,
                      SolverConfig::CONFIG_translation_weight,
                      SolverConfig::CONFIG_rotation_weight);
       // For every SLAM node we want to optimize it against the past
       // lidar constraint amount nodes.
-      for (size_t node_i_index = 0; node_i_index < problem_.nodes.size();
+      for (size_t node_i_index = 0; node_i_index < state_->problem.nodes.size();
            node_i_index++) {
         std::mutex problem_mutex;
 #pragma omp parallel for
         for (size_t node_j_index =
                  std::max((int64_t)(node_i_index)-window_size, 0l);
              node_j_index < node_i_index; node_j_index++) {
-          PointCorrespondences correspondence(solution_[node_i_index].pose,
-                                              solution_[node_j_index].pose,
+          PointCorrespondences correspondence(state_->solution[node_i_index].pose,
+                                              state_->solution[node_j_index].pose,
                                               node_i_index, node_j_index);
           // Get the correspondences between these two poses.
           difference +=
-              GetPointCorrespondences(problem_.nodes[node_i_index].lidar_factor,
-                                      problem_.nodes[node_j_index].lidar_factor,
-                                      solution_[node_i_index].pose,
-                                      solution_[node_j_index].pose,
+              GetPointCorrespondences(state_->problem.nodes[node_i_index].lidar_factor,
+                                      state_->problem.nodes[node_j_index].lidar_factor,
+                                      state_->solution[node_i_index].pose,
+                                      state_->solution[node_j_index].pose,
                                       &correspondence) /
-              problem_.nodes[node_j_index].lidar_factor.pointcloud.size();
+              state_->problem.nodes[node_j_index].lidar_factor.pointcloud.size();
           // Add the correspondences as constraints in the optimization problem.
           problem_mutex.lock();
-          vis_callback_->UpdateLastCorrespondence(correspondence);
           ceres::ResidualBlockId id =
               ceres_information.problem->AddResidualBlock(
                   LIDARPointBlobResidual::create(correspondence.source_points,
@@ -223,17 +189,13 @@ vector<SLAMNodeSolution2D> Solver::SolveSLAM() {
         }
       }
       // Normalize the difference so it's an average over each node.
-      difference /= problem_.nodes.size();
+      difference /= state_->problem.nodes.size();
       AddHITLResiduals(ceres_information.problem.get());
       ceres::Solve(options, ceres_information.problem.get(), &summary);
     }
   }
   // Call the visualization once more to see the finished optimization.
-  for (int i = 0; i < 5; i++) {
-    vis_callback_->PubVisualization();
-    sleep(1);
-  }
-  return solution_;
+  vis_->DrawSolution();
 }
 
 void Solver::AddOdomFactors(ceres::Problem *ceres_problem,
@@ -241,16 +203,16 @@ void Solver::AddOdomFactors(ceres::Problem *ceres_problem,
                             double trans_weight, double rot_weight) {
   for (const OdometryFactor2D &odom_factor : factors) {
     CHECK_LT(odom_factor.pose_i, odom_factor.pose_j);
-    CHECK_GT(solution_.size(), odom_factor.pose_i);
-    CHECK_GT(solution_.size(), odom_factor.pose_j);
+    CHECK_GT(state_->solution.size(), odom_factor.pose_i);
+    CHECK_GT(state_->solution.size(), odom_factor.pose_j);
     ceres::ResidualBlockId id = ceres_problem->AddResidualBlock(
         OdometryResidual::create(odom_factor, trans_weight, rot_weight), NULL,
-        solution_[odom_factor.pose_i].pose, solution_[odom_factor.pose_j].pose);
+        state_->solution[odom_factor.pose_i].pose, state_->solution[odom_factor.pose_j].pose);
     ceres_information.res_descriptors.emplace_back(odom_factor.pose_i,
                                                    odom_factor.pose_j, id);
   }
-  if (solution_.size() > 0) {
-    ceres_problem->SetParameterBlockConstant(solution_[0].pose);
+  if (state_->solution.size() > 0) {
+    ceres_problem->SetParameterBlockConstant(state_->solution[0].pose);
   }
 }
 
@@ -368,8 +330,8 @@ double Solver::GetPointCorrespondences(
 
 OdometryFactor2D Solver::GetDifferenceOdom(const uint64_t node_a,
                                            const uint64_t node_b) {
-  double *pose_a = solution_[node_a].pose;
-  double *pose_b = solution_[node_b].pose;
+  double *pose_a = state_->solution[node_a].pose;
+  double *pose_b = state_->solution[node_b].pose;
   Vector2f translation(pose_b[0] - pose_a[0], pose_b[1] - pose_a[1]);
   float rotation = pose_b[2] - pose_a[2];
   return OdometryFactor2D(node_a, node_b, translation, rotation);
@@ -384,20 +346,20 @@ OdometryFactor2D Solver::GetDifferenceOdom(const uint64_t node_a,
 }
 
 vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
-  CHECK_GT(solution_.size(), 1);
+  CHECK_GT(state_->solution.size(), 1);
   vector<OdometryFactor2D> factors;
-  for (uint64_t index = 1; index < solution_.size(); index++) {
+  for (uint64_t index = 1; index < state_->solution.size(); index++) {
     // Get the change in translation.
     for (uint64_t prev_idx =
              std::max((uint64_t)0,
                       index - SolverConfig::CONFIG_lidar_constraint_amount_max);
          prev_idx < index; prev_idx++) {
-      Vector2f prev_loc(solution_[prev_idx].pose[0],
-                        solution_[prev_idx].pose[1]);
-      Vector2f loc(solution_[index].pose[0], solution_[index].pose[1]);
+      Vector2f prev_loc(state_->solution[prev_idx].pose[0],
+                        state_->solution[prev_idx].pose[1]);
+      Vector2f loc(state_->solution[index].pose[0], state_->solution[index].pose[1]);
 
       double rot_change =
-          solution_[index].pose[2] - solution_[prev_idx].pose[2];
+          state_->solution[index].pose[2] - state_->solution[prev_idx].pose[2];
       Vector2f trans_change = loc - prev_loc;
       factors.emplace_back(prev_idx, index, trans_change, rot_change);
     }
@@ -407,17 +369,17 @@ vector<OdometryFactor2D> Solver::GetSolvedOdomFactors() {
 
 vector<OdometryFactor2D> Solver::GetSolvedOdomFactorsBetweenNodes(uint64_t a,
                                                                   uint64_t b) {
-  CHECK_GT(solution_.size(), b);
+  CHECK_GT(state_->solution.size(), b);
   CHECK_GT(b, a);
   vector<OdometryFactor2D> factors;
   for (uint64_t index = a + 1; index <= b; index++) {
     // Get the change in translation.
     uint64_t prev_idx = index - 1;
-    Vector2f prev_loc(solution_[prev_idx].pose[0], solution_[prev_idx].pose[1]);
-    Vector2f loc(solution_[index].pose[0], solution_[index].pose[1]);
+    Vector2f prev_loc(state_->solution[prev_idx].pose[0], state_->solution[prev_idx].pose[1]);
+    Vector2f loc(state_->solution[index].pose[0], state_->solution[index].pose[1]);
 
-    double rot_change = math_util::AngleDiff(solution_[index].pose[2],
-                                             solution_[prev_idx].pose[2]);
+    double rot_change = math_util::AngleDiff(state_->solution[index].pose[2],
+                                             state_->solution[prev_idx].pose[2]);
     Vector2f trans_change = loc - prev_loc;
     factors.emplace_back(prev_idx, index, trans_change, rot_change);
   }
@@ -459,14 +421,14 @@ HitlLCConstraint Solver::GetRelevantPosesForHITL(
   // Go through all points and see if they lie on either of the two lines.
   const vector<LineSegment<float>> lines = LineSegmentsFromHitlMsg(hitl_msg);
   HitlLCConstraint hitl_constraint(lines[0], lines[1]);
-  for (size_t node_idx = 0; node_idx < problem_.nodes.size(); node_idx++) {
+  for (size_t node_idx = 0; node_idx < state_->problem.nodes.size(); node_idx++) {
     vector<Vector2f> points_on_a;
     vector<Vector2f> points_on_b;
-    double *pose_ptr = solution_[node_idx].pose;
+    double *pose_ptr = state_->solution[node_idx].pose;
     Affine2f node_to_world =
         PoseArrayToAffine(&pose_ptr[2], &pose_ptr[0]).cast<float>();
     for (const Vector2f &point :
-         problem_.nodes[node_idx].lidar_factor.pointcloud) {
+         state_->problem.nodes[node_idx].lidar_factor.pointcloud) {
       Vector2f point_transformed = node_to_world * point;
       if (DistanceToLineSegment(point_transformed, lines[0]) <=
           SolverConfig::CONFIG_hitl_line_width) {
@@ -492,23 +454,23 @@ void Solver::AddHITLResiduals(ceres::Problem *problem) {
   for (HitlLCConstraint &constraint : hitl_constraints_) {
     for (const LCPose &a_pose : constraint.line_a_poses) {
       const vector<Vector2f> &pointcloud_a = a_pose.points_on_feature;
-      CHECK_LT(a_pose.node_idx, solution_.size());
+      CHECK_LT(a_pose.node_idx, state_->solution.size());
       problem->AddResidualBlock(
           PointToLineResidual::create(constraint.line_a, pointcloud_a), NULL,
-          solution_[a_pose.node_idx].pose, constraint.chosen_line_pose);
+          state_->solution[a_pose.node_idx].pose, constraint.chosen_line_pose);
     }
     for (const LCPose &b_pose : constraint.line_b_poses) {
       const vector<Vector2f> &pointcloud_b = b_pose.points_on_feature;
-      CHECK_LT(b_pose.node_idx, solution_.size());
+      CHECK_LT(b_pose.node_idx, state_->solution.size());
       problem->AddResidualBlock(
           PointToLineResidual::create(constraint.line_a, pointcloud_b), NULL,
-          solution_[b_pose.node_idx].pose, constraint.chosen_line_pose);
+          state_->solution[b_pose.node_idx].pose, constraint.chosen_line_pose);
     }
   }
 }
 
 void Solver::HitlCallback(const HitlSlamInputMsgConstPtr &hitl_ptr) {
-  problem_.odometry_factors = GetSolvedOdomFactors();
+  state_->problem.odometry_factors = GetSolvedOdomFactors();
   const HitlSlamInputMsg hitl_msg = *hitl_ptr;
   // Get the poses that belong to this input.
   const HitlLCConstraint colinear_constraint =
@@ -517,13 +479,8 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr &hitl_ptr) {
             << " poses for the first line." << std::endl;
   std::cout << "Found " << colinear_constraint.line_b_poses.size()
             << " poses for the second line." << std::endl;
-  vis_callback_->AddConstraint(colinear_constraint);
-  for (int i = 0; i < 5; i++) {
-    vis_callback_->PubVisualization();
-    sleep(1);
-  }
+  // TODO: Re-add constraint visualization
   hitl_constraints_.push_back(colinear_constraint);
-  vis_callback_->PubVisualization();
   // Resolve the initial problem with extra pointcloud residuals between these
   // loop closed points.
   // TODO: Find a better way to set these up.
@@ -532,7 +489,7 @@ void Solver::HitlCallback(const HitlSlamInputMsgConstPtr &hitl_ptr) {
   std::cout << "Solving problem with HITL constraints..." << std::endl;
   SolveSLAM();
   // TODO: This is giving worse results.
-  problem_.odometry_factors = initial_odometry_factors;
+  state_->problem.odometry_factors = initial_odometry_factors;
   std::cout << "Solving problem with initial odometry constraints..."
             << std::endl;
   SolveSLAM();
@@ -544,14 +501,14 @@ vector<ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
   const uint64_t first_node = std::min(node_a, node_b);
   const uint64_t second_node = std::max(node_a, node_b);
   vector<ResidualDesc> res_desc;
-  PointCorrespondences correspondence(solution_[first_node].pose,
-                                      solution_[second_node].pose, first_node,
+  PointCorrespondences correspondence(state_->solution[first_node].pose,
+                                      state_->solution[second_node].pose, first_node,
                                       second_node);
   // Get the correspondences between these two poses.
-  GetPointCorrespondences(problem_.nodes[first_node].lidar_factor,
-                          problem_.nodes[second_node].lidar_factor,
-                          solution_[first_node].pose,
-                          solution_[second_node].pose, &correspondence);
+  GetPointCorrespondences(state_->problem.nodes[first_node].lidar_factor,
+                          state_->problem.nodes[second_node].lidar_factor,
+                          state_->solution[first_node].pose,
+                          state_->solution[second_node].pose, &correspondence);
   // Add the correspondences as constraints in the optimization problem.
   ceres::ResidualBlockId lidar_id;
   lidar_id = ceres_information.problem->AddResidualBlock(
@@ -567,7 +524,7 @@ vector<ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
       OdometryResidual::create(GetDifferenceOdom(first_node, second_node),
                                SolverConfig::CONFIG_lc_translation_weight,
                                SolverConfig::CONFIG_lc_rotation_weight),
-      NULL, solution_[first_node].pose, solution_[second_node].pose);
+      NULL, state_->solution[first_node].pose, state_->solution[second_node].pose);
   res_desc.emplace_back(node_a, node_b, odom_id);
   return res_desc;
 }
@@ -575,39 +532,6 @@ vector<ResidualDesc> Solver::AddLCResiduals(const uint64_t node_a,
 /*----------------------------------------------------------------------------*
  *                            MISC. SOLVER CALLBACKS                          |
  *----------------------------------------------------------------------------*/
-
-void Solver::LoadSLAMSolution(const char *poses_path) {
-  std::map<double, Vector3f> poses;
-  std::ifstream poses_file;
-  poses_file.open(poses_path);
-  if (poses_file.is_open()) {
-    double timestamp;
-    float pose_x, pose_y, theta;
-    while (poses_file >> timestamp >> pose_x >> pose_y >> theta) {
-      poses[timestamp] = Vector3f(pose_x, pose_y, theta);
-    }
-  }
-  poses_file.close();
-  std::cout << "Finished loading solution file." << std::endl;
-  for (size_t i = 0; i < solution_.size(); i++) {
-    std::stringstream ss;
-    ss << std::fixed << solution_[i].timestamp;
-    double timestamp = std::stod(ss.str());
-    if (poses.find(timestamp) != poses.end()) {
-      solution_[i].pose[0] = poses[timestamp][0];
-      solution_[i].pose[1] = poses[timestamp][1];
-      solution_[i].pose[2] = poses[timestamp][2];
-    } else {
-      printf("Unable to find solution for timestamp %f\n", timestamp);
-    }
-  }
-
-  // Call the visualization once more to see the finished optimization.
-  for (int i = 0; i < 5; i++) {
-    vis_callback_->PubVisualization();
-    sleep(1);
-  }
-}
 
 void Solver::WriteCallback(const WriteMsgConstPtr &msg) {
   if (SolverConfig::CONFIG_pose_output_file.compare("") == 0) {
@@ -617,7 +541,7 @@ void Solver::WriteCallback(const WriteMsgConstPtr &msg) {
   std::cout << "Writing Poses" << std::endl;
   std::ofstream output_file;
   output_file.open(SolverConfig::CONFIG_pose_output_file);
-  for (const SLAMNodeSolution2D &sol_node : solution_) {
+  for (const SLAMNodeSolution2D &sol_node : state_->solution) {
     output_file << std::fixed << sol_node.timestamp << " " << sol_node.pose[0]
                 << " " << sol_node.pose[1] << " " << sol_node.pose[2]
                 << std::endl;
@@ -629,9 +553,9 @@ void Solver::Vectorize(const WriteMsgConstPtr &msg) {
   std::cout << "Vectorizing" << std::endl;
   using VectorMaps::LineSegment;
   vector<Vector2f> whole_pointcloud;
-  for (const SLAMNode2D &n : problem_.nodes) {
+  for (const SLAMNode2D &n : state_->problem.nodes) {
     vector<Vector2f> pc = n.lidar_factor.pointcloud;
-    pc = TransformPointcloud(solution_[n.node_idx].pose, pc);
+    pc = TransformPointcloud(state_->solution[n.node_idx].pose, pc);
     whole_pointcloud.insert(whole_pointcloud.begin(), pc.begin(), pc.end());
   }
 

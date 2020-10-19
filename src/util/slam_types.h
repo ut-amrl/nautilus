@@ -43,6 +43,9 @@ struct LidarFactor {
   sensor_msgs::LaserScan scan;
   std::vector<Eigen::Vector2f> pointcloud;
   std::shared_ptr<KDTree<float, 2>> pointcloud_tree;
+
+  FeatureExtractor feature_extractor;
+
   LidarFactor() {
     pose_id = 0;
     pointcloud_tree = std::shared_ptr<KDTree<float, 2>>(nullptr);
@@ -157,6 +160,18 @@ struct SLAMNodeSolution2D {
         pose{n.pose.loc.x(), n.pose.loc.y(), n.pose.angle} {}
 
   SLAMNodeSolution2D() = default;
+};
+
+struct SLAMState2D {
+  SLAMProblem2D problem;
+  std::vector<SLAMNodeSolution2D> solution;
+
+  SLAMState2D(const SLAMProblem2D& prob) : problem(prob) {
+    solution.clear();
+    for (const auto& node : problem.nodes) {
+      solution.emplace_back(node);
+    }
+  };
 };
 
 }  // namespace slam_types

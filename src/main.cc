@@ -1,6 +1,7 @@
 #include <csignal>
 #include <vector>
 
+#include "Eigen/Dense"
 #include "config_reader/config_reader.h"
 #include "gflags/gflags.h"
 #include "glog/logging.h"
@@ -14,6 +15,7 @@
 #include "rosbag/view.h"
 #include "sensor_msgs/LaserScan.h"
 #include "util/slam_types.h"
+#include "visualization/solver_vis_ros.h"
 
 namespace nautilus {
 
@@ -24,6 +26,7 @@ using nautilus::WriteMsg;
 using slam_types::SLAMNode2D;
 using slam_types::SLAMNodeSolution2D;
 using slam_types::SLAMProblem2D;
+using slam_types::SLAMState2D;
 using std::string;
 using std::vector;
 
@@ -134,38 +137,37 @@ void SignalHandler(int signum) {
   exit(0);
 }
 
-void PopulateSLAMProblem(SLAMProblem2D& slam_problem, Solver& solver) {
-  // Iteratively add all the nodes and odometry factors.
-  for (uint64_t node_index = 0; node_index < slam_problem.nodes.size();
-       node_index++) {
-    if (node_index == 0) {
-      solver.AddSlamNode(slam_problem.nodes[0]);
-    } else {
-      solver.AddSLAMNodeOdom(slam_problem.nodes[node_index],
-                             slam_problem.odometry_factors[node_index - 1]);
+void LoadSolutionFromFile(std::shared_ptr<SLAMState2D> state, std::string poses_path) {
+  std::map<double, Eigen::Vector3f> poses;
+  std::ifstream poses_file;
+  poses_file.open(poses_path);
+  if (poses_file.is_open()) {
+    double timestamp;
+    float pose_x, pose_y, theta;
+    while (poses_file >> timestamp >> pose_x >> pose_y >> theta) {
+      poses[timestamp] = Eigen::Vector3f(pose_x, pose_y, theta);
     }
-    std::cout << "Nodes added: " << node_index + 1 << std::endl;
   }
-}
-
-void SolveSLAMProblem(SLAMProblem2D& slam_problem, Solver& solver) {
-  std::cout << "Solving SLAM Problem..." << std::endl;
-  solver.SolveSLAM();
-  // Do a final pass through and check for any LC nodes.
-  // But only if automatic loop closure is enabled.
-  if (CONFIG_auto_lc) {
-    std::cout << "Automatically loop closing" << std::endl;
-    std::ofstream lc_output_file;
-    lc_output_file.open(CONFIG_lc_debug_output_dir + "/lc_matches.txt",
-                        std::ios::trunc);
-    lc_output_file.close();
-    solver.SolveSLAM();
+  poses_file.close();
+  std::cout << "Finished loading solution file." << std::endl;
+  for (size_t i = 0; i < state->solution.size(); i++) {
+    std::stringstream ss;
+    ss << std::fixed << state->solution[i].timestamp;
+    double timestamp = std::stod(ss.str());
+    if (poses.find(timestamp) != poses.end()) {
+      state->solution[i].pose[0] = poses[timestamp][0];
+      state->solution[i].pose[1] = poses[timestamp][1];
+      state->solution[i].pose[2] = poses[timestamp][2];
+    } else {
+      printf("Unable to find solution for timestamp %f\n", timestamp);
+    }
   }
 }
 
 }  // namespace nautilus
 
 using nautilus::Solver;
+using nautilus::slam_types::SLAMState2D;
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(*argv);
@@ -189,17 +191,20 @@ int main(int argc, char** argv) {
   CHECK_GT(slam_problem.nodes.size(), 1)
       << " Not enough nodes were processed"
       << " you probably didn't specify the correct topics!\n";
-  // Load all the residuals into the problem and run to get initial solution.
-  Solver solver(n);
-  nautilus::PopulateSLAMProblem(slam_problem, solver);
+  // Construct the slam state.
+  std::shared_ptr<SLAMState2D> state = std::make_shared<SLAMState2D>(slam_problem);
+  // Check if there is a pre-existing solution file to load.
   if (nautilus::FLAGS_solution_poses != "") {
     std::cout << "Loading solution poses; skipping SLAM solving step."
               << std::endl;
-    solver.LoadSLAMSolution(nautilus::FLAGS_solution_poses.c_str());
-  } else {
-    nautilus::SolveSLAMProblem(slam_problem, solver);
+    nautilus::LoadSolutionFromFile(state, nautilus::FLAGS_solution_poses);
   }
-
+  // Load all the residuals into the problem and run to get initial solution.
+  std::unique_ptr<nautilus::visualization::SolverVisualizerROS> vis =
+      std::make_unique<nautilus::visualization::SolverVisualizerROS>(state, n);
+  Solver solver(n, state, std::move(vis));
+  // Call the solver once.
+  solver.SolveSLAM();
   std::cout << "Waiting for Loop Closure input" << std::endl;
   ros::Subscriber hitl_sub = n.subscribe(nautilus::CONFIG_hitl_lc_topic, 10,
                                          &Solver::HitlCallback, &solver);

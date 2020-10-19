@@ -50,6 +50,18 @@ struct HitlLCConstraint {
   HitlLCConstraint() {}
 };
 
+// Represents a generic correspondence between two points that are in their poses frame.
+struct Correspondence {
+    // point indexes are the index of the points in form <A, B>
+    // Where A is an index in pose a's points, and B is an index in pose b's points.
+    std::vector<std::pair<size_t, size_t>> point_indexes;
+    size_t pose_a;
+    size_t pose_b;
+
+    Correspondence(std::vector<std::pair<size_t, size_t>> indexes, size_t a, size_t b) :
+      point_indexes(indexes), pose_a(a), pose_b (b) {};
+};
+
 struct AutoLCConstraint {
   const slam_types::SLAMNode2D* node_a;
   const slam_types::SLAMNode2D* node_b;

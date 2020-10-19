@@ -154,3 +154,6 @@ nc_mean_distance=0.1
 
 -- The number of buckets to use in the Hough transform.
 nc_bin_number=32
+
+-- TODO: Remove This, just for feature testing.
+sampling_distance=0.25

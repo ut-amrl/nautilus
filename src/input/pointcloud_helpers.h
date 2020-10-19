@@ -19,7 +19,7 @@ void InitPointcloud(sensor_msgs::PointCloud2* point);
 void PushBackBytes(float val, sensor_msgs::PointCloud2* ptr);
 void PublishPointcloud(const std::vector<Eigen::Vector2f>& points,
                        sensor_msgs::PointCloud2* point_cloud,
-                       ros::Publisher& pub);
+                       const ros::Publisher& pub);
 std::vector<Eigen::Vector2f> normalizePointCloud(
     const std::vector<Eigen::Vector2f>& pointcloud, double range);
 sensor_msgs::PointCloud2 EigenPointcloudToRos(

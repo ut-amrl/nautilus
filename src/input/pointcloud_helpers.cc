@@ -80,7 +80,7 @@ void PushBackBytes(float val, sensor_msgs::PointCloud2 *ptr) {
 }
 
 void PublishPointcloud(const vector<Vector2f> &points, PointCloud2 *point_cloud,
-                       Publisher &pub) {
+                       const Publisher &pub) {
   CHECK_NOTNULL(point_cloud);
   for (uint64_t i = 0; i < points.size(); i++) {
     Vector2f vec = points[i];
