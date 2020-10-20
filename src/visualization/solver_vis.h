@@ -11,7 +11,7 @@ namespace nautilus::visualization {
 
 class SolverVisualizer : public ceres::IterationCallback {
 public:
-  SolverVisualizer(std::shared_ptr<slam_types::SLAMState2D>& state)
+  SolverVisualizer(std::shared_ptr<slam_types::SLAMState2D> state)
   : state_(state) {}
 
   // So that every ceres iteration callback will update the solution.

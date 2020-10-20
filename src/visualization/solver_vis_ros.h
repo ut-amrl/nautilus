@@ -14,12 +14,14 @@ namespace nautilus::visualization {
 
 class SolverVisualizerROS : public SolverVisualizer {
 public:
-    SolverVisualizerROS(std::shared_ptr<slam_types::SLAMState2D>& state, ros::NodeHandle& n);
+    SolverVisualizerROS(std::shared_ptr<slam_types::SLAMState2D> state, ros::NodeHandle& n);
     void DrawSolution() const;
     void DrawCorrespondence(const Correspondence&) const;
 private:
     ros::Publisher points_pub_;
     ros::Publisher poses_pub_;
+    ros::Publisher edge_pub_;
+    ros::Publisher planar_pub_;
 };
 
 }

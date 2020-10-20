@@ -74,10 +74,13 @@ class Solver {
   Solver(ros::NodeHandle& n, std::shared_ptr<slam_types::SLAMState2D> state, std::unique_ptr<visualization::SolverVisualizer> vis);
   void SolveSLAM();
   std::vector<slam_types::SLAMNodeSolution2D> SolvePoseSLAM();
-  double GetPointCorrespondences(const slam_types::LidarFactor& source_lidar,
-                                 const slam_types::LidarFactor& target_lidar,
-                                 double* source_pose, double* target_pose,
-                                 PointCorrespondences* point_correspondences);
+  double GetPointCorrespondences(
+    const vector<Eigen::Vector2f> source_pointcloud,
+    const std::shared_ptr<KDTree<float, 2>> source_tree,
+    const vector<Eigen::Vector2f> target_pointcloud,
+    const std::shared_ptr<KDTree<float, 2>> target_tree,
+    double *source_pose, double *target_pose,
+    PointCorrespondences *point_correspondences);
   void AddOdomFactors(ceres::Problem* ceres_problem,
                       std::vector<slam_types::OdometryFactor2D> factors,
                       double trans_weight, double rot_weight);
