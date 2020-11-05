@@ -50,17 +50,30 @@ struct HitlLCConstraint {
   HitlLCConstraint() {}
 };
 
-// Represents a generic correspondence between two points that are in their poses frame.
-struct Correspondence {
-    // point indexes are the index of the points in form <A, B>
-    // Where A is an index in pose a's points, and B is an index in pose b's points.
-    std::vector<std::pair<size_t, size_t>> point_indexes;
-    size_t pose_a;
-    size_t pose_b;
-
-    Correspondence(std::vector<std::pair<size_t, size_t>> indexes, size_t a, size_t b) :
-      point_indexes(indexes), pose_a(a), pose_b (b) {};
-};
+// A class to represent a single correpondence between two poses.
+// Correspondence is a virtual class that should be overriden and implemented
+// for the specific type of correpondence that you want.
+// class Correspondence {
+// public:
+//  Correspondence(size_t node_a_index, size_t node_b_index_) :
+//    node_a_index_(node_a_index), node_b_index_(node_b_index) {}
+// protected:
+//  size_t node_a_index_;
+//  size_t node_b_index_;
+//};
+//
+//
+//// TODO: Come back and make this the overall type of correspondence.
+// class PointCorrespondence : public Correspondence {
+// public:
+//  PointCorrespondence(size_t node_a_index, size_t node_b_index, size_t
+//  points_a, size_t points_b) :
+//    Correspondence(node_a, node_b), points_a_(points_a), points_b_(points_b)
+//    {}
+// private:
+//  std::vector<Eigen::Vector2f> points_a_;
+//  std::vector<Eigen::Vector2f> points_b_;
+//};
 
 struct AutoLCConstraint {
   const slam_types::SLAMNode2D* node_a;

@@ -24,7 +24,7 @@ public:
     // Do nothing here.
   }
 
-  virtual void DrawCorrespondence(const Correspondence&) const {
+  virtual void DrawCorrespondence(const PointCorrespondences&) const {
     // Do nothing here.
   }
 protected:

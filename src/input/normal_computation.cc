@@ -77,6 +77,8 @@ vector<Vector2f> GetNormals(const vector<Vector2f> &points) {
   // Pick the most selected bin and set the normal of this point to the average
   // angle of that bin.
   // Compute the line using that angle and a point at (1,0).
+  CHECK_GT(NormalComputationConfig::CONFIG_neighborhood_size, 0.0);
+  CHECK_GT(NormalComputationConfig::CONFIG_neighborhood_step_size, 0.0);
   srand(time(NULL));
   KDTree<float, 2> *tree =
       new KDTree<float, 2>(KDTree<float, 2>::EigenToKDNoNormals(points));

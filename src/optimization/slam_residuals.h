@@ -29,7 +29,8 @@ struct OdometryResidual {
     const Vector2T error_translation = Ti + T_odom.cast<T>() - Tj;
     // Rotation error is very similar to the translation error, except
     // we don't care about the difference in the position.
-    const T error_rotation = pose_i[2] + T(R_odom) - pose_j[2];
+    const T rotation_diff = pose_i[2] + T(R_odom) - pose_j[2];
+    const T error_rotation = atan2(sin(rotation_diff), cos(rotation_diff));
     // The residuals are weighted according to the parameters set
     // by the user.
     residual[0] = T(translation_weight) * error_translation.x();
@@ -59,9 +60,8 @@ struct OdometryResidual {
   const Eigen::Vector2f T_odom;
 };
 
-struct LIDARPointBlobResidual {
-  // TODO: Add the source normals penalization as well.
-  // Would cause there to be two normals.
+// Lidar Normal Residual
+struct LIDARNormalResidual {
   template <typename T>
   bool operator()(const T *source_pose, const T *target_pose,
                   T *residuals) const {
@@ -88,10 +88,10 @@ struct LIDARPointBlobResidual {
     return true;
   }
 
-  LIDARPointBlobResidual(std::vector<Eigen::Vector2f> &source_points,
-                         std::vector<Eigen::Vector2f> &target_points,
-                         std::vector<Eigen::Vector2f> &source_normals,
-                         std::vector<Eigen::Vector2f> &target_normals)
+  LIDARNormalResidual(std::vector<Eigen::Vector2f> &source_points,
+                      std::vector<Eigen::Vector2f> &target_points,
+                      std::vector<Eigen::Vector2f> &source_normals,
+                      std::vector<Eigen::Vector2f> &target_normals)
       : source_points(source_points),
         target_points(target_points),
         source_normals(source_normals),
@@ -101,17 +101,73 @@ struct LIDARPointBlobResidual {
     CHECK_EQ(source_normals.size(), target_normals.size());
   }
 
-  static ceres::AutoDiffCostFunction<LIDARPointBlobResidual, ceres::DYNAMIC, 3,
-                                     3>
+  static ceres::AutoDiffCostFunction<LIDARNormalResidual, ceres::DYNAMIC, 3, 3>
       *create(std::vector<Eigen::Vector2f> &source_points,
               std::vector<Eigen::Vector2f> &target_points,
               std::vector<Eigen::Vector2f> &source_normals,
               std::vector<Eigen::Vector2f> &target_normals) {
-    LIDARPointBlobResidual *residual = new LIDARPointBlobResidual(
+    CHECK_GT(source_points.size(), 0);
+    LIDARNormalResidual *residual = new LIDARNormalResidual(
         source_points, target_points, source_normals, target_normals);
-    return new ceres::AutoDiffCostFunction<LIDARPointBlobResidual,
-                                           ceres::DYNAMIC, 3, 3>(
-        residual, source_points.size() * 2);
+    return new ceres::AutoDiffCostFunction<LIDARNormalResidual, ceres::DYNAMIC,
+                                           3, 3>(residual,
+                                                 source_points.size() * 2);
+  }
+
+  const std::vector<Eigen::Vector2f> source_points;
+  const std::vector<Eigen::Vector2f> target_points;
+  const std::vector<Eigen::Vector2f> source_normals;
+  const std::vector<Eigen::Vector2f> target_normals;
+};
+
+struct LIDARPointResidual {
+  template <typename T>
+  bool operator()(const T *source_pose, const T *target_pose,
+                  T *residuals) const {
+    typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
+    typedef Eigen::Matrix<T, 2, 1> Vector2T;
+    const Affine2T source_to_world =
+        PoseArrayToAffine(&source_pose[2], &source_pose[0]);
+    const Affine2T world_to_target =
+        PoseArrayToAffine(&target_pose[2], &target_pose[0]).inverse();
+    const Affine2T source_to_target = world_to_target * source_to_world;
+#pragma omp parallel for shared(residuals)
+    for (size_t index = 0; index < source_points.size(); index++) {
+      Vector2T source_pointT = source_points[index].cast<T>();
+      Vector2T target_pointT = target_points[index].cast<T>();
+      // Transform source_point into the frame of target_point
+      source_pointT = source_to_target * source_pointT;
+      Vector2T difference_in_target = target_pointT - source_pointT;
+      residuals[index * 2] = difference_in_target(0);
+      residuals[index * 2 + 1] = difference_in_target(1);
+    }
+    return true;
+  }
+
+  LIDARPointResidual(std::vector<Eigen::Vector2f> &source_points,
+                     std::vector<Eigen::Vector2f> &target_points,
+                     std::vector<Eigen::Vector2f> &source_normals,
+                     std::vector<Eigen::Vector2f> &target_normals)
+      : source_points(source_points),
+        target_points(target_points),
+        source_normals(source_normals),
+        target_normals(target_normals) {
+    CHECK_EQ(source_points.size(), target_points.size());
+    CHECK_EQ(target_points.size(), target_normals.size());
+    CHECK_EQ(source_normals.size(), target_normals.size());
+  }
+
+  static ceres::AutoDiffCostFunction<LIDARPointResidual, ceres::DYNAMIC, 3, 3>
+      *create(std::vector<Eigen::Vector2f> &source_points,
+              std::vector<Eigen::Vector2f> &target_points,
+              std::vector<Eigen::Vector2f> &source_normals,
+              std::vector<Eigen::Vector2f> &target_normals) {
+    CHECK_GT(source_points.size(), 0);
+    LIDARPointResidual *residual = new LIDARPointResidual(
+        source_points, target_points, source_normals, target_normals);
+    return new ceres::AutoDiffCostFunction<LIDARPointResidual, ceres::DYNAMIC,
+                                           3, 3>(residual,
+                                                 source_points.size() * 2);
   }
 
   const std::vector<Eigen::Vector2f> source_points;

@@ -5,29 +5,28 @@
 #ifndef SRC_SOLVER_H_
 #define SRC_SOLVER_H_
 
+#include <boost/math/distributions/chi_squared.hpp>
 #include <vector>
 
-#include <boost/math/distributions/chi_squared.hpp>
-#include "Eigen/Dense"
-#include "ceres/ceres.h"
-#include "geometry_msgs/PoseArray.h"
-#include "glog/logging.h"
-#include "ros/node_handle.h"
-#include "ros/package.h"
-#include "sensor_msgs/PointCloud2.h"
-#include "visualization_msgs/Marker.h"
-
-#include "nautilus/HitlSlamInputMsg.h"
-#include "nautilus/WriteMsg.h"
-#include "../util/slam_util.h"
 #include "../input/pointcloud_helpers.h"
 #include "../util/gui_helpers.h"
 #include "../util/kdtree.h"
 #include "../util/slam_types.h"
+#include "../util/slam_util.h"
+#include "../visualization/solver_vis.h"
 #include "./data_structures.h"
 #include "CorrelativeScanMatcher.h"
+#include "Eigen/Dense"
+#include "ceres/ceres.h"
 #include "config_reader/config_reader.h"
-#include "../visualization/solver_vis.h"
+#include "geometry_msgs/PoseArray.h"
+#include "glog/logging.h"
+#include "nautilus/HitlSlamInputMsg.h"
+#include "nautilus/WriteMsg.h"
+#include "ros/node_handle.h"
+#include "ros/package.h"
+#include "sensor_msgs/PointCloud2.h"
+#include "visualization_msgs/Marker.h"
 
 namespace nautilus {
 namespace SolverConfig {
@@ -71,16 +70,25 @@ CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
 
 class Solver {
  public:
-  Solver(ros::NodeHandle& n, std::shared_ptr<slam_types::SLAMState2D> state, std::unique_ptr<visualization::SolverVisualizer> vis);
+  Solver(ros::NodeHandle& n, std::shared_ptr<slam_types::SLAMState2D> state,
+         std::unique_ptr<visualization::SolverVisualizer> vis);
   void SolveSLAM();
   std::vector<slam_types::SLAMNodeSolution2D> SolvePoseSLAM();
   double GetPointCorrespondences(
+      const vector<Eigen::Vector2f> source_pointcloud,
+      const std::shared_ptr<KDTree<float, 2>> source_tree,
+      const vector<Eigen::Vector2f> target_pointcloud,
+      const std::shared_ptr<KDTree<float, 2>> target_tree,
+      const std::shared_ptr<KDTree<float, 2>> target_norm_tree,
+      double* source_pose, double* target_pose,
+      PointCorrespondences* point_correspondences);
+  double GetPointCorrespondencesByNormal(
     const vector<Eigen::Vector2f> source_pointcloud,
     const std::shared_ptr<KDTree<float, 2>> source_tree,
     const vector<Eigen::Vector2f> target_pointcloud,
     const std::shared_ptr<KDTree<float, 2>> target_tree,
-    double *source_pose, double *target_pose,
-    PointCorrespondences *point_correspondences);
+    const std::shared_ptr<KDTree<float, 2>> norm_tree, double *source_pose,
+    double *target_pose, PointCorrespondences *point_correspondences);
   void AddOdomFactors(ceres::Problem* ceres_problem,
                       std::vector<slam_types::OdometryFactor2D> factors,
                       double trans_weight, double rot_weight);
@@ -114,7 +122,7 @@ class Solver {
                        slam_types::SLAMNode2D& keyframe);
   AutoLCConstraint computeAutoLCConstraint(const uint64_t node_a,
                                            const uint64_t node_b);
-  
+
   slam_types::OdometryFactor2D GetTotalOdomChange(
       const std::vector<slam_types::OdometryFactor2D>& factors);
   std::vector<slam_types::OdometryFactor2D> GetSolvedOdomFactorsBetweenNodes(

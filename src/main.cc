@@ -131,9 +131,10 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
 }
 
 void SignalHandler(int signum) {
-  printf("Exiting with %d\n", signum);
   asking_for_input = false;
+  std::cout << "Shutting down" << std::endl;
   ros::shutdown();
+  std::cout << "ROS Shutdown" << std::endl;
   exit(0);
 }
 
@@ -181,7 +182,7 @@ int main(int argc, char** argv) {
     printf("Must specify an input bag!\n");
     exit(1);
   }
-  ros::init(argc, argv, "nautilus");
+  ros::init(argc, argv, "nautilus", ros::init_options::NoSigintHandler);
   ros::NodeHandle n;
   signal(SIGINT, nautilus::SignalHandler);
   // Load and pre-process the data.
@@ -199,12 +200,28 @@ int main(int argc, char** argv) {
               << std::endl;
     nautilus::LoadSolutionFromFile(state, nautilus::FLAGS_solution_poses);
   }
+
   // Load all the residuals into the problem and run to get initial solution.
   std::unique_ptr<nautilus::visualization::SolverVisualizerROS> vis =
       std::make_unique<nautilus::visualization::SolverVisualizerROS>(state, n);
   Solver solver(n, state, std::move(vis));
+  // Wait for RViz to start before we solve so visualization will be displayed.
+  ros::service::waitForService("/rviz/reload_shaders");
   // Call the solver once.
   solver.SolveSLAM();
+
+  // TODO :Remove
+//  double last_x = 0.0;
+//  double last_y = 0.0;
+//  for (const auto& sol_node : state->solution) {
+//    Eigen::Vector2f diff(sol_node.pose[0] - last_x, sol_node.pose[1] - last_y);
+//    if (diff.norm() >= 0.35) {
+//      std::cout << "Difference Between " << sol_node.node_idx << " " << (sol_node.node_idx - 1) << std::endl;
+//    }
+//    last_x = sol_node.pose[0];
+//    last_y = sol_node.pose[1];
+//  }
+
   std::cout << "Waiting for Loop Closure input" << std::endl;
   ros::Subscriber hitl_sub = n.subscribe(nautilus::CONFIG_hitl_lc_topic, 10,
                                          &Solver::HitlCallback, &solver);
@@ -212,6 +229,9 @@ int main(int argc, char** argv) {
       n.subscribe("/write_output", 10, &Solver::WriteCallback, &solver);
   ros::Subscriber vector_sub =
       n.subscribe("/vectorize_output", 10, &Solver::Vectorize, &solver);
-  ros::spin();
+  // Wait for input
+  while (ros::ok()) {
+    ros::spinOnce();
+  }
   return 0;
 }
