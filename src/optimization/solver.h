@@ -68,13 +68,19 @@ CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
  *                                SOLVER                                      |
  *----------------------------------------------------------------------------*/
 
+enum class PointcloudType {
+    PLANAR,
+    EDGE,
+    ALL
+};
+
 class Solver {
  public:
   Solver(ros::NodeHandle& n, std::shared_ptr<slam_types::SLAMState2D> state,
          std::unique_ptr<visualization::SolverVisualizer> vis);
   void SolveSLAM();
   std::vector<slam_types::SLAMNodeSolution2D> SolvePoseSLAM();
-  double GetPointCorrespondences(
+      double GetPointCorrespondences(
       const vector<Eigen::Vector2f> source_pointcloud,
       const std::shared_ptr<KDTree<float, 2>> source_tree,
       const vector<Eigen::Vector2f> target_pointcloud,
@@ -83,12 +89,12 @@ class Solver {
       double* source_pose, double* target_pose,
       PointCorrespondences* point_correspondences);
   double GetPointCorrespondencesByNormal(
-    const vector<Eigen::Vector2f> source_pointcloud,
-    const std::shared_ptr<KDTree<float, 2>> source_tree,
-    const vector<Eigen::Vector2f> target_pointcloud,
-    const std::shared_ptr<KDTree<float, 2>> target_tree,
-    const std::shared_ptr<KDTree<float, 2>> norm_tree, double *source_pose,
-    double *target_pose, PointCorrespondences *point_correspondences);
+      const vector<Eigen::Vector2f> source_pointcloud,
+      const std::shared_ptr<KDTree<float, 2>> source_tree,
+      const vector<Eigen::Vector2f> target_pointcloud,
+      const std::shared_ptr<KDTree<float, 2>> target_tree,
+      const std::shared_ptr<KDTree<float, 2>> norm_tree, double* source_pose,
+      double* target_pose, PointCorrespondences* point_correspondences);
   void AddOdomFactors(ceres::Problem* ceres_problem,
                       std::vector<slam_types::OdometryFactor2D> factors,
                       double trans_weight, double rot_weight);
@@ -106,7 +112,8 @@ class Solver {
   std::vector<slam_types::OdometryFactor2D> GetSolvedOdomFactors();
 
  private:
-  double CostFromResidualDescriptor(const ResidualDesc& res_desc);
+  PointCorrespondences GetPointToPointMatching(int source_node_idx, int target_node_idx, PointcloudType type);
+      double CostFromResidualDescriptor(const ResidualDesc& res_desc);
   double GetChiSquareCost(uint64_t node_a, uint64_t node_b);
   slam_types::OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
                                                  const uint64_t node_b);

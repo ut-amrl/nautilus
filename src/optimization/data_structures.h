@@ -93,6 +93,7 @@ struct PointCorrespondences {
   double* target_pose;
   uint64_t source_index;
   uint64_t target_index;
+  double difference = 0.0;
   PointCorrespondences(double* source_pose, double* target_pose,
                        uint64_t source_index, uint64_t target_index)
       : source_pose(source_pose),
@@ -101,6 +102,10 @@ struct PointCorrespondences {
         target_index(target_index) {
     CHECK_NOTNULL(source_pose);
     CHECK_NOTNULL(target_pose);
+  }
+  PointCorrespondences(uint64_t source_index, uint64_t target_index) :
+    source_index(source_index), target_index(target_index) {
+
   }
   PointCorrespondences()
       : source_pose(nullptr),
