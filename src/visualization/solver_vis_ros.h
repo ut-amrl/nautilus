@@ -5,26 +5,27 @@
 #ifndef NAUTILUS_SOLVER_VIS_IMPL_H
 #define NAUTILUS_SOLVER_VIS_IMPL_H
 
-#include "ros/ros.h"
-
 #include "../util/slam_types.h"
 #include "./solver_vis.h"
+#include "ros/ros.h"
 
 namespace nautilus::visualization {
 
 class SolverVisualizerROS : public SolverVisualizer {
-public:
-    SolverVisualizerROS(std::shared_ptr<slam_types::SLAMState2D> state, ros::NodeHandle& n);
-    void DrawSolution() const;
-    void DrawCorrespondence(const PointCorrespondences&) const;
-private:
-    ros::Publisher points_pub_;
-    ros::Publisher poses_pub_;
-    ros::Publisher edge_pub_;
-    ros::Publisher planar_pub_;
-    ros::Publisher correspondence_pub_;
+ public:
+  SolverVisualizerROS(std::shared_ptr<slam_types::SLAMState2D> state,
+                      ros::NodeHandle& n);
+  void DrawSolution() const;
+  void DrawCorrespondence(const PointCorrespondences&) const;
+
+ private:
+  ros::Publisher points_pub_;
+  ros::Publisher poses_pub_;
+  ros::Publisher edge_pub_;
+  ros::Publisher planar_pub_;
+  ros::Publisher correspondence_pub_;
 };
 
-}
+}  // namespace nautilus::visualization
 
-#endif //NAUTILUS_SOLVER_VIS_IMPL_H
+#endif  // NAUTILUS_SOLVER_VIS_IMPL_H

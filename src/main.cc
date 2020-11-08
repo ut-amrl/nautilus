@@ -128,7 +128,8 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
   return slam_builder.GetSlamProblem();
 }
 
-void LoadSolutionFromFile(std::shared_ptr<SLAMState2D> state, std::string poses_path) {
+void LoadSolutionFromFile(std::shared_ptr<SLAMState2D> state,
+                          std::string poses_path) {
   std::map<double, Eigen::Vector3f> poses;
   std::ifstream poses_file;
   poses_file.open(poses_path);
@@ -182,7 +183,8 @@ int main(int argc, char** argv) {
       << " Not enough nodes were processed"
       << " you probably didn't specify the correct topics!\n";
   // Construct the slam state.
-  std::shared_ptr<SLAMState2D> state = std::make_shared<SLAMState2D>(slam_problem);
+  std::shared_ptr<SLAMState2D> state =
+      std::make_shared<SLAMState2D>(slam_problem);
   // Check if there is a pre-existing solution file to load.
   if (nautilus::FLAGS_solution_poses != "") {
     std::cout << "Loading solution poses; skipping SLAM solving step."
@@ -200,16 +202,17 @@ int main(int argc, char** argv) {
   solver.SolveSLAM();
 
   // TODO :Remove
-//  double last_x = 0.0;
-//  double last_y = 0.0;
-//  for (const auto& sol_node : state->solution) {
-//    Eigen::Vector2f diff(sol_node.pose[0] - last_x, sol_node.pose[1] - last_y);
-//    if (diff.norm() >= 0.35) {
-//      std::cout << "Difference Between " << sol_node.node_idx << " " << (sol_node.node_idx - 1) << std::endl;
-//    }
-//    last_x = sol_node.pose[0];
-//    last_y = sol_node.pose[1];
-//  }
+  //  double last_x = 0.0;
+  //  double last_y = 0.0;
+  //  for (const auto& sol_node : state->solution) {
+  //    Eigen::Vector2f diff(sol_node.pose[0] - last_x, sol_node.pose[1] -
+  //    last_y); if (diff.norm() >= 0.35) {
+  //      std::cout << "Difference Between " << sol_node.node_idx << " " <<
+  //      (sol_node.node_idx - 1) << std::endl;
+  //    }
+  //    last_x = sol_node.pose[0];
+  //    last_y = sol_node.pose[1];
+  //  }
 
   std::cout << "Waiting for Loop Closure input" << std::endl;
   ros::Subscriber hitl_sub = n.subscribe(nautilus::CONFIG_hitl_lc_topic, 10,

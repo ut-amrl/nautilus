@@ -7,17 +7,18 @@
 
 #include <vector>
 
+#include "../optimization/data_structures.h"
 #include "Eigen/Dense"
 #include "ceres/ceres.h"
-#include "../optimization/data_structures.h"
 
 namespace nautilus {
 
-/* Implements the common SLAM utility functions for transforming by poses and the like */
+/* Implements the common SLAM utility functions for transforming by poses and
+ * the like */
 
-template<typename T>
+template <typename T>
 inline Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(
-        const T *rotation, const T *translation) {
+    const T *rotation, const T *translation) {
   typedef Eigen::Transform<T, 2, Eigen::Affine> Affine2T;
   typedef Eigen::Rotation2D<T> Rotation2DT;
   typedef Eigen::Translation<T, 2> Translation2T;
@@ -26,20 +27,20 @@ inline Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(
   return affine;
 }
 
-template<typename T>
+template <typename T>
 inline Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(
-        const T *pose_array) {
+    const T *pose_array) {
   return PoseArrayToAffine(&pose_array[2], &pose_array[0]);
 }
 
-template<typename T>
-inline Eigen::Transform<T, 2, Eigen::Affine> GetPoseAsAffine(const std::shared_ptr<slam_types::SLAMState2D> state,
-                                                             int index) {
+template <typename T>
+inline Eigen::Transform<T, 2, Eigen::Affine> GetPoseAsAffine(
+    const std::shared_ptr<slam_types::SLAMState2D> state, int index) {
   return PoseArrayToAffine<double>(state->solution[index].pose).cast<T>();
 }
 
-inline std::vector<Eigen::Vector2f> TransformPointcloud(double *pose,
-                                                        const std::vector<Eigen::Vector2f>& pointcloud) {
+inline std::vector<Eigen::Vector2f> TransformPointcloud(
+    double *pose, const std::vector<Eigen::Vector2f> &pointcloud) {
   std::vector<Eigen::Vector2f> pcloud;
   Eigen::Affine2f trans = PoseArrayToAffine(&pose[2], &pose[0]).cast<float>();
   for (const Eigen::Vector2f &p : pointcloud) {
@@ -69,12 +70,12 @@ inline Eigen::MatrixXd CRSToEigen(const ceres::CRSMatrix &crs_matrix) {
 }
 
 // Returns if val is between a and b.
-template<typename T>
+template <typename T>
 bool IsBetween(const T &val, const T &a, const T &b) {
   return (val >= a && val <= b) || (val >= b && val <= a);
 }
 
-template<typename T>
+template <typename T>
 T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1> &point,
                         const LineSegment<T> &line_seg) {
   typedef Eigen::Matrix<T, 2, 1> Vector2T;
@@ -83,7 +84,7 @@ T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1> &point,
   // We can get the point on the line by projecting the start -> point onto
   // this line.
   Eigen::Hyperplane<T, 2> line =
-          Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.end);
+      Eigen::Hyperplane<T, 2>::Through(line_seg.start, line_seg.end);
   Vector2T point_on_line = line.projection(point);
   if (IsBetween(point_on_line.x(), line_seg.start.x(), line_seg.end.x()) &&
       IsBetween(point_on_line.y(), line_seg.start.y(), line_seg.end.y())) {
@@ -95,6 +96,6 @@ T DistanceToLineSegment(const Eigen::Matrix<T, 2, 1> &point,
   return std::min<T>(dist_to_start, dist_to_endpoint);
 }
 
-}
+}  // namespace nautilus
 
-#endif //NAUTILUS_SLAM_UTIL_H
+#endif  // NAUTILUS_SLAM_UTIL_H

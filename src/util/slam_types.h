@@ -27,13 +27,12 @@
 #include <utility>
 #include <vector>
 
+#include "../input/feature_extracter.h"
+#include "./kdtree.h"
+#include "./math_util.h"
 #include "eigen3/Eigen/Dense"
 #include "eigen3/Eigen/Geometry"
 #include "sensor_msgs/LaserScan.h"
-
-#include "./kdtree.h"
-#include "./math_util.h"
-#include "../input/feature_extracter.h"
 
 namespace nautilus {
 
@@ -68,10 +67,10 @@ struct LidarFactor {
     planar_points = feature_extracter.GetPlanarPoints();
     edge_points = feature_extracter.GetEdgePoints();
 
-    planar_tree =
-      std::shared_ptr<KDTree<float, 2>>(new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(planar_points))); 
-    edge_tree =
-      std::shared_ptr<KDTree<float, 2>>(new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(edge_points)));
+    planar_tree = std::shared_ptr<KDTree<float, 2>>(
+        new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(planar_points)));
+    edge_tree = std::shared_ptr<KDTree<float, 2>>(
+        new KDTree<float, 2>(KDTree<float, 2>::EigenToKD(edge_points)));
   }
 };
 
