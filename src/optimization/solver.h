@@ -64,37 +64,15 @@ CONFIG_DOUBLE(translation_std_dev, "translation_standard_deviation");
 CONFIG_DOUBLE(rotation_std_dev, "rotation_standard_deviation");
 };  // namespace SolverConfig
 
-/*----------------------------------------------------------------------------*
- *                                SOLVER                                      |
- *----------------------------------------------------------------------------*/
+enum class PointcloudType { PLANAR, EDGE, ALL };
 
-enum class PointcloudType {
-    PLANAR,
-    EDGE,
-    ALL
-};
+enum class OptimizationType { FEATURE, ALL };
 
 class Solver {
  public:
   Solver(ros::NodeHandle& n, std::shared_ptr<slam_types::SLAMState2D> state,
          std::unique_ptr<visualization::SolverVisualizer> vis);
   void SolveSLAM();
-  std::vector<slam_types::SLAMNodeSolution2D> SolvePoseSLAM();
-      double GetPointCorrespondences(
-      const vector<Eigen::Vector2f> source_pointcloud,
-      const std::shared_ptr<KDTree<float, 2>> source_tree,
-      const vector<Eigen::Vector2f> target_pointcloud,
-      const std::shared_ptr<KDTree<float, 2>> target_tree,
-      const std::shared_ptr<KDTree<float, 2>> target_norm_tree,
-      double* source_pose, double* target_pose,
-      PointCorrespondences* point_correspondences);
-  double GetPointCorrespondencesByNormal(
-      const vector<Eigen::Vector2f> source_pointcloud,
-      const std::shared_ptr<KDTree<float, 2>> source_tree,
-      const vector<Eigen::Vector2f> target_pointcloud,
-      const std::shared_ptr<KDTree<float, 2>> target_tree,
-      const std::shared_ptr<KDTree<float, 2>> norm_tree, double* source_pose,
-      double* target_pose, PointCorrespondences* point_correspondences);
   void AddOdomFactors(ceres::Problem* ceres_problem,
                       std::vector<slam_types::OdometryFactor2D> factors,
                       double trans_weight, double rot_weight);
@@ -112,35 +90,31 @@ class Solver {
   std::vector<slam_types::OdometryFactor2D> GetSolvedOdomFactors();
 
  private:
-  PointCorrespondences GetPointToPointMatching(int source_node_idx, int target_node_idx, PointcloudType type);
-      double CostFromResidualDescriptor(const ResidualDesc& res_desc);
-  double GetChiSquareCost(uint64_t node_a, uint64_t node_b);
+  PointCorrespondences GetPointToPointMatching(int source_node_idx,
+                                               int target_node_idx,
+                                               const PointcloudType& type);
+  PointCorrespondences GetPointToNormalMatching(int source_node_idx,
+                                                int target_node_idx,
+                                                const PointcloudType& type);
   slam_types::OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
                                                  const uint64_t node_b);
   slam_types::OdometryFactor2D GetDifferenceOdom(const uint64_t node_a,
                                                  const uint64_t node_b,
                                                  Eigen::Vector3f trans);
-  vector<ResidualDesc> AddLCResiduals(const uint64_t node_a,
-                                      const uint64_t node_b);
+  double BuildOptimizationOverWindow(int64_t window_size,
+                                     const OptimizationType& type);
+  void OptimizeOverGrowingWindow(const OptimizationType& type,
+                                 const ceres::Solver::Options& options);
+  void OptimizeOverMaxWindow(const OptimizationType& type,
+                             const ceres::Solver::Options& options);
   void AddHITLResiduals(ceres::Problem* problem);
-  void RemoveResiduals(vector<ResidualDesc> descs);
-  void AddKeyframe(slam_types::SLAMNode2D& node);
-  float GetMatchScores(slam_types::SLAMNode2D& node,
-                       slam_types::SLAMNode2D& keyframe);
-  AutoLCConstraint computeAutoLCConstraint(const uint64_t node_a,
-                                           const uint64_t node_b);
-
   slam_types::OdometryFactor2D GetTotalOdomChange(
       const std::vector<slam_types::OdometryFactor2D>& factors);
   std::vector<slam_types::OdometryFactor2D> GetSolvedOdomFactorsBetweenNodes(
       uint64_t node_a, uint64_t node_b);
-  std::pair<double, double> GetLocalUncertainty(const uint64_t node_idx);
-  std::pair<double, double> GetLocalUncertaintyEstimate(
-      const uint64_t node_idx);
-  vector<size_t> GetMatchingKeyframeIndices(size_t keyframe_index);
+
   std::vector<slam_types::OdometryFactor2D> initial_odometry_factors;
   ros::NodeHandle n_;
-  vector<AutoLCConstraint> auto_lc_constraints_;
   vector<HitlLCConstraint> hitl_constraints_;
   ros::ServiceClient matcher_client;
   ros::ServiceClient local_uncertainty_client;

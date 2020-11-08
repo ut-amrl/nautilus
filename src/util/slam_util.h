@@ -32,6 +32,12 @@ inline Eigen::Transform<T, 2, Eigen::Affine> PoseArrayToAffine(
   return PoseArrayToAffine(&pose_array[2], &pose_array[0]);
 }
 
+template<typename T>
+inline Eigen::Transform<T, 2, Eigen::Affine> GetPoseAsAffine(const std::shared_ptr<slam_types::SLAMState2D> state,
+                                                             int index) {
+  return PoseArrayToAffine<double>(state->solution[index].pose).cast<T>();
+}
+
 inline std::vector<Eigen::Vector2f> TransformPointcloud(double *pose,
                                                         const std::vector<Eigen::Vector2f>& pointcloud) {
   std::vector<Eigen::Vector2f> pcloud;

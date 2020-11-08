@@ -43,8 +43,6 @@ DEFINE_string(solution_poses, "",
               "The path to the file containing the solution poses, to load "
               "from an existing solution.");
 
-static bool asking_for_input = true;
-
 SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
   /*
    * Loads and processes the bag file pulling out the lidar data
@@ -130,14 +128,6 @@ SLAMProblem2D ProcessBagFile(const char* bag_path, const ros::NodeHandle& n) {
   return slam_builder.GetSlamProblem();
 }
 
-void SignalHandler(int signum) {
-  asking_for_input = false;
-  std::cout << "Shutting down" << std::endl;
-  ros::shutdown();
-  std::cout << "ROS Shutdown" << std::endl;
-  exit(0);
-}
-
 void LoadSolutionFromFile(std::shared_ptr<SLAMState2D> state, std::string poses_path) {
   std::map<double, Eigen::Vector3f> poses;
   std::ifstream poses_file;
@@ -182,9 +172,8 @@ int main(int argc, char** argv) {
     printf("Must specify an input bag!\n");
     exit(1);
   }
-  ros::init(argc, argv, "nautilus", ros::init_options::NoSigintHandler);
+  ros::init(argc, argv, "nautilus");
   ros::NodeHandle n;
-  signal(SIGINT, nautilus::SignalHandler);
   // Load and pre-process the data.
   std::string package_path = ros::package::getPath("nautilus");
   nautilus::slam_types::SLAMProblem2D slam_problem = nautilus::ProcessBagFile(

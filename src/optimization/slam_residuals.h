@@ -88,10 +88,10 @@ struct LIDARNormalResidual {
     return true;
   }
 
-  LIDARNormalResidual(std::vector<Eigen::Vector2f> &source_points,
-                      std::vector<Eigen::Vector2f> &target_points,
-                      std::vector<Eigen::Vector2f> &source_normals,
-                      std::vector<Eigen::Vector2f> &target_normals)
+  LIDARNormalResidual(const std::vector<Eigen::Vector2f> &source_points,
+                      const std::vector<Eigen::Vector2f> &target_points,
+                      const std::vector<Eigen::Vector2f> &source_normals,
+                      const std::vector<Eigen::Vector2f> &target_normals)
       : source_points(source_points),
         target_points(target_points),
         source_normals(source_normals),
@@ -102,10 +102,10 @@ struct LIDARNormalResidual {
   }
 
   static ceres::AutoDiffCostFunction<LIDARNormalResidual, ceres::DYNAMIC, 3, 3>
-      *create(std::vector<Eigen::Vector2f> &source_points,
-              std::vector<Eigen::Vector2f> &target_points,
-              std::vector<Eigen::Vector2f> &source_normals,
-              std::vector<Eigen::Vector2f> &target_normals) {
+      *create(const std::vector<Eigen::Vector2f> &source_points,
+              const std::vector<Eigen::Vector2f> &target_points,
+              const std::vector<Eigen::Vector2f> &source_normals,
+              const std::vector<Eigen::Vector2f> &target_normals) {
     CHECK_GT(source_points.size(), 0);
     LIDARNormalResidual *residual = new LIDARNormalResidual(
         source_points, target_points, source_normals, target_normals);
@@ -144,10 +144,10 @@ struct LIDARPointResidual {
     return true;
   }
 
-  LIDARPointResidual(std::vector<Eigen::Vector2f> &source_points,
-                     std::vector<Eigen::Vector2f> &target_points,
-                     std::vector<Eigen::Vector2f> &source_normals,
-                     std::vector<Eigen::Vector2f> &target_normals)
+  LIDARPointResidual(const std::vector<Eigen::Vector2f> &source_points,
+                     const std::vector<Eigen::Vector2f> &target_points,
+                     const std::vector<Eigen::Vector2f> &source_normals,
+                     const std::vector<Eigen::Vector2f> &target_normals)
       : source_points(source_points),
         target_points(target_points),
         source_normals(source_normals),
@@ -158,10 +158,10 @@ struct LIDARPointResidual {
   }
 
   static ceres::AutoDiffCostFunction<LIDARPointResidual, ceres::DYNAMIC, 3, 3>
-      *create(std::vector<Eigen::Vector2f> &source_points,
-              std::vector<Eigen::Vector2f> &target_points,
-              std::vector<Eigen::Vector2f> &source_normals,
-              std::vector<Eigen::Vector2f> &target_normals) {
+      *create(const std::vector<Eigen::Vector2f> &source_points,
+              const std::vector<Eigen::Vector2f> &target_points,
+              const std::vector<Eigen::Vector2f> &source_normals,
+              const std::vector<Eigen::Vector2f> &target_normals) {
     CHECK_GT(source_points.size(), 0);
     LIDARPointResidual *residual = new LIDARPointResidual(
         source_points, target_points, source_normals, target_normals);

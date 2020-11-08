@@ -62,87 +62,198 @@ Solver::Solver(ros::NodeHandle &n, std::shared_ptr<SLAMState2D> state,
  *                        POINT MATCHING FUNCTIONS                            |
  *----------------------------------------------------------------------------*/
 
-/// @desc: Returns a matching between source and target nodes specified pointclouds, the matching is found by finding
-/// the closest target point to every source point within the CONFIG::outlier_threshold.
-/// @param source_node_idx: The index of the first node in the state, points will be matched against target.
-/// @param target_node_idx: The index of the second node in the state, points will be used for finding closest match to
-/// source point.
-/// @returns A PointCorrespondences object which holds the matches between source and target, maybe empty.
-PointCorrespondences Solver::GetPointToPointMatching(int source_node_idx, int target_node_idx, PointcloudType type) {
-  // Check Validity
+Vector2f GetPointNormal(const Vector2f &point,
+                        std::shared_ptr<KDTree<float, 2>> lookup_tree) {
+  KDNodeValue<float, 2> point_in_tree;
+  double distance_to_point =
+      lookup_tree->FindNearestPoint(point, 0.00001, &point_in_tree);
+  // Points should be within a very small distance to themselves, as this is the
+  // same point. If this fails, it means the point is not in this tree and you
+  // should not lookup the normal using this function.
+  CHECK_LT(distance_to_point, 0.00001);
+  return point_in_tree.normal;
+}
+
+std::optional<Vector2f> FindClosestPoint(
+    const Vector2f &source_point,
+    std::shared_ptr<KDTree<float, 2>> match_lookup_tree) {
+  KDNodeValue<float, 2> closest_match;
+  double dist = match_lookup_tree->FindNearestPoint(
+      source_point, SolverConfig::CONFIG_outlier_threshold, &closest_match);
+  if (dist < SolverConfig::CONFIG_outlier_threshold) {
+    return std::optional(closest_match.point);
+  }
+  return std::nullopt;
+}
+
+std::tuple<vector<Vector2f>, std::shared_ptr<KDTree<float, 2>>>
+GetPointsAndLookupTree(const std::shared_ptr<slam_types::SLAMState2D> state,
+                       int source_node_idx, int target_node_idx,
+                       const PointcloudType &type) {
+  vector<Vector2f> source_points;
+  std::shared_ptr<KDTree<float, 2>> match_lookup_tree;
+  switch (type) {
+    case PointcloudType::PLANAR:
+      match_lookup_tree =
+          state->problem.nodes[target_node_idx].lidar_factor.planar_tree;
+      source_points =
+          state->problem.nodes[source_node_idx].lidar_factor.planar_points;
+      break;
+    case PointcloudType::EDGE:
+      match_lookup_tree =
+          state->problem.nodes[target_node_idx].lidar_factor.edge_tree;
+      source_points =
+          state->problem.nodes[source_node_idx].lidar_factor.edge_points;
+      break;
+    case PointcloudType::ALL:
+      match_lookup_tree =
+          state->problem.nodes[target_node_idx].lidar_factor.pointcloud_tree;
+      source_points =
+          state->problem.nodes[source_node_idx].lidar_factor.pointcloud;
+      break;
+    default:
+      throw "Unknown PointcloudType";
+      break;
+  }
+  return {source_points, match_lookup_tree};
+}
+
+/// @desc: Returns a matching between source and target nodes specified
+/// pointclouds, the matching is found by finding the closest target point to
+/// every source point within the CONFIG::outlier_threshold.
+/// @param source_node_idx: The index of the first node in the state, points
+/// will be matched against target.
+/// @param target_node_idx: The index of the second node in the state, points
+/// will be used for finding closest match to source point.
+/// @returns A PointCorrespondences object which holds the matches between
+/// source and target, maybe empty.
+PointCorrespondences Solver::GetPointToPointMatching(
+    int source_node_idx, int target_node_idx, const PointcloudType &type) {
   CHECK_LT(source_node_idx, state_->problem.nodes.size());
   CHECK_LT(target_node_idx, state_->problem.nodes.size());
   CHECK_LT(source_node_idx, state_->solution.size());
   CHECK_LT(target_node_idx, state_->solution.size());
-  // Get the right pointclouds.
-  std::shared_ptr<KDTree<float, 2>> match_lookup_tree = nullptr;
-  vector<Vector2f> source_points;
-  switch(type) {
-    case PointcloudType::PLANAR:
-      match_lookup_tree = state_->problem.nodes[target_node_idx].lidar_factor.planar_tree;
-      source_points = state_->problem.nodes[source_node_idx].lidar_factor.planar_points;
-      break;
-    case PointcloudType::EDGE:
-      match_lookup_tree = state_->problem.nodes[target_node_idx].lidar_factor.edge_tree;
-      source_points = state_->problem.nodes[source_node_idx].lidar_factor.edge_points;
-      break;
-    case PointcloudType::ALL:
-      match_lookup_tree = state_->problem.nodes[target_node_idx].lidar_factor.pointcloud_tree;
-      source_points = state_->problem.nodes[source_node_idx].lidar_factor.pointcloud;
-      break;
-  }
+  // Get the right pointclouds for match lookup based on the PointcloudType
+  // given.
+  auto [source_points, match_lookup_tree] =
+      GetPointsAndLookupTree(state_, source_node_idx, target_node_idx, type);
   CHECK_NOTNULL(match_lookup_tree);
   auto source_pose = state_->solution[source_node_idx].pose;
   auto target_pose = state_->solution[target_node_idx].pose;
-  PointCorrespondences correspondence(source_pose, target_pose, source_node_idx, target_node_idx);
-  // --- Find the matching points. ---
-  // Summed differences between point correspondences.
-  double difference = 0.0;
+  PointCorrespondences correspondence(source_pose, target_pose, source_node_idx,
+                                      target_node_idx);
   // Affine transformations from the two pose's reference frames.
-  Affine2f source_to_world =
-          PoseArrayToAffine(&source_pose[2], &source_pose[0]).cast<float>();
-  Affine2f target_to_world =
-          PoseArrayToAffine(&target_pose[2], &target_pose[0]).cast<float>();
-  // Loop over all the points in the source pointcloud,
-  // match each point to the closest point in the target pointcloud
-  // who's normal is within a certain threshold.
-  std::shared_ptr<KDTree<float, 2>> source_normal_tree =
-          state_->problem.nodes[source_node_idx].lidar_factor.pointcloud_tree;
-  std::shared_ptr<KDTree<float, 2>> target_normal_tree =
-          state_->problem.nodes[target_node_idx].lidar_factor.pointcloud_tree;
+  Affine2f source_to_world = GetPoseAsAffine<float>(state_, source_node_idx);
+  Affine2f target_to_world = GetPoseAsAffine<float>(state_, target_node_idx);
+  // The full pointcloud trees are always used for finding normals, as they are
+  // the most accurate.
+  auto source_normal_tree =
+      state_->problem.nodes[source_node_idx].lidar_factor.pointcloud_tree;
+  auto target_normal_tree =
+      state_->problem.nodes[target_node_idx].lidar_factor.pointcloud_tree;
   for (const Vector2f &source_point : source_points) {
     // Transform the source point to the target frame.
-    Vector2f source_point_transformed =
-            target_to_world.inverse() * source_to_world * source_point;
-    // Get the closest points within the threshold.
-    KDNodeValue<float, 2> closest_target;
-    double dist = match_lookup_tree->FindNearestPoint(
-            source_point_transformed, SolverConfig::CONFIG_outlier_threshold,
-            &closest_target);
-    // If these are sufficiently similar, or the closest point is super far
-    // away.
-    if (dist > SolverConfig::CONFIG_outlier_threshold) {
-      continue;
+    Vector2f source_point_target_frame =
+        target_to_world.inverse() * source_to_world * source_point;
+    if (auto match =
+            FindClosestPoint(source_point_target_frame, match_lookup_tree);
+        match.has_value()) {
+      // We have a match! So we get the normals and save it.
+      Vector2f source_normal = GetPointNormal(source_point, source_normal_tree);
+      Vector2f target_normal =
+          GetPointNormal(match.value(), target_normal_tree);
+      correspondence.AddCorrespondence(source_point, source_normal,
+                                       match.value(), target_normal);
     }
-    // Otherwise we have a match and should save it!
-    // Get the normal of the source point.
-    KDNodeValue<float, 2> source_point_with_normal;
-    double distance_to_self = source_normal_tree->FindNearestPoint(
-            source_point, 0.01, &source_point_with_normal);
-    CHECK_LT(distance_to_self, 0.01);
-    KDNodeValue<float, 2> target_with_normal;
-    double distance_to_target_self = target_normal_tree->FindNearestPoint(
-            closest_target.point, 0.01, &target_with_normal);
-    CHECK_LT(distance_to_target_self, 0.01);
-    // Add to the correspondence for returning.
-    Vector2f source_point_modifiable = source_point;
-    correspondence.source_points.push_back(source_point_modifiable);
-    correspondence.target_points.push_back(closest_target.point);
-    correspondence.source_normals.push_back(source_point_with_normal.normal);
-    correspondence.target_normals.push_back(target_with_normal.normal);
-    difference += dist;
   }
-  correspondence.difference = difference;
+  return correspondence;
+}
+
+/// @desc: Finds the point in the match_lookup_tree that is closest to the
+/// source point and has a "similar" normal. A "similar" normal is when the two
+/// normals have angles between them of less than 20 degrees.
+std::optional<Vector2f> FindClosestPointWithSimilarNormal(
+    const Vector2f &source_point, const Vector2f &source_normal,
+    std::shared_ptr<KDTree<float, 2>> match_lookup_tree,
+    const double outlier_threshold) {
+  std::vector<KDNodeValue<float, 2>> possible_matches;
+  match_lookup_tree->FindNeighborPoints(
+      source_point, SolverConfig::CONFIG_outlier_threshold, &possible_matches);
+  // Sort possible_matches by the distance from the source_point, as this is not
+  // guaranteed by the KDTree.
+  std::sort(possible_matches.begin(), possible_matches.end(),
+            [&source_point](KDNodeValue<float, 2> point_1,
+                            KDNodeValue<float, 2> point_2) {
+              return (source_point - point_1.point).norm() <
+                     (source_point - point_2.point).norm();
+            });
+  // Find the match point with the closest normal.
+  for (auto current_match : possible_matches) {
+    if (NormalsSimilar(current_match.normal, source_normal,
+                       cos(math_util::DegToRad(20.0)))) {
+      return std::optional(current_match.point);
+    }
+  }
+  return std::nullopt;
+}
+
+/// @desc: Similar to the FindClosestPointWithSimilarNormal above, except
+/// instead of using a static outlier threshold. it grows the threshold up the
+/// max threshold so that the runtime is faster along the way.
+std::optional<Vector2f> FindClosestPointWithSimilarNormal(
+    const Vector2f &source_point, const Vector2f &source_normal,
+    std::shared_ptr<KDTree<float, 2>> match_lookup_tree) {
+  for (int i = 6; i > 0; i--) {
+    double outlier_threshold =
+        SolverConfig::CONFIG_outlier_threshold / static_cast<double>(i);
+    auto match = FindClosestPointWithSimilarNormal(
+        source_point, source_normal, match_lookup_tree, outlier_threshold);
+    if (match.has_value()) {
+      return match;
+    }
+  }
+  return std::nullopt;
+}
+
+PointCorrespondences Solver::GetPointToNormalMatching(
+    int source_node_idx, int target_node_idx, const PointcloudType &type) {
+  CHECK_LT(source_node_idx, state_->problem.nodes.size());
+  CHECK_LT(target_node_idx, state_->problem.nodes.size());
+  CHECK_LT(source_node_idx, state_->solution.size());
+  CHECK_LT(target_node_idx, state_->solution.size());
+  // Get the right pointclouds for match lookup based on the PointcloudType
+  // given.
+  auto [source_points, match_lookup_tree] =
+      GetPointsAndLookupTree(state_, source_node_idx, target_node_idx, type);
+  CHECK_NOTNULL(match_lookup_tree);
+  auto source_pose = state_->solution[source_node_idx].pose;
+  auto target_pose = state_->solution[target_node_idx].pose;
+  PointCorrespondences correspondence(source_pose, target_pose, source_node_idx,
+                                      target_node_idx);
+  // Affine transformations from the two pose's reference frames.
+  Affine2f source_to_world = GetPoseAsAffine<float>(state_, source_node_idx);
+  Affine2f target_to_world = GetPoseAsAffine<float>(state_, target_node_idx);
+  // The full pointcloud trees are always used for finding normals, as they are
+  // the most accurate.
+  auto source_normal_tree =
+      state_->problem.nodes[source_node_idx].lidar_factor.pointcloud_tree;
+  auto target_normal_tree =
+      state_->problem.nodes[target_node_idx].lidar_factor.pointcloud_tree;
+  for (const Vector2f &source_point : source_points) {
+    // Transform the source point to the target frame.
+    Vector2f source_point_target_frame =
+        target_to_world.inverse() * source_to_world * source_point;
+    Vector2f source_normal = GetPointNormal(source_point, source_normal_tree);
+    if (auto match = FindClosestPointWithSimilarNormal(
+            source_point_target_frame, source_normal, match_lookup_tree);
+        match.has_value()) {
+      // We have a match! So we get the normals and save it.
+      Vector2f target_normal =
+          GetPointNormal(match.value(), target_normal_tree);
+      correspondence.AddCorrespondence(source_point, source_normal,
+                                       match.value(), target_normal);
+    }
+  }
   return correspondence;
 }
 
@@ -150,10 +261,90 @@ PointCorrespondences Solver::GetPointToPointMatching(int source_node_idx, int ta
  *                          SLAM SOLVING FUNCTIONS                            |
  *----------------------------------------------------------------------------*/
 
+void AddNormalCorrespondence(CeresInformation *ceres_info,
+                             const PointCorrespondences &corr) {
+  if (!corr.source_points.empty()) {
+    ceres_info->problem->AddResidualBlock(
+        LIDARNormalResidual::create(corr.source_points, corr.target_points,
+                                    corr.source_normals, corr.target_normals),
+        NULL, corr.source_pose, corr.target_pose);
+  }
+}
+
+void AddPointCorrespondence(CeresInformation *ceres_info,
+                            const PointCorrespondences &corr) {
+  if (!corr.source_points.empty()) {
+    ceres_info->problem->AddResidualBlock(
+        LIDARPointResidual::create(corr.source_points, corr.target_points,
+                                   corr.source_normals, corr.target_normals),
+        NULL, corr.source_pose, corr.target_pose);
+  }
+}
+
+double Solver::BuildOptimizationOverWindow(
+    int64_t window_size, const OptimizationType &optimization_type) {
+  double difference = 0.0;
+  for (size_t node_i_index = 0; node_i_index < state_->problem.nodes.size();
+       node_i_index++) {
+    for (size_t node_j_index =
+             std::max((int64_t)(node_i_index)-window_size, 0l);
+         node_j_index < node_i_index; node_j_index++) {
+      if (optimization_type == OptimizationType::FEATURE) {
+        // Planar Correspondences
+        auto planar_correspondence = GetPointToPointMatching(
+            node_i_index, node_j_index, PointcloudType::PLANAR);
+        difference += planar_correspondence.difference;
+        // Only add if we got matches between pointclouds.
+        AddNormalCorrespondence(&ceres_information, planar_correspondence);
+        vis_->DrawCorrespondence(planar_correspondence);
+        // Edge Correspondences
+        auto edge_correspondence = GetPointToPointMatching(
+            node_i_index, node_j_index, PointcloudType::EDGE);
+        difference += edge_correspondence.difference;
+        AddPointCorrespondence(&ceres_information, edge_correspondence);
+        vis_->DrawCorrespondence(edge_correspondence);
+      } else {
+        // Correspondence involving all the points. Using Normals for more
+        // accurate results.
+        auto correspondence = GetPointToPointMatching(
+            node_i_index, node_j_index, PointcloudType::ALL);
+        difference += correspondence.difference;
+        AddPointCorrespondence(&ceres_information, correspondence);
+        vis_->DrawCorrespondence(correspondence);
+      }
+    }
+  }
+  return difference;
+}
+
+void Solver::OptimizeOverGrowingWindow(const OptimizationType &type,
+                                       const ceres::Solver::Options &options) {
+  // While our solution moves more than the stopping_accuracy,
+  // continue to optimize.
+  for (int64_t window_size = SolverConfig::CONFIG_lidar_constraint_amount_min;
+       window_size <= SolverConfig::CONFIG_lidar_constraint_amount_max;
+       window_size++) {
+    LOG(INFO) << "Using window size: " << window_size << std::endl;
+    double difference = std::numeric_limits<double>::max();
+    ceres_information.ResetProblem();
+    // Add all the odometry constraints between our poses.
+    AddOdomFactors(ceres_information.problem.get(),
+                   state_->problem.odometry_factors,
+                   SolverConfig::CONFIG_translation_weight,
+                   SolverConfig::CONFIG_rotation_weight);
+    // Add the vision factors.
+    difference = BuildOptimizationOverWindow(window_size, type);
+    // Normalize the difference so it's an average over each node.
+    AddHITLResiduals(ceres_information.problem.get());
+    ceres::Solver::Summary summary;
+    ceres::Solve(options, ceres_information.problem.get(), &summary);
+    std::cout << "Difference: " << difference << std::endl;
+  }
+}
+
 void Solver::SolveSLAM() {
   // Setup ceres for evaluation of the problem.
   ceres::Solver::Options options;
-  ceres::Solver::Summary summary;
   options.linear_solver_type = ceres::SPARSE_SCHUR;
   options.minimizer_progress_to_stdout = false;
   options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
@@ -161,131 +352,8 @@ void Solver::SolveSLAM() {
       dynamic_cast<ceres::IterationCallback *>(vis_.get()));
   // Draw the initial solution
   vis_->DrawSolution();
-
-  for (int i = 0; i < 2; i++) {
-    double difference = 0;
-    double last_difference = std::numeric_limits<double>::max();
-    std::cout << "Iteration " << i << std::endl;
-    // While our solution moves more than the stopping_accuracy,
-    // continue to optimize.
-    for (int64_t window_size = SolverConfig::CONFIG_lidar_constraint_amount_min;
-         window_size <= SolverConfig::CONFIG_lidar_constraint_amount_max;
-         window_size++) {
-      LOG(INFO) << "Using window size: " << window_size << std::endl;
-      while (abs(difference - last_difference) >
-             SolverConfig::CONFIG_accuracy_change_stop_threshold) {
-        last_difference = difference;
-        difference = 0;
-        ceres_information.ResetProblem();
-        // Add all the odometry constraints between our poses.
-        AddOdomFactors(ceres_information.problem.get(),
-                       state_->problem.odometry_factors,
-                       SolverConfig::CONFIG_translation_weight,
-                       SolverConfig::CONFIG_rotation_weight);
-
-        // For every SLAM node we want to optimize it against the past
-        // lidar constraint amount nodes.
-        for (size_t node_i_index = 0;
-             node_i_index < state_->problem.nodes.size(); node_i_index++) {
-          std::mutex problem_mutex;
-#pragma omp parallel for
-          for (size_t node_j_index =
-                   std::max((int64_t)(node_i_index)-window_size, 0l);
-               node_j_index < node_i_index; node_j_index++) {
-            if (i == 0) {
-              PointCorrespondences planar_correspondence(
-                  state_->solution[node_i_index].pose,
-                  state_->solution[node_j_index].pose, node_i_index,
-                  node_j_index);
-              PointCorrespondences edge_correspondence(
-                  state_->solution[node_i_index].pose,
-                  state_->solution[node_j_index].pose, node_i_index,
-                  node_j_index);
-              // Get the correspondences between these two poses.
-
-              if (!state_->problem.nodes[node_j_index]
-                       .lidar_factor.planar_points.empty()) {
-                planar_correspondence = GetPointToPointMatching(node_i_index, node_j_index, PointcloudType::PLANAR);
-                difference += planar_correspondence.difference;
-                // Only add if we got matches between pointclouds.
-                if (!planar_correspondence.source_points.empty()) {
-                  problem_mutex.lock();
-                  ceres_information.problem->AddResidualBlock(
-                      LIDARNormalResidual::create(
-                          planar_correspondence.source_points,
-                          planar_correspondence.target_points,
-                          planar_correspondence.source_normals,
-                          planar_correspondence.target_normals),
-                      NULL, planar_correspondence.source_pose,
-                      planar_correspondence.target_pose);
-                  problem_mutex.unlock();
-                }
-              }
-              if (!state_->problem.nodes[node_j_index].lidar_factor.edge_points.empty()) {
-                edge_correspondence = GetPointToPointMatching(node_i_index, node_j_index, PointcloudType::EDGE);
-                difference += edge_correspondence.difference;
-                if (!edge_correspondence.source_points.empty()) {
-                  problem_mutex.lock();
-                  ceres_information.problem->AddResidualBlock(
-                      LIDARPointResidual::create(
-                          edge_correspondence.source_points,
-                          edge_correspondence.target_points,
-                          edge_correspondence.source_normals,
-                          edge_correspondence.target_normals),
-                      NULL, edge_correspondence.source_pose,
-                      edge_correspondence.target_pose);
-                  problem_mutex.unlock();
-                }
-              }
-              // Add the correspondences as constraints in the optimization
-              // problem.
-              // vis_->DrawCorrespondence(planar_correspondence);
-              // vis_->DrawCorrespondence(edge_correspondence);
-            } else {
-              PointCorrespondences correspondence(
-                  state_->solution[node_i_index].pose,
-                  state_->solution[node_j_index].pose, node_i_index,
-                  node_j_index);
-              difference +=
-                  GetPointCorrespondencesByNormal(
-                      state_->problem.nodes[node_i_index]
-                          .lidar_factor.pointcloud,
-                      state_->problem.nodes[node_i_index]
-                          .lidar_factor.pointcloud_tree,
-                      state_->problem.nodes[node_j_index]
-                          .lidar_factor.pointcloud,
-                      state_->problem.nodes[node_j_index]
-                          .lidar_factor.pointcloud_tree,
-                      state_->problem.nodes[node_j_index]
-                          .lidar_factor.pointcloud_tree,
-                      state_->solution[node_i_index].pose,
-                      state_->solution[node_j_index].pose, &correspondence) /
-                  state_->problem.nodes[node_j_index]
-                      .lidar_factor.pointcloud.size();
-              if (!correspondence.source_points.empty()) {
-                problem_mutex.lock();
-                ceres_information.problem->AddResidualBlock(
-                    LIDARPointResidual::create(correspondence.source_points,
-                                               correspondence.target_points,
-                                               correspondence.source_normals,
-                                               correspondence.target_normals),
-                    NULL, correspondence.source_pose,
-                    correspondence.target_pose);
-                problem_mutex.unlock();
-              }
-              vis_->DrawCorrespondence(correspondence);
-            }
-          }
-        }
-        // Normalize the difference so it's an average over each node.
-        difference /= state_->problem.nodes.size();
-        AddHITLResiduals(ceres_information.problem.get());
-        ceres::Solve(options, ceres_information.problem.get(), &summary);
-        std::cout << summary.FullReport() << std::endl;
-        std::cout << "Difference: " << difference << std::endl;
-      }
-    }
-  }
+  // Optimize the first time with just features, for faster performance.
+  OptimizeOverGrowingWindow(OptimizationType::FEATURE, options);
   // Call the visualization once more to see the finished optimization.
   for (int i = 0; i < 5; i++) {
     vis_->DrawSolution();
@@ -309,112 +377,6 @@ void Solver::AddOdomFactors(ceres::Problem *ceres_problem,
   if (state_->solution.size() > 0) {
     ceres_problem->SetParameterBlockConstant(state_->solution[0].pose);
   }
-}
-
-double Solver::GetPointCorrespondencesByNormal(
-    const vector<Eigen::Vector2f> source_pointcloud,
-    const std::shared_ptr<KDTree<float, 2>> source_tree,
-    const vector<Eigen::Vector2f> target_pointcloud,
-    const std::shared_ptr<KDTree<float, 2>> target_tree,
-    const std::shared_ptr<KDTree<float, 2>> norm_tree, double *source_pose,
-    double *target_pose, PointCorrespondences *point_correspondences) {
-  double difference = 0.0;
-  // Affine transformations from the two pose's reference frames.
-  Affine2f source_to_world =
-      PoseArrayToAffine(&source_pose[2], &source_pose[0]).cast<float>();
-  Affine2f target_to_world =
-      PoseArrayToAffine(&target_pose[2], &target_pose[0]).cast<float>();
-  for (const Vector2f &source_point : source_pointcloud) {
-    // Transform the source point to the target frame.
-    Vector2f source_point_transformed =
-        target_to_world.inverse() * source_to_world * source_point;
-    // Get the closest points within the threshold.
-    // For now we assume that a match is within 1/6 of the threshold.
-    KDNodeValue<float, 2> closest_target;
-    vector<KDNodeValue<float, 2>> neighbors;
-    target_tree->FindNeighborPoints(
-        source_point_transformed, SolverConfig::CONFIG_outlier_threshold / 6.0,
-        &neighbors);
-    // Sort the target points by distance from the source point in the
-    // target frame.
-    std::sort(neighbors.begin(), neighbors.end(),
-              [&source_point_transformed](KDNodeValue<float, 2> point_1,
-                                          KDNodeValue<float, 2> point_2) {
-                return (source_point_transformed - point_1.point).norm() <
-                       (source_point_transformed - point_2.point).norm();
-              });
-    // Get the closest points within the threshold.
-    // For now we assume that a match is within 1/6 of the threshold.
-    // Otherwise we have a match and should save it!
-    // Get the normal of the source point.
-    KDNodeValue<float, 2> source_point_with_normal;
-    double distance_to_self = source_tree->FindNearestPoint(
-        source_point, 0.01, &source_point_with_normal);
-    CHECK_LT(distance_to_self, 0.01);
-    // For all target points, starting with the closest
-    // see if any of them have a close enough normal to be
-    // considered a match.
-    double dist = SolverConfig::CONFIG_outlier_threshold;
-    for (KDNodeValue<float, 2> current_target : neighbors) {
-      if (NormalsSimilar(current_target.normal, source_point_with_normal.normal,
-                         cos(math_util::DegToRad(20.0)))) {
-        closest_target = current_target;
-        dist = (source_point_transformed - current_target.point).norm();
-        break;
-      }
-    }
-    // If we didn't find any matches in the first 1/6 of the threshold,
-    // try all target points within the full threshold.
-    if (dist >= SolverConfig::CONFIG_outlier_threshold) {
-      // Re-find all the closest targets.
-      neighbors.clear();
-      target_tree->FindNeighborPoints(source_point_transformed,
-                                      SolverConfig::CONFIG_outlier_threshold,
-                                      &neighbors);
-      // Sort them again, based on distance from the source point in the
-      // target frame.
-      std::sort(neighbors.begin(), neighbors.end(),
-                [&source_point_transformed](KDNodeValue<float, 2> point_1,
-                                            KDNodeValue<float, 2> point_2) {
-                  return (source_point_transformed - point_1.point).norm() <
-                         (source_point_transformed - point_2.point).norm();
-                });
-      // Cut out the first 1/6 threshold that we already checked.
-      vector<KDNodeValue<float, 2>> unchecked_neighbors(
-          neighbors.begin() + (SolverConfig::CONFIG_outlier_threshold / 6),
-          neighbors.end());
-      // See if any of these points have a normal within our threshold.
-      for (KDNodeValue<float, 2> current_target : unchecked_neighbors) {
-        if (NormalsSimilar(current_target.normal,
-                           source_point_with_normal.normal,
-                           cos(math_util::DegToRad(20.0)))) {
-          closest_target = current_target;
-          dist = (source_point_transformed - current_target.point).norm();
-          break;
-        }
-      }
-      // If no target point was found to correspond to our source point then
-      // don't match this source point to anything.
-      if (dist >= SolverConfig::CONFIG_outlier_threshold) {
-        difference += dist;
-        continue;
-      }
-    }
-
-    KDNodeValue<float, 2> target_with_normal;
-    double distance_to_target_self = norm_tree->FindNearestPoint(
-        closest_target.point, 0.01, &target_with_normal);
-    CHECK_LT(distance_to_target_self, 0.01);
-    difference += dist;
-    // Add to the correspondence for returning.
-    Vector2f source_point_modifiable = source_point;
-    point_correspondences->source_points.push_back(source_point_modifiable);
-    point_correspondences->target_points.push_back(closest_target.point);
-    point_correspondences->source_normals.push_back(
-        source_point_with_normal.normal);
-    point_correspondences->target_normals.push_back(target_with_normal.normal);
-  }
-  return difference;
 }
 
 OdometryFactor2D Solver::GetDifferenceOdom(const uint64_t node_a,

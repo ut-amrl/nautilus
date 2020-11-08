@@ -50,31 +50,6 @@ struct HitlLCConstraint {
   HitlLCConstraint() {}
 };
 
-// A class to represent a single correpondence between two poses.
-// Correspondence is a virtual class that should be overriden and implemented
-// for the specific type of correpondence that you want.
-// class Correspondence {
-// public:
-//  Correspondence(size_t node_a_index, size_t node_b_index_) :
-//    node_a_index_(node_a_index), node_b_index_(node_b_index) {}
-// protected:
-//  size_t node_a_index_;
-//  size_t node_b_index_;
-//};
-//
-//
-//// TODO: Come back and make this the overall type of correspondence.
-// class PointCorrespondence : public Correspondence {
-// public:
-//  PointCorrespondence(size_t node_a_index, size_t node_b_index, size_t
-//  points_a, size_t points_b) :
-//    Correspondence(node_a, node_b), points_a_(points_a), points_b_(points_b)
-//    {}
-// private:
-//  std::vector<Eigen::Vector2f> points_a_;
-//  std::vector<Eigen::Vector2f> points_b_;
-//};
-
 struct AutoLCConstraint {
   const slam_types::SLAMNode2D* node_a;
   const slam_types::SLAMNode2D* node_b;
@@ -103,15 +78,25 @@ struct PointCorrespondences {
     CHECK_NOTNULL(source_pose);
     CHECK_NOTNULL(target_pose);
   }
-  PointCorrespondences(uint64_t source_index, uint64_t target_index) :
-    source_index(source_index), target_index(target_index) {
+  PointCorrespondences(uint64_t source_index, uint64_t target_index)
+      : source_index(source_index), target_index(target_index) {}
 
-  }
   PointCorrespondences()
       : source_pose(nullptr),
         target_pose(nullptr),
         source_index(0),
         target_index(0) {}
+
+  void AddCorrespondence(Eigen::Vector2f source_point,
+                         Eigen::Vector2f source_normal,
+                         Eigen::Vector2f target_point,
+                         Eigen::Vector2f target_normal) {
+    source_points.push_back(source_point);
+    source_normals.push_back(source_normal);
+    target_points.push_back(target_point);
+    target_normals.push_back(target_normal);
+    difference += (source_point - target_point).norm();
+  }
 };
 
 struct ResidualDesc {

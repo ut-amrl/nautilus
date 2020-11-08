@@ -83,27 +83,6 @@ target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES}
                                        ${OpenMP_CXX_LIBRARIES}
                                        ${non_findable_libs})
 
-# Add the Feature Extraction Test TODO: Remove
-
-add_executable(ft_test test/feature_extractor_test.cc
-        src/input/pointcloud_helpers.cc
-        src/optimization/solver.cc
-        src/input/slam_type_builder.cc
-        src/util/kdtree.cc
-        src/input/normal_computation.cc
-        src/visualization/solver_vis_ros.cc
-        src/input/feature_extracter.cc)
-
-target_link_libraries(ft_test ${catkin_LIBRARIES}
-                                       amrl_shared
-                                       ${CERES_LIBRARIES}
-                                       ${OpenMP_CXX_LIBRARIES}
-                                       ${non_findable_libs})
-add_dependencies(ft_test ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} laser_scan_matcher_generate_messages_cpp local_uncertainty_matcher_generate_messages_cpp)
-
-# End of Adding Feature Extraction Test
-
-
 # We need the second Exported Targets because Laser_scan_matcher should be built first.
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} laser_scan_matcher_generate_messages_cpp local_uncertainty_matcher_generate_messages_cpp)
 
