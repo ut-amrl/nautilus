@@ -73,6 +73,8 @@ class Solver {
   Solver(ros::NodeHandle& n, std::shared_ptr<slam_types::SLAMState2D> state,
          std::unique_ptr<visualization::SolverVisualizer> vis);
   void SolveSLAM();
+  void SolveAutoLC();
+
   void AddOdomFactors(ceres::Problem* ceres_problem,
                       std::vector<slam_types::OdometryFactor2D> factors,
                       double trans_weight, double rot_weight);
@@ -84,12 +86,11 @@ class Solver {
   }
   HitlLCConstraint GetRelevantPosesForHITL(
       const nautilus::HitlSlamInputMsg& hitl_msg);
-  void SolveForLC();
-  double AddResidualsForAutoLC(ceres::Problem* problem, bool include_lidar);
-  void AddPointCloudResiduals(ceres::Problem* problem);
   std::vector<slam_types::OdometryFactor2D> GetSolvedOdomFactors();
 
  private:
+  std::tuple<double, int> BestScanMatch(int source_scan,
+                                        std::vector<int> scans);
   PointCorrespondences GetPointToPointMatching(int source_node_idx,
                                                int target_node_idx,
                                                const PointcloudType& type);
@@ -112,6 +113,7 @@ class Solver {
       const std::vector<slam_types::OdometryFactor2D>& factors);
   std::vector<slam_types::OdometryFactor2D> GetSolvedOdomFactorsBetweenNodes(
       uint64_t node_a, uint64_t node_b);
+  std::vector<int> GetScansForLC();
 
   std::vector<slam_types::OdometryFactor2D> initial_odometry_factors;
   ros::NodeHandle n_;

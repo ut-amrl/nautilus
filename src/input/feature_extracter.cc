@@ -10,7 +10,7 @@
 
 #include "glog/logging.h"
 
-namespace nautilus {
+namespace nautilus::input_processing {
 
 std::vector<Eigen::Vector2f> GetNeighborhood(
     const std::vector<Eigen::Vector2f>& points, size_t point_index,
@@ -167,4 +167,4 @@ std::vector<Eigen::Vector2f> FeatureExtractor::GetEdgePoints() {
 std::vector<float> FeatureExtractor::GetSmoothnessScores() {
   return unordered_scores_;
 }
-}  // namespace nautilus
+}  // namespace nautilus::input_processing

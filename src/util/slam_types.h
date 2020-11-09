@@ -63,7 +63,8 @@ struct LidarFactor {
     scan = laser_scan;
 
     // Extract the edge and planar points.
-    FeatureExtractor feature_extracter(pointcloud, 0.008, 2.0, 10, 10, 20, 10);
+    input_processing::FeatureExtractor feature_extracter(pointcloud, 0.008, 2.0,
+                                                         10, 10, 20, 10);
     planar_points = feature_extracter.GetPlanarPoints();
     edge_points = feature_extracter.GetEdgePoints();
 

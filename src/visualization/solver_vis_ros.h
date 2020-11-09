@@ -17,6 +17,7 @@ class SolverVisualizerROS : public SolverVisualizer {
                       ros::NodeHandle& n);
   void DrawSolution() const;
   void DrawCorrespondence(const PointCorrespondences&) const;
+  void DrawScans(const std::vector<int> scans) const;
 
  private:
   ros::Publisher points_pub_;
@@ -24,6 +25,7 @@ class SolverVisualizerROS : public SolverVisualizer {
   ros::Publisher edge_pub_;
   ros::Publisher planar_pub_;
   ros::Publisher correspondence_pub_;
+  ros::Publisher scan_pub_;
 };
 
 }  // namespace nautilus::visualization

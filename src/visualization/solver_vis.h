@@ -29,6 +29,10 @@ class SolverVisualizer : public ceres::IterationCallback {
     // Do nothing here.
   }
 
+  virtual void DrawScans(const std::vector<int>) const {
+    // Do nothing here.
+  }
+
  protected:
   std::shared_ptr<slam_types::SLAMState2D> state_;
 };

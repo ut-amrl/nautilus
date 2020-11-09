@@ -118,6 +118,8 @@ SolverVisualizerROS::SolverVisualizerROS(std::shared_ptr<SLAMState2D> state,
       n.advertise<sensor_msgs::PointCloud2>("/nautilus/planar_points", 10);
   correspondence_pub_ =
       n.advertise<visualization_msgs::Marker>("/nautilus/correspondences", 10);
+  scan_pub_ =
+      n.advertise<sensor_msgs::PointCloud2>("/nautilus/auto_lc_scans", 10);
 }
 
 void SolverVisualizerROS::DrawSolution() const {
@@ -155,6 +157,18 @@ void SolverVisualizerROS::DrawCorrespondence(
                          gui_helpers::Color4f::kGreen, &line_list_msg);
   }
   correspondence_pub_.publish(line_list_msg);
+}
+
+void SolverVisualizerROS::DrawScans(const std::vector<int> scans) const {
+  vector<Vector2f> all_points;
+  for (int i : scans) {
+    auto scan_pointcloud = state_->problem.nodes[i].lidar_factor.pointcloud;
+    auto transformed_pointcloud =
+        TransformPointcloud(state_->solution[i].pose, scan_pointcloud);
+    all_points.insert(all_points.end(), transformed_pointcloud.begin(),
+                      transformed_pointcloud.end());
+  }
+  PublishPointcloud(all_points, scan_pub_);
 }
 
 }  // namespace nautilus::visualization

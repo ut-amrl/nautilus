@@ -198,22 +198,8 @@ int main(int argc, char** argv) {
   Solver solver(n, state, std::move(vis));
   // Wait for RViz to start before we solve so visualization will be displayed.
   ros::service::waitForService("/rviz/reload_shaders");
-  // Call the solver once.
   solver.SolveSLAM();
-
-  // TODO :Remove
-  //  double last_x = 0.0;
-  //  double last_y = 0.0;
-  //  for (const auto& sol_node : state->solution) {
-  //    Eigen::Vector2f diff(sol_node.pose[0] - last_x, sol_node.pose[1] -
-  //    last_y); if (diff.norm() >= 0.35) {
-  //      std::cout << "Difference Between " << sol_node.node_idx << " " <<
-  //      (sol_node.node_idx - 1) << std::endl;
-  //    }
-  //    last_x = sol_node.pose[0];
-  //    last_y = sol_node.pose[1];
-  //  }
-
+  solver.SolveAutoLC();
   std::cout << "Waiting for Loop Closure input" << std::endl;
   ros::Subscriber hitl_sub = n.subscribe(nautilus::CONFIG_hitl_lc_topic, 10,
                                          &Solver::HitlCallback, &solver);

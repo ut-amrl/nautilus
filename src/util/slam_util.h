@@ -39,6 +39,19 @@ inline Eigen::Transform<T, 2, Eigen::Affine> GetPoseAsAffine(
   return PoseArrayToAffine<double>(state->solution[index].pose).cast<T>();
 }
 
+inline Eigen::Vector3d GetPose(
+    const std::shared_ptr<slam_types::SLAMState2D> state, int index) {
+  auto *pose = state->solution[index].pose;
+  return Eigen::Vector3d(pose[0], pose[1], pose[2]);
+}
+
+inline Eigen::Vector2f GetPoseTranslation(
+    const std::shared_ptr<slam_types::SLAMState2D> state, int index) {
+  CHECK_LT(index, state->solution.size());
+  auto *pose = state->solution[index].pose;
+  return Eigen::Vector2f(pose[0], pose[1]);
+}
+
 inline std::vector<Eigen::Vector2f> TransformPointcloud(
     double *pose, const std::vector<Eigen::Vector2f> &pointcloud) {
   std::vector<Eigen::Vector2f> pcloud;

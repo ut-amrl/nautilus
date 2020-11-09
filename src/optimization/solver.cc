@@ -325,7 +325,6 @@ void Solver::OptimizeOverGrowingWindow(const OptimizationType &type,
        window_size <= SolverConfig::CONFIG_lidar_constraint_amount_max;
        window_size++) {
     LOG(INFO) << "Using window size: " << window_size << std::endl;
-    double difference = std::numeric_limits<double>::max();
     ceres_information.ResetProblem();
     // Add all the odometry constraints between our poses.
     AddOdomFactors(ceres_information.problem.get(),
@@ -333,12 +332,11 @@ void Solver::OptimizeOverGrowingWindow(const OptimizationType &type,
                    SolverConfig::CONFIG_translation_weight,
                    SolverConfig::CONFIG_rotation_weight);
     // Add the vision factors.
-    difference = BuildOptimizationOverWindow(window_size, type);
+    BuildOptimizationOverWindow(window_size, type);
     // Normalize the difference so it's an average over each node.
     AddHITLResiduals(ceres_information.problem.get());
     ceres::Solver::Summary summary;
     ceres::Solve(options, ceres_information.problem.get(), &summary);
-    std::cout << "Difference: " << difference << std::endl;
   }
 }
 
@@ -615,4 +613,126 @@ void Solver::Vectorize(const WriteMsgConstPtr &msg) {
     lines_pub.publish(line_mark);
   }
 }
+
+/*----------------------------------------------------------------*
+ |                      Auto LC Functions                         |
+ *----------------------------------------------------------------*/
+
+Eigen::Vector2f ComputeMean(const vector<Vector2f> &pointcloud) {
+  // Compute the mean and return the mean vector.
+  Eigen::Vector2f mean_vector(0, 0);
+  for (const auto &p : pointcloud) {
+    mean_vector += p;
+  }
+  return (1.0 / pointcloud.size()) * mean_vector;
+}
+
+/// @desc: Computes the min eigenvalue / max eigenvalue of a scatter matrix for
+/// a particular scan.
+double ComputeScatterMatrixScore(const vector<Vector2f> &pointcloud) {
+  Vector2f mean = ComputeMean(pointcloud);
+  Eigen::Matrix2f scatter_matrix;
+  scatter_matrix << 0, 0, 0, 0;
+  // Compute the scatter matrix.
+  for (const auto &p : pointcloud) {
+    scatter_matrix += (p - mean) * (p - mean).transpose();
+  }
+  Eigen::EigenSolver<Eigen::Matrix2f> eigen_solver;
+  eigen_solver.compute(scatter_matrix);
+  // Now extract the eigen values.
+  auto eigen_values = eigen_solver.eigenvalues();
+  CHECK_EQ(eigen_values.rows(), 2);
+  double ev_1 = eigen_values(0, 0).real();
+  double ev_2 = eigen_values(1, 0).real();
+  return std::min(ev_1, ev_2) / std::max(ev_1, ev_2);
+}
+
+bool DistantFromLastScan(std::shared_ptr<slam_types::SLAMState2D> state,
+                         int node_idx, std::vector<int> scans,
+                         double distance) {
+  if (scans.empty()) {
+    return true;
+  }
+  auto last_scan_trans = GetPoseTranslation(state, scans[scans.size() - 1]);
+  auto node_trans = GetPoseTranslation(state, node_idx);
+  return (node_trans - last_scan_trans).norm() >= distance;
+}
+
+vector<int> Solver::GetScansForLC() {
+  vector<int> scans;
+  for (size_t i = 0; i < state_->problem.nodes.size(); i++) {
+    if (!DistantFromLastScan(state_, static_cast<int>(i), scans, 5)) {
+      // Skip close scans.
+      continue;
+    }
+    double score = ComputeScatterMatrixScore(
+        state_->problem.nodes[i].lidar_factor.pointcloud);
+    // A score close to 1 means a good spread in both axes of the scan.
+    // So a high score means a good location for loop closure because it has
+    // good spread.
+    if (score >= 0.70) {
+      scans.push_back(i);
+    }
+  }
+  return scans;
+}
+
+// Gets the score between the source and the target node. A representation of
+// how likely they are to match for loop closure.
+double ChiSquareScore(std::shared_ptr<slam_types::SLAMState2D> state,
+                      ceres::Problem *problem, int source, int target) {
+  ceres::Covariance::Options options;
+  options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
+  ceres::Covariance cov(options);
+  vector<std::pair<const double *, const double *>> blocks;
+  blocks.emplace_back(state->solution[source].pose,
+                      state->solution[target].pose);
+  cov.Compute(blocks, problem);
+  double values[9] = {0};
+  cov.GetCovarianceBlock(state->solution[source].pose,
+                         state->solution[target].pose, values);
+  Eigen::Matrix3d covariance_mat = Eigen::Map<Eigen::Matrix3d>(values);
+  Eigen::Vector3d source_pose = GetPose(state, source);
+  Eigen::Vector3d target_pose = GetPose(state, target);
+  return (target_pose - source_pose).transpose() * covariance_mat.inverse() *
+         (target_pose - source_pose);
+}
+
+// Finds the scan most likely to be a match, if there exists one.
+std::tuple<double, int> Solver::BestScanMatch(int source_scan,
+                                              std::vector<int> scans) {
+  CHECK_GT(scans.size(), 0);
+  double best_score = std::numeric_limits<double>::max();
+  int best_match = scans[0];
+  for (int target_scan : scans) {
+    if (source_scan == target_scan) {
+      continue;
+    }
+    auto score = ChiSquareScore(state_, ceres_information.problem.get(),
+                                source_scan, target_scan);
+    if (score < best_score) {
+      best_match = target_scan;
+      best_score = score;
+    }
+  }
+  return {best_score, best_match};
+}
+
+void Solver::SolveAutoLC() {
+  auto scans = GetScansForLC();
+  vis_->DrawScans(scans);
+  // TODO: Remove later, using correspondence to draw matches.
+  double empty_pose[3] = {0};
+  PointCorrespondences corr(empty_pose, empty_pose, 0, 0);
+  // Now loop through and find if it matches any of the scans.
+  for (int i : scans) {
+    auto [score, match] = BestScanMatch(i, scans);
+    std::cout << "Matched Scan #" << i << " with Scan #" << match
+              << " with score " << score << std::endl;
+    corr.source_points.push_back(GetPoseTranslation(state_, i));
+    corr.target_points.push_back(GetPoseTranslation(state_, match));
+  }
+  vis_->DrawCorrespondence(corr);
+}
+
 }  // namespace nautilus

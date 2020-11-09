@@ -7,7 +7,7 @@
 
 #include <Eigen/Dense>
 
-namespace nautilus {
+namespace nautilus::input_processing {
 // Implements the feature extraction used in the LOAM system paper:
 // https://ri.cmu.edu/pub_files/2014/7/Ji_LidarMapping_RSS2014_v8.pdf
 // Does not use the sub region splitting at the current time.
@@ -36,6 +36,6 @@ class FeatureExtractor {
   std::vector<int> planar_points_;
   std::vector<int> edge_points_;
 };
-}  // namespace nautilus
+}  // namespace nautilus::input_processing
 
 #endif  // FEATURE_IDENT_FEATURE_EXTRACTER_H
