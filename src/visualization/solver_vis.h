@@ -33,6 +33,10 @@ class SolverVisualizer : public ceres::IterationCallback {
     // Do nothing here.
   }
 
+  virtual void DrawCovariances(std::vector<std::tuple<int, Eigen::Matrix2f>>) const {
+    // Do nothing here.
+  }
+
  protected:
   std::shared_ptr<slam_types::SLAMState2D> state_;
 };

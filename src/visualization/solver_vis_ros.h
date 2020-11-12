@@ -18,6 +18,7 @@ class SolverVisualizerROS : public SolverVisualizer {
   void DrawSolution() const;
   void DrawCorrespondence(const PointCorrespondences&) const;
   void DrawScans(const std::vector<int> scans) const;
+  void DrawCovariances(std::vector<std::tuple<int, Eigen::Matrix2f>>) const;
 
  private:
   ros::Publisher points_pub_;
@@ -26,6 +27,7 @@ class SolverVisualizerROS : public SolverVisualizer {
   ros::Publisher planar_pub_;
   ros::Publisher correspondence_pub_;
   ros::Publisher scan_pub_;
+  ros::Publisher covariance_pub_;
 };
 
 }  // namespace nautilus::visualization

@@ -17,6 +17,8 @@
 #include "ros/ros.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "visualization_msgs/Marker.h"
+#include "geometry_msgs/PoseWithCovariance.h"
+#include "geometry_msgs/PoseWithCovarianceStamped.h"
 
 namespace nautilus::visualization {
 
@@ -120,6 +122,8 @@ SolverVisualizerROS::SolverVisualizerROS(std::shared_ptr<SLAMState2D> state,
       n.advertise<visualization_msgs::Marker>("/nautilus/correspondences", 10);
   scan_pub_ =
       n.advertise<sensor_msgs::PointCloud2>("/nautilus/auto_lc_scans", 10);
+  covariance_pub_ =
+      n.advertise<geometry_msgs::PoseWithCovarianceStamped>("/nautilus/covariances", 10);
 }
 
 void SolverVisualizerROS::DrawSolution() const {
@@ -169,6 +173,31 @@ void SolverVisualizerROS::DrawScans(const std::vector<int> scans) const {
                       transformed_pointcloud.end());
   }
   PublishPointcloud(all_points, scan_pub_);
+}
+
+void SolverVisualizerROS::DrawCovariances(std::vector<std::tuple<int, Eigen::Matrix2f>> node_covariances) const {
+  vector<geometry_msgs::PoseWithCovariance> covariances;
+  for (auto [node_idx, covariance] : node_covariances) {
+    // Get the pose of node.
+    geometry_msgs::PoseWithCovariance pose_with_covariance;
+    pose_with_covariance.pose = ConstructPoseMsg(state_->solution[node_idx].pose);
+    // Now manually enter the values for the covariance array.
+    std::fill(pose_with_covariance.covariance.begin(), pose_with_covariance.covariance.end(), 0);
+    std::cout << covariance << std::endl;
+    pose_with_covariance.covariance[0] = covariance(0, 0);
+    pose_with_covariance.covariance[1] = covariance(0, 1);
+    pose_with_covariance.covariance[6] = covariance(1, 0);
+    pose_with_covariance.covariance[7] = covariance(0, 1);
+    covariances.push_back(pose_with_covariance);
+  }
+  static int pose_seq = 0;
+  for (auto pose_with_covariance : covariances) {
+    geometry_msgs::PoseWithCovarianceStamped pose_stamped;
+    pose_stamped.pose = pose_with_covariance;
+    pose_stamped.header.frame_id = "map";
+    pose_stamped.header.seq = pose_seq++;
+    covariance_pub_.publish(pose_stamped);
+  }
 }
 
 }  // namespace nautilus::visualization

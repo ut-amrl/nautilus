@@ -677,26 +677,39 @@ vector<int> Solver::GetScansForLC() {
   return scans;
 }
 
-// Gets the score between the source and the target node. A representation of
-// how likely they are to match for loop closure.
-double ChiSquareScore(std::shared_ptr<slam_types::SLAMState2D> state,
-                      ceres::Problem *problem, int source, int target) {
+// Gets the Covariance matrix between any two scans.
+Eigen::Matrix2f GetCovarianceMatrix(std::shared_ptr<slam_types::SLAMState2D> state,
+                                    ceres::Problem *problem, int source, int target) {
   ceres::Covariance::Options options;
   options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
   ceres::Covariance cov(options);
   vector<std::pair<const double *, const double *>> blocks;
   blocks.emplace_back(state->solution[source].pose,
                       state->solution[target].pose);
-  cov.Compute(blocks, problem);
   double values[9] = {0};
+  problem->SetParameterBlockVariable(state->solution[0].pose);
+  problem->SetParameterBlockConstant(state->solution[source].pose);
+  CHECK(cov.Compute(blocks, problem));
   cov.GetCovarianceBlock(state->solution[source].pose,
                          state->solution[target].pose, values);
-  Eigen::Matrix3d covariance_mat = Eigen::Map<Eigen::Matrix3d>(values);
-  Eigen::Vector3d source_pose = GetPose(state, source);
-  Eigen::Vector3d target_pose = GetPose(state, target);
+  problem->SetParameterBlockVariable(state->solution[source].pose);
+  problem->SetParameterBlockConstant(state->solution[0].pose);
+  Eigen::Matrix2d covariance_mat; //= Eigen::Map<Eigen::Matrix3d>(values);
+  covariance_mat << values[0], values[1], values[3], values[4];
+  return covariance_mat.cast<float>();
+}
+
+// Gets the score between the source and the target node. A representation of
+// how likely they are to match for loop closure.
+double ChiSquareScore(std::shared_ptr<slam_types::SLAMState2D> state,
+                      ceres::Problem *problem, int source, int target) {
+  auto covariance_mat = GetCovarianceMatrix(state, problem, source, target);
+  Eigen::Vector2f source_pose = GetPoseTranslation(state, source);
+  Eigen::Vector2f target_pose = GetPoseTranslation(state, target);
   return (target_pose - source_pose).transpose() * covariance_mat.inverse() *
          (target_pose - source_pose);
 }
+
 
 // Finds the scan most likely to be a match, if there exists one.
 std::tuple<double, int> Solver::BestScanMatch(int source_scan,
@@ -731,6 +744,11 @@ void Solver::SolveAutoLC() {
               << " with score " << score << std::endl;
     corr.source_points.push_back(GetPoseTranslation(state_, i));
     corr.target_points.push_back(GetPoseTranslation(state_, match));
+    // TODO: Remove later, using to draw the covariances.
+    vector<std::tuple<int, Eigen::Matrix2f>> covs;
+    covs.emplace_back(i, GetCovarianceMatrix(state_, ceres_information.problem.get(), i, match));
+    covs.emplace_back(match, GetCovarianceMatrix(state_, ceres_information.problem.get(), match, i));
+    vis_->DrawCovariances(covs);
   }
   vis_->DrawCorrespondence(corr);
 }
