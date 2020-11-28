@@ -29,11 +29,12 @@ class SolverVisualizer : public ceres::IterationCallback {
     // Do nothing here.
   }
 
-  virtual void DrawScans(const std::vector<int>) const {
+  virtual void DrawScans(const std::vector<size_t>) const {
     // Do nothing here.
   }
 
-  virtual void DrawCovariances(std::vector<std::tuple<int, Eigen::Matrix2f>>) const {
+  virtual void DrawCovariances(
+      std::vector<std::tuple<size_t, Eigen::Matrix2f>>) const {
     // Do nothing here.
   }
 

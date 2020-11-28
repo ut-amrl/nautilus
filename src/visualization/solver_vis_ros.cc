@@ -14,11 +14,11 @@
 #include "Eigen/Dense"
 #include "geometry_msgs/Pose.h"
 #include "geometry_msgs/PoseArray.h"
+#include "geometry_msgs/PoseWithCovariance.h"
+#include "geometry_msgs/PoseWithCovarianceStamped.h"
 #include "ros/ros.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "visualization_msgs/Marker.h"
-#include "geometry_msgs/PoseWithCovariance.h"
-#include "geometry_msgs/PoseWithCovarianceStamped.h"
 
 namespace nautilus::visualization {
 
@@ -122,8 +122,8 @@ SolverVisualizerROS::SolverVisualizerROS(std::shared_ptr<SLAMState2D> state,
       n.advertise<visualization_msgs::Marker>("/nautilus/correspondences", 10);
   scan_pub_ =
       n.advertise<sensor_msgs::PointCloud2>("/nautilus/auto_lc_scans", 10);
-  covariance_pub_ =
-      n.advertise<geometry_msgs::PoseWithCovarianceStamped>("/nautilus/covariances", 10);
+  covariance_pub_ = n.advertise<geometry_msgs::PoseWithCovarianceStamped>(
+      "/nautilus/covariances", 10);
 }
 
 void SolverVisualizerROS::DrawSolution() const {
@@ -163,9 +163,9 @@ void SolverVisualizerROS::DrawCorrespondence(
   correspondence_pub_.publish(line_list_msg);
 }
 
-void SolverVisualizerROS::DrawScans(const std::vector<int> scans) const {
+void SolverVisualizerROS::DrawScans(const std::vector<size_t> scans) const {
   vector<Vector2f> all_points;
-  for (int i : scans) {
+  for (size_t i : scans) {
     auto scan_pointcloud = state_->problem.nodes[i].lidar_factor.pointcloud;
     auto transformed_pointcloud =
         TransformPointcloud(state_->solution[i].pose, scan_pointcloud);
@@ -175,14 +175,17 @@ void SolverVisualizerROS::DrawScans(const std::vector<int> scans) const {
   PublishPointcloud(all_points, scan_pub_);
 }
 
-void SolverVisualizerROS::DrawCovariances(std::vector<std::tuple<int, Eigen::Matrix2f>> node_covariances) const {
+void SolverVisualizerROS::DrawCovariances(
+    std::vector<std::tuple<size_t, Eigen::Matrix2f>> node_covariances) const {
   vector<geometry_msgs::PoseWithCovariance> covariances;
   for (auto [node_idx, covariance] : node_covariances) {
     // Get the pose of node.
     geometry_msgs::PoseWithCovariance pose_with_covariance;
-    pose_with_covariance.pose = ConstructPoseMsg(state_->solution[node_idx].pose);
+    pose_with_covariance.pose =
+        ConstructPoseMsg(state_->solution[node_idx].pose);
     // Now manually enter the values for the covariance array.
-    std::fill(pose_with_covariance.covariance.begin(), pose_with_covariance.covariance.end(), 0);
+    std::fill(pose_with_covariance.covariance.begin(),
+              pose_with_covariance.covariance.end(), 0);
     std::cout << covariance << std::endl;
     pose_with_covariance.covariance[0] = covariance(0, 0);
     pose_with_covariance.covariance[1] = covariance(0, 1);

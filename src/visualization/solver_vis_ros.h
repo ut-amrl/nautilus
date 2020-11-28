@@ -17,8 +17,8 @@ class SolverVisualizerROS : public SolverVisualizer {
                       ros::NodeHandle& n);
   void DrawSolution() const;
   void DrawCorrespondence(const PointCorrespondences&) const;
-  void DrawScans(const std::vector<int> scans) const;
-  void DrawCovariances(std::vector<std::tuple<int, Eigen::Matrix2f>>) const;
+  void DrawScans(const std::vector<size_t> scans) const;
+  void DrawCovariances(std::vector<std::tuple<size_t, Eigen::Matrix2f>>) const;
 
  private:
   ros::Publisher points_pub_;

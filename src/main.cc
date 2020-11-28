@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
   // Wait for RViz to start before we solve so visualization will be displayed.
   ros::service::waitForService("/rviz/reload_shaders");
   solver.SolveSLAM();
-  solver.SolveAutoLC();
+  //solver.SolveAutoLC();
   std::cout << "Waiting for Loop Closure input" << std::endl;
   ros::Subscriber hitl_sub = n.subscribe(nautilus::CONFIG_hitl_lc_topic, 10,
                                          &Solver::HitlCallback, &solver);

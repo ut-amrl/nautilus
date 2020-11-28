@@ -70,7 +70,9 @@ add_executable(${PROJECT_NAME} src/main.cc
         src/util/kdtree.cc
         src/input/normal_computation.cc
         src/visualization/solver_vis_ros.cc
-        src/input/feature_extracter.cc)
+        src/input/feature_extracter.cc
+        src/loop_closure/lc_candidate_filter.cc
+        src/loop_closure/lc_matcher.cc)
 
 add_library(amrl_shared src/util/gui_helpers.cc
         src/util/timer.cc)

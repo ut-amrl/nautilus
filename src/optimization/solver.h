@@ -89,6 +89,9 @@ class Solver {
   std::vector<slam_types::OdometryFactor2D> GetSolvedOdomFactors();
 
  private:
+  void AddLCConstraints(std::vector<std::tuple<size_t, size_t>>,  const OptimizationType&);
+  void ResolveWithConstraints(std::vector<std::tuple<size_t, size_t>>);
+  void AddLidarResiduals(size_t source, size_t target, const OptimizationType& type);
   std::tuple<double, int> BestScanMatch(int source_scan,
                                         std::vector<int> scans);
   PointCorrespondences GetPointToPointMatching(int source_node_idx,

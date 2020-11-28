@@ -15,6 +15,8 @@
 #include "../util/timer.h"
 #include "./line_extraction.h"
 #include "./slam_residuals.h"
+#include "../loop_closure/lc_matcher.h"
+#include "../loop_closure/lc_candidate_filter.h"
 #include "Eigen/Geometry"
 #include "ceres/ceres.h"
 #include "laser_scan_matcher/MatchLaserScans.h"
@@ -261,6 +263,17 @@ PointCorrespondences Solver::GetPointToNormalMatching(
  *                          SLAM SOLVING FUNCTIONS                            |
  *----------------------------------------------------------------------------*/
 
+ceres::Solver::Options BuildOptions(SolverVisualizer * vis) {
+    // Setup ceres for evaluation of the problem.
+    ceres::Solver::Options options;
+    options.linear_solver_type = ceres::SPARSE_SCHUR;
+    options.minimizer_progress_to_stdout = false;
+    options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
+    options.callbacks.push_back(
+            dynamic_cast<ceres::IterationCallback *>(vis));
+    return options;
+}
+
 void AddNormalCorrespondence(CeresInformation *ceres_info,
                              const PointCorrespondences &corr) {
   if (!corr.source_points.empty()) {
@@ -281,6 +294,30 @@ void AddPointCorrespondence(CeresInformation *ceres_info,
   }
 }
 
+void Solver::AddLidarResiduals(size_t source, size_t target, const OptimizationType& type) {
+  if (type == OptimizationType::FEATURE) {
+    // Planar Correspondences
+    auto planar_correspondence = GetPointToPointMatching(
+            source, target, PointcloudType::PLANAR);
+    // Only add if we got matches between pointclouds.
+    AddNormalCorrespondence(&ceres_information, planar_correspondence);
+    vis_->DrawCorrespondence(planar_correspondence);
+    // Edge Correspondences
+    auto edge_correspondence = GetPointToPointMatching(
+            source, target, PointcloudType::EDGE);
+    AddPointCorrespondence(&ceres_information, edge_correspondence);
+    vis_->DrawCorrespondence(edge_correspondence);
+  } else {
+    // Correspondence involving all the points. Using Normals for more
+    // accurate results.
+    auto correspondence = GetPointToPointMatching(
+            source, target, PointcloudType::ALL);
+    AddPointCorrespondence(&ceres_information, correspondence);
+    vis_->DrawCorrespondence(correspondence);
+  }
+}
+
+
 double Solver::BuildOptimizationOverWindow(
     int64_t window_size, const OptimizationType &optimization_type) {
   double difference = 0.0;
@@ -289,29 +326,7 @@ double Solver::BuildOptimizationOverWindow(
     for (size_t node_j_index =
              std::max((int64_t)(node_i_index)-window_size, 0l);
          node_j_index < node_i_index; node_j_index++) {
-      if (optimization_type == OptimizationType::FEATURE) {
-        // Planar Correspondences
-        auto planar_correspondence = GetPointToPointMatching(
-            node_i_index, node_j_index, PointcloudType::PLANAR);
-        difference += planar_correspondence.difference;
-        // Only add if we got matches between pointclouds.
-        AddNormalCorrespondence(&ceres_information, planar_correspondence);
-        vis_->DrawCorrespondence(planar_correspondence);
-        // Edge Correspondences
-        auto edge_correspondence = GetPointToPointMatching(
-            node_i_index, node_j_index, PointcloudType::EDGE);
-        difference += edge_correspondence.difference;
-        AddPointCorrespondence(&ceres_information, edge_correspondence);
-        vis_->DrawCorrespondence(edge_correspondence);
-      } else {
-        // Correspondence involving all the points. Using Normals for more
-        // accurate results.
-        auto correspondence = GetPointToPointMatching(
-            node_i_index, node_j_index, PointcloudType::ALL);
-        difference += correspondence.difference;
-        AddPointCorrespondence(&ceres_information, correspondence);
-        vis_->DrawCorrespondence(correspondence);
-      }
+      AddLidarResiduals(node_i_index, node_j_index, optimization_type);
     }
   }
   return difference;
@@ -341,13 +356,7 @@ void Solver::OptimizeOverGrowingWindow(const OptimizationType &type,
 }
 
 void Solver::SolveSLAM() {
-  // Setup ceres for evaluation of the problem.
-  ceres::Solver::Options options;
-  options.linear_solver_type = ceres::SPARSE_SCHUR;
-  options.minimizer_progress_to_stdout = false;
-  options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
-  options.callbacks.push_back(
-      dynamic_cast<ceres::IterationCallback *>(vis_.get()));
+  auto options = BuildOptions(vis_.get());
   // Draw the initial solution
   vis_->DrawSolution();
   // Optimize the first time with just features, for faster performance.
@@ -618,139 +627,76 @@ void Solver::Vectorize(const WriteMsgConstPtr &msg) {
  |                      Auto LC Functions                         |
  *----------------------------------------------------------------*/
 
-Eigen::Vector2f ComputeMean(const vector<Vector2f> &pointcloud) {
-  // Compute the mean and return the mean vector.
-  Eigen::Vector2f mean_vector(0, 0);
-  for (const auto &p : pointcloud) {
-    mean_vector += p;
+Eigen::Affine2f GetRelativeTransform(std::shared_ptr<SLAMState2D> state, size_t source, size_t target) {
+  // TODO: Use CSM here to get the relative transform.
+  // A to B in B's reference frame.
+  CorrelativeScanMatcher scan_matcher(30, 2, 0.3, 0.01);
+  auto trans_pair = scan_matcher.GetTransformation(state->problem.nodes[source].lidar_factor.pointcloud,
+                                                   state->problem.nodes[target].lidar_factor.pointcloud,
+                                                   state->solution[source].pose[2],
+                                                   state->solution[target].pose[2],
+                                                   math_util::DegToRad(90));
+  // Turn this into an affine transform.
+  // Naming Note: ATB means A to B, in terms of frame changes.
+  // BTW means B to World.
+  Eigen::Affine2f trans_ATB =
+          Eigen::Translation2f(trans_pair.second.first(0), trans_pair.second.first(1)) *
+          Eigen::Rotation2Df(trans_pair.second.second).toRotationMatrix();
+  Eigen::Affine2f trans_BTW = GetPoseAsAffine<float>(state, target);
+  Eigen::Affine2f trans_ATW = GetPoseAsAffine<float>(state, source);
+  Eigen::Affine2f trans_ATB_in_a_frame = trans_ATW.inverse() * trans_BTW * trans_ATB;
+  return trans_ATB_in_a_frame;
+}
+
+void Solver::AddLCConstraints(vector<std::tuple<size_t, size_t>> matches, const OptimizationType& type) {
+  // For every match add a visual constraint.
+//  for (auto [source, target] : matches) {
+//    Eigen::Affine2f transform_ATB = GetRelativeTransform(state_, source, target);
+//    auto pose2D_A = GetTranslation(state_, source);
+//    auto new_pose2D_A = transform_ATB
+//    // TODO: Add Odometry residual using the returned relative transform.
+//    // TODO: Add the vision residuals here
+//  }
+}
+
+void Solver::ResolveWithConstraints(vector<std::tuple<size_t, size_t>> matches) {
+  // Build the problem from scratch.
+  auto options = BuildOptions(vis_.get());
+  ceres_information.ResetProblem();
+  // Add the LC Constraints first so new Odometry nodes are added in the optimization over window function.
+  AddLCConstraints(matches, OptimizationType::FEATURE);
+  BuildOptimizationOverWindow(SolverConfig::CONFIG_lidar_constraint_amount_max, OptimizationType::FEATURE);
+  ceres::Solver::Summary summary;
+  ceres::Solve(options, ceres_information.problem.get(), &summary);
+  for (int i = 0; i < 5; i++) {
+    vis_->DrawSolution();
   }
-  return (1.0 / pointcloud.size()) * mean_vector;
-}
-
-/// @desc: Computes the min eigenvalue / max eigenvalue of a scatter matrix for
-/// a particular scan.
-double ComputeScatterMatrixScore(const vector<Vector2f> &pointcloud) {
-  Vector2f mean = ComputeMean(pointcloud);
-  Eigen::Matrix2f scatter_matrix;
-  scatter_matrix << 0, 0, 0, 0;
-  // Compute the scatter matrix.
-  for (const auto &p : pointcloud) {
-    scatter_matrix += (p - mean) * (p - mean).transpose();
-  }
-  Eigen::EigenSolver<Eigen::Matrix2f> eigen_solver;
-  eigen_solver.compute(scatter_matrix);
-  // Now extract the eigen values.
-  auto eigen_values = eigen_solver.eigenvalues();
-  CHECK_EQ(eigen_values.rows(), 2);
-  double ev_1 = eigen_values(0, 0).real();
-  double ev_2 = eigen_values(1, 0).real();
-  return std::min(ev_1, ev_2) / std::max(ev_1, ev_2);
-}
-
-bool DistantFromLastScan(std::shared_ptr<slam_types::SLAMState2D> state,
-                         int node_idx, std::vector<int> scans,
-                         double distance) {
-  if (scans.empty()) {
-    return true;
-  }
-  auto last_scan_trans = GetPoseTranslation(state, scans[scans.size() - 1]);
-  auto node_trans = GetPoseTranslation(state, node_idx);
-  return (node_trans - last_scan_trans).norm() >= distance;
-}
-
-vector<int> Solver::GetScansForLC() {
-  vector<int> scans;
-  for (size_t i = 0; i < state_->problem.nodes.size(); i++) {
-    if (!DistantFromLastScan(state_, static_cast<int>(i), scans, 5)) {
-      // Skip close scans.
-      continue;
-    }
-    double score = ComputeScatterMatrixScore(
-        state_->problem.nodes[i].lidar_factor.pointcloud);
-    // A score close to 1 means a good spread in both axes of the scan.
-    // So a high score means a good location for loop closure because it has
-    // good spread.
-    if (score >= 0.70) {
-      scans.push_back(i);
-    }
-  }
-  return scans;
-}
-
-// Gets the Covariance matrix between any two scans.
-Eigen::Matrix2f GetCovarianceMatrix(std::shared_ptr<slam_types::SLAMState2D> state,
-                                    ceres::Problem *problem, int source, int target) {
-  ceres::Covariance::Options options;
-  options.num_threads = static_cast<int>(std::thread::hardware_concurrency());
-  ceres::Covariance cov(options);
-  vector<std::pair<const double *, const double *>> blocks;
-  blocks.emplace_back(state->solution[source].pose,
-                      state->solution[target].pose);
-  double values[9] = {0};
-  problem->SetParameterBlockVariable(state->solution[0].pose);
-  problem->SetParameterBlockConstant(state->solution[source].pose);
-  CHECK(cov.Compute(blocks, problem));
-  cov.GetCovarianceBlock(state->solution[source].pose,
-                         state->solution[target].pose, values);
-  problem->SetParameterBlockVariable(state->solution[source].pose);
-  problem->SetParameterBlockConstant(state->solution[0].pose);
-  Eigen::Matrix2d covariance_mat; //= Eigen::Map<Eigen::Matrix3d>(values);
-  covariance_mat << values[0], values[1], values[3], values[4];
-  return covariance_mat.cast<float>();
-}
-
-// Gets the score between the source and the target node. A representation of
-// how likely they are to match for loop closure.
-double ChiSquareScore(std::shared_ptr<slam_types::SLAMState2D> state,
-                      ceres::Problem *problem, int source, int target) {
-  auto covariance_mat = GetCovarianceMatrix(state, problem, source, target);
-  Eigen::Vector2f source_pose = GetPoseTranslation(state, source);
-  Eigen::Vector2f target_pose = GetPoseTranslation(state, target);
-  return (target_pose - source_pose).transpose() * covariance_mat.inverse() *
-         (target_pose - source_pose);
-}
-
-
-// Finds the scan most likely to be a match, if there exists one.
-std::tuple<double, int> Solver::BestScanMatch(int source_scan,
-                                              std::vector<int> scans) {
-  CHECK_GT(scans.size(), 0);
-  double best_score = std::numeric_limits<double>::max();
-  int best_match = scans[0];
-  for (int target_scan : scans) {
-    if (source_scan == target_scan) {
-      continue;
-    }
-    auto score = ChiSquareScore(state_, ceres_information.problem.get(),
-                                source_scan, target_scan);
-    if (score < best_score) {
-      best_match = target_scan;
-      best_score = score;
-    }
-  }
-  return {best_score, best_match};
 }
 
 void Solver::SolveAutoLC() {
-  auto scans = GetScansForLC();
-  vis_->DrawScans(scans);
-  // TODO: Remove later, using correspondence to draw matches.
-  double empty_pose[3] = {0};
-  PointCorrespondences corr(empty_pose, empty_pose, 0, 0);
-  // Now loop through and find if it matches any of the scans.
-  for (int i : scans) {
-    auto [score, match] = BestScanMatch(i, scans);
-    std::cout << "Matched Scan #" << i << " with Scan #" << match
-              << " with score " << score << std::endl;
-    corr.source_points.push_back(GetPoseTranslation(state_, i));
-    corr.target_points.push_back(GetPoseTranslation(state_, match));
-    // TODO: Remove later, using to draw the covariances.
-    vector<std::tuple<int, Eigen::Matrix2f>> covs;
-    covs.emplace_back(i, GetCovarianceMatrix(state_, ceres_information.problem.get(), i, match));
-    covs.emplace_back(match, GetCovarianceMatrix(state_, ceres_information.problem.get(), match, i));
-    vis_->DrawCovariances(covs);
+  loop_closure::LCCandidateFilter candidate_filter(state_);
+  auto candidates = candidate_filter.GetLCCandidates();
+  vis_->DrawScans(candidates);
+  loop_closure::LCMatcher lc_matcher(state_, ceres_information.problem);
+  vector<std::tuple<size_t, size_t>> lc_matches;
+  for (size_t candidate : candidates) {
+    auto matches = lc_matcher.GetPossibleMatches(candidate, candidates);
+    // Visualize the matches.
+    vector<std::tuple<size_t, Eigen::Matrix2f>> covariances;
+    for (auto match : matches) {
+      // --- Visualize for Debugging ---
+      auto [cov, score] = lc_matcher.ChiSquareScore(candidate, match);
+      std::cout << "----" << std::endl;
+      std::cout << cov << std::endl;
+      std::cout << "Between " << candidate << " " << match << " with score: " << score << std::endl;
+      std::cout << "----" << std::endl;
+      covariances.emplace_back(match, cov);
+      // ---
+      lc_matches.emplace_back(candidate, match);
+    }
+    vis_->DrawCovariances(covariances);
   }
-  vis_->DrawCorrespondence(corr);
+//  ResolveWithConstraints(lc_matches);
 }
 
 }  // namespace nautilus

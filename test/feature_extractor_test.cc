@@ -68,5 +68,6 @@ int main(int argc, char ** argv) {
   Solver solver(n, state, std::move(vis));
   solver.SolveSLAM();
   std::cout << "Finished" << std::endl;
+
   while (ros::ok()) {}
 }
